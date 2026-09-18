@@ -1,39 +1,75 @@
-//! kernel-core: 内核门面。组装 store + md + sync，对 CLI/桌面端/server 暴露统一操作。
+//! kernel-core: 内核门面。组装 store + md + sync + index，对 CLI/桌面端/server 暴露统一操作。
+
+pub mod watch;
 
 pub use kernel_md::{Block, DocModel};
-pub use kernel_store::{Cas, StoreError, Vault, VaultConfig, list_docs, new_doc_id};
+pub use kernel_store::{Cas, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
 pub use kernel_sync::{OpLog, SyncError};
 
+use kernel_store::index::Index;
 use std::fs;
 
-/// 高层库操作：一次处理“文件 + op-log”两侧。
+/// 附件元数据。rel 是相对库根的路径（真相区 Assets/ 下）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetMeta {
+    pub hash: String,
+    pub rel: String,
+    pub mime: String,
+    pub size: usize,
+}
+
+/// 高层库操作：一次处理“文件 + op-log + 索引”三层。
 pub struct Kernel {
     pub vault: Vault,
     pub log: OpLog,
+    index: Index,
 }
 
 impl Kernel {
-    pub fn open(vault: Vault) -> Self {
-        Kernel {
+    pub fn open(vault: Vault) -> Result<Self, StoreError> {
+        let index = Index::open(&vault)?;
+        Ok(Kernel {
             vault,
             log: OpLog::new(),
-        }
+            index,
+        })
     }
 
-    /// 扫描 Notes/，把所有外部改动导入 op-log。返回发生变化的文档数。
+    /// 扫描 Notes/，把所有外部改动导入 op-log 并同步全文索引。
+    /// 返回发生内容变化的文档数。已删除的文档自动从索引回收。
     pub fn sync_all(&mut self) -> Result<usize, SyncError> {
         let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
         let mut changed = 0;
-        for rel in docs {
-            let text = fs::read_to_string(self.vault.root.join(&rel)).unwrap_or_default();
-            let before = self
-                .log
-                .current_model(&self.vault, rel.to_str().unwrap_or(""))?;
+        for rel in &docs {
+            let rel_str = rel.to_str().unwrap_or("");
+            let text = fs::read_to_string(self.vault.root.join(rel)).unwrap_or_default();
+            let before = self.log.current_model(&self.vault, rel_str)?;
             let before_md = kernel_md::to_markdown(&before);
             if before_md != text {
-                self.log
-                    .import_file(&self.vault, rel.to_str().unwrap_or(""), &text)?;
+                self.log.import_file(&self.vault, rel_str, &text)?;
                 changed += 1;
+            }
+            // 索引 upsert（内部按 hash 跳过未变文档）
+            let hash = kernel_store::Cas::hash_hex(text.as_bytes());
+            let reindexed = self
+                .index
+                .upsert(rel_str, &hash, &text)
+                .map_err(SyncError::Store)?;
+            if reindexed {
+                let refs = refs::find_asset_refs(&text);
+                self.index
+                    .set_doc_assets(rel_str, &refs)
+                    .map_err(SyncError::Store)?;
+            }
+        }
+        // 回收已删除文档的索引
+        let on_disk: std::collections::HashSet<String> = docs
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        for rel in self.index.list_paths().map_err(SyncError::Store)? {
+            if !on_disk.contains(&rel) {
+                self.index.remove(&rel).map_err(SyncError::Store)?;
             }
         }
         Ok(changed)
@@ -49,7 +85,59 @@ impl Kernel {
         self.log.import_file(&self.vault, rel, md)?;
         // 物化：把确定性序列化写回，保证文件即规范形态
         self.log.materialize_to_file(&self.vault, rel)?;
+        // 索引
+        let text = fs::read_to_string(&abs).unwrap_or_default();
+        let hash = kernel_store::Cas::hash_hex(text.as_bytes());
+        if self
+            .index
+            .upsert(rel, &hash, &text)
+            .map_err(SyncError::Store)?
+        {
+            let refs = refs::find_asset_refs(&text);
+            self.index
+                .set_doc_assets(rel, &refs)
+                .map_err(SyncError::Store)?;
+        }
         Ok(())
+    }
+
+    /// 附件入库：内容寻址写入真相区 Assets/，登记元数据。返回 Markdown 可直接引用的元数据。
+    pub fn put_asset(&mut self, name: &str, bytes: &[u8]) -> Result<AssetMeta, SyncError> {
+        let ext = match name.rsplit_once('.') {
+            Some((_, e)) if !e.is_empty() && e.len() <= 8 => e.to_ascii_lowercase(),
+            _ => String::new(),
+        };
+        let (hash, abs) = Cas::put_with_ext(&self.vault.assets_dir(), bytes, &ext)
+            .map_err(SyncError::Store)?;
+        let rel = abs
+            .strip_prefix(&self.vault.root)
+            .unwrap_or(&abs)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let mime = refs::mime_for_ext(&ext);
+        self.index
+            .upsert_asset(&hash, &rel, mime, bytes.len() as i64, now_secs())
+            .map_err(SyncError::Store)?;
+        Ok(AssetMeta {
+            hash,
+            rel,
+            mime: mime.to_string(),
+            size: bytes.len(),
+        })
+    }
+
+    /// 生成文档内引用片段（稳定路径；换图床时无需改文档）。
+    pub fn asset_markdown(meta: &AssetMeta, alt: &str) -> String {
+        format!("![{alt}]({})", meta.rel)
+    }
+
+    /// 反查：哪些文档引用了该附件。
+    pub fn asset_docs(&self, hash: &str) -> Result<Vec<String>, SyncError> {
+        Ok(self.index.docs_for_asset(hash).map_err(SyncError::Store)?)
+    }
+
+    pub fn assets_count(&self) -> Result<usize, StoreError> {
+        self.index.assets_count()
     }
 
     /// 读取一篇文档的当前块模型。
@@ -57,20 +145,22 @@ impl Kernel {
         self.log.current_model(&self.vault, rel)
     }
 
-    /// 全库检索（V1：子串匹配标题+正文，Phase 0 后半换 FTS5）。
-    pub fn search(&mut self, query: &str) -> Result<Vec<(String, usize)>, SyncError> {
-        let mut hits = Vec::new();
-        let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
-        for rel in docs {
-            let text = fs::read_to_string(self.vault.root.join(&rel)).unwrap_or_default();
-            let n = text.matches(query).count();
-            if n > 0 {
-                hits.push((rel.to_string_lossy().into_owned(), n));
-            }
-        }
-        hits.sort_by(|a, b| b.1.cmp(&a.1));
-        Ok(hits)
+    /// 全文检索（FTS5 trigram，中文子串可查，bm25 排序）。
+    pub fn search(&self, query: &str) -> Result<Vec<(String, f64)>, SyncError> {
+        Ok(self.index.search(query).map_err(SyncError::Store)?)
     }
+
+    /// 已索引文档数。
+    pub fn indexed_count(&self) -> Result<usize, StoreError> {
+        self.index.doc_count()
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -82,16 +172,16 @@ mod tests {
     fn put_get_search_and_external_edit() {
         let dir = tempdir().unwrap();
         let vault = Vault::init(dir.path(), "k").unwrap();
-        let mut k = Kernel::open(vault);
+        let mut k = Kernel::open(vault).unwrap();
 
         k.put_doc("Notes/x.md", "# 标题\n\n正文内容\n").unwrap();
         let m = k.get_doc("Notes/x.md").unwrap();
         assert_eq!(m.title.as_deref(), Some("标题"));
 
-        let hits = k.search("正文").unwrap();
-        assert_eq!(hits, vec![("Notes/x.md".into(), 1)]);
+        let hits = k.search("正文内容").unwrap();
+        assert_eq!(hits[0].0, "Notes/x.md");
 
-        // 外部编辑后 sync_all 拉进 op-log
+        // 外部编辑后 sync_all 拉进 op-log + 索引
         std::fs::write(
             k.vault.root.join("Notes/x.md"),
             "# 标题\n\n改过的内容\n",
@@ -100,5 +190,36 @@ mod tests {
         assert_eq!(k.sync_all().unwrap(), 1);
         let m = k.get_doc("Notes/x.md").unwrap();
         assert!(kernel_md::to_markdown(&m).contains("改过的内容"));
+        assert!(k.search("改过的内容").unwrap().len() == 1);
+        assert!(k.search("正文内容").unwrap().is_empty());
+
+        // 删除文档 → 索引回收
+        std::fs::remove_file(k.vault.root.join("Notes/x.md")).unwrap();
+        k.sync_all().unwrap();
+        assert_eq!(k.indexed_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn assets_are_deduped_and_backlinked() {
+        let dir = tempdir().unwrap();
+        let vault = Vault::init(dir.path(), "k").unwrap();
+        let mut k = Kernel::open(vault).unwrap();
+
+        let png = b"\x89PNG fake";
+        let m1 = k.put_asset("photo.png", png).unwrap();
+        let m2 = k.put_asset("copy.png", png).unwrap();
+        assert_eq!(m1.hash, m2.hash, "同内容必须去重");
+        assert!(m1.rel.ends_with(".png") && m1.rel.starts_with("Assets/"));
+        assert!(k.vault.root.join(&m1.rel).is_file());
+        assert_eq!(k.assets_count().unwrap(), 1);
+
+        let snippet = Kernel::asset_markdown(&m1, "照片");
+        k.put_doc("Notes/with-asset.md", &format!("# 带图\n\n{snippet}\n"))
+            .unwrap();
+        assert_eq!(k.asset_docs(&m1.hash).unwrap(), vec!["Notes/with-asset.md"]);
+
+        // 移除引用后反查清空
+        k.put_doc("Notes/with-asset.md", "# 带图\n\n无图了\n").unwrap();
+        assert!(k.asset_docs(&m1.hash).unwrap().is_empty());
     }
 }

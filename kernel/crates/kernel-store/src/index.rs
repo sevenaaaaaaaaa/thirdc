@@ -1,0 +1,260 @@
+//! kernel-store::index — SQLite/FTS5 全文索引。
+//!
+//! trigram 分词：中文/任意子串可查（SQLite 3.34+）。短查询（<3 字符）回退 LIKE 扫描。
+//! 索引位于 sidecar，可随时删除重建（真相在文件）。
+
+use rusqlite::Connection;
+
+use crate::{StoreError, Vault};
+
+const SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS docs(
+    path TEXT PRIMARY KEY,
+    hash TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+    path UNINDEXED,
+    content,
+    tokenize='trigram'
+);
+CREATE TABLE IF NOT EXISTS assets(
+    hash TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS doc_assets(
+    doc TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    PRIMARY KEY(doc, hash)
+);
+"#;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetRow {
+    pub hash: String,
+    pub path: String,
+    pub mime: String,
+    pub size: i64,
+}
+
+pub struct Index {
+    conn: Connection,
+}
+
+impl Index {
+    /// 打开（或创建）库索引。
+    pub fn open(vault: &Vault) -> Result<Self, StoreError> {
+        let dir = vault.sidecar().join("index");
+        std::fs::create_dir_all(&dir)?;
+        let conn = Connection::open(dir.join("index.db"))?;
+        conn.execute_batch(SCHEMA)?;
+        Ok(Index { conn })
+    }
+
+    /// upsert 一篇文档。hash 未变则跳过，返回是否重建了索引行。
+    pub fn upsert(&self, rel: &str, hash: &str, content: &str) -> Result<bool, StoreError> {
+        let existing: Option<String> = self
+            .conn
+            .query_row("SELECT hash FROM docs WHERE path = ?1", [rel], |r| {
+                r.get(0)
+            })
+            .ok();
+        if existing.as_deref() == Some(hash) {
+            return Ok(false);
+        }
+        self.remove(rel)?;
+        self.conn.execute(
+            "INSERT INTO docs_fts(path, content) VALUES (?1, ?2)",
+            [rel, content],
+        )?;
+        self.conn.execute(
+            "INSERT INTO docs(path, hash) VALUES (?1, ?2)",
+            [rel, hash],
+        )?;
+        Ok(true)
+    }
+
+    /// 删除一篇文档的索引（含其附件引用关系）。
+    pub fn remove(&self, rel: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM docs_fts WHERE path = ?1", [rel])?;
+        self.conn.execute("DELETE FROM docs WHERE path = ?1", [rel])?;
+        self.conn
+            .execute("DELETE FROM doc_assets WHERE doc = ?1", [rel])?;
+        Ok(())
+    }
+
+    // ---------- 附件登记表（图床地基） ----------
+
+    /// 登记附件元数据（hash 唯一，天然去重）。
+    pub fn upsert_asset(
+        &self,
+        hash: &str,
+        path: &str,
+        mime: &str,
+        size: i64,
+        created_at: i64,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO assets(hash, path, mime, size, created_at) VALUES (?1,?2,?3,?4,?5)",
+            rusqlite::params![hash, path, mime, size, created_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn asset(&self, hash: &str) -> Result<Option<AssetRow>, StoreError> {
+        let r = self
+            .conn
+            .query_row(
+                "SELECT hash, path, mime, size FROM assets WHERE hash = ?1",
+                [hash],
+                |r| {
+                    Ok(AssetRow {
+                        hash: r.get(0)?,
+                        path: r.get(1)?,
+                        mime: r.get(2)?,
+                        size: r.get(3)?,
+                    })
+                },
+            )
+            .ok();
+        Ok(r)
+    }
+
+    pub fn assets_count(&self) -> Result<usize, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM assets", [], |r| r.get::<_, i64>(0))?
+            as usize)
+    }
+
+    /// 覆盖式设置某文档引用的附件集合（用于“换图床/反查引用”）。
+    pub fn set_doc_assets(&self, doc: &str, hashes: &[String]) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM doc_assets WHERE doc = ?1", [doc])?;
+        let mut stmt = self
+            .conn
+            .prepare("INSERT OR IGNORE INTO doc_assets(doc, hash) VALUES (?1, ?2)")?;
+        for h in hashes {
+            stmt.execute(rusqlite::params![doc, h])?;
+        }
+        Ok(())
+    }
+
+    /// 反查：哪些文档引用了该附件。
+    pub fn docs_for_asset(&self, hash: &str) -> Result<Vec<String>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc FROM doc_assets WHERE hash = ?1 ORDER BY doc")?;
+        let rows = stmt.query_map([hash], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// 已索引的全部路径。
+    pub fn list_paths(&self) -> Result<Vec<String>, StoreError> {
+        let mut stmt = self.conn.prepare("SELECT path FROM docs")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn doc_count(&self) -> Result<usize, StoreError> {
+        Ok(self.conn.query_row("SELECT COUNT(*) FROM docs", [], |r| {
+            r.get::<_, i64>(0)
+        })? as usize)
+    }
+
+    /// 全文检索，按相关度（bm25）排序。返回 (相对路径, 相关度)。
+    pub fn search(&self, query: &str) -> Result<Vec<(String, f64)>, StoreError> {
+        let qlen = query.chars().count();
+        if qlen == 0 {
+            return Ok(Vec::new());
+        }
+        if qlen >= 3 {
+            // trigram 子串匹配；引号转义成 phrase 查询
+            let quoted = format!("\"{}\"", query.replace('"', "\"\""));
+            let mut stmt = self.conn.prepare(
+                "SELECT path, rank FROM docs_fts WHERE docs_fts MATCH ?1 ORDER BY rank LIMIT 50",
+            )?;
+            let rows = stmt.query_map([&quoted], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
+            })?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        } else {
+            // 短查询回退：LIKE 全扫（% 和 _ 转义）
+            let esc = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            let like = format!("%{esc}%");
+            let mut stmt = self.conn.prepare(
+                "SELECT path FROM docs_fts WHERE content LIKE ?1 ESCAPE '\\' LIMIT 50",
+            )?;
+            let rows = stmt.query_map([&like], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push((r?, 0.0));
+            }
+            Ok(out)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn idx() -> (tempfile::TempDir, Index) {
+        let dir = tempdir().unwrap();
+        let vault = Vault::init(dir.path(), "t").unwrap();
+        (dir, Index::open(&vault).unwrap())
+    }
+
+    #[test]
+    fn upsert_search_remove() {
+        let (_d, ix) = idx();
+        let h1 = crate::Cas::hash_hex(b"a");
+        assert!(ix.upsert("Notes/x.md", &h1, "推送所有，管理所有").unwrap());
+        let h2 = crate::Cas::hash_hex(b"b");
+        ix.upsert("Notes/y.md", &h2, "采集与发布").unwrap();
+        assert_eq!(ix.doc_count().unwrap(), 2);
+
+        let hits = ix.search("推送所有").unwrap();
+        assert_eq!(hits[0].0, "Notes/x.md");
+
+        // hash 不变跳过
+        assert!(!ix.upsert("Notes/x.md", &h1, "推送所有，管理所有").unwrap());
+        // 变更重建
+        assert!(ix.upsert("Notes/x.md", &h2, "新内容").unwrap());
+        assert!(ix.search("新内容").unwrap().len() == 1);
+
+        ix.remove("Notes/x.md").unwrap();
+        assert_eq!(ix.doc_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn short_query_fallback() {
+        let (_d, ix) = idx();
+        ix.upsert("Notes/x.md", "h", "推送所有").unwrap();
+        let hits = ix.search("推送").unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn quotes_do_not_break_match() {
+        let (_d, ix) = idx();
+        ix.upsert("Notes/x.md", "h", "she said \"hello\"").unwrap();
+        assert_eq!(ix.search("said \"hel").unwrap().len(), 1);
+    }
+}

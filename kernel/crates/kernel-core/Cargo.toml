@@ -8,6 +8,7 @@ license.workspace = true
 kernel-md = { path = "../kernel-md" }
 kernel-store = { path = "../kernel-store" }
 kernel-sync = { path = "../kernel-sync" }
+notify.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use kernel_core::{Kernel, Vault};
+use kernel_core::Vault;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -20,7 +20,9 @@ enum Cmd {
     },
     /// 库状态：文档数、配置
     Status { path: PathBuf },
-    /// 子串检索（FTS5 之前的过渡实现）
+    /// 监听 Notes/，外部改动实时合入 op-log 与索引
+    Watch { path: PathBuf },
+    /// 全文检索（FTS5，中文可查，bm25 排序）
     Search {
         path: PathBuf,
         query: String,
@@ -39,6 +41,15 @@ enum Cmd {
         path: PathBuf,
         rel: String,
     },
+    /// 附件入库：写入 Assets/ 并输出可直接粘贴的引用片段
+    Asset {
+        path: PathBuf,
+        file: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// 反查：哪些文档引用了该附件
+    Refs { path: PathBuf, hash: String },
 }
 
 fn main() -> Result<()> {
@@ -49,25 +60,35 @@ fn main() -> Result<()> {
         }
         Cmd::Status { path } => {
             let vault = Vault::open(&path)?;
-            let mut k = Kernel::open(vault);
+            let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
             let docs = kernel_core::list_docs(&k.vault)?;
-            println!("vault:  {}", k.vault.config.name);
-            println!("root:   {}", k.vault.root.display());
-            println!("docs:   {}", docs.len());
+            println!("vault:   {}", k.vault.config.name);
+            println!("root:    {}", k.vault.root.display());
+            println!("docs:    {}", docs.len());
+            println!("indexed: {}", k.indexed_count()?);
+            println!("assets:  {}", k.assets_count()?);
             let synced = k.sync_all()?;
-            println!("synced: {synced} external change(s) merged into op-log");
+            println!("synced:  {synced} external change(s) merged into op-log");
+        }
+        Cmd::Watch { path } => {
+            let vault = Vault::open(&path)?;
+            println!("watching {} — Ctrl-C to stop", vault.notes_dir().display());
+            kernel_core::watch::watch(vault, |changed| {
+                if changed > 0 {
+                    println!("[{}] synced {changed} doc(s)", now_hms());
+                }
+            })?;
         }
         Cmd::Search { path, query } => {
             let vault = Vault::open(&path)?;
-            let mut k = Kernel::open(vault);
-            k.sync_all()?;
-            for (rel, n) in k.search(&query)? {
-                println!("{n:>4}  {rel}");
+            let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+            for (rel, rank) in k.search(&query)? {
+                println!("{rank:>8.3}  {rel}");
             }
         }
         Cmd::Put { path, rel, file } => {
             let vault = Vault::open(&path)?;
-            let mut k = Kernel::open(vault);
+            let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
             let md = match file {
                 Some(f) => std::fs::read_to_string(f)?,
                 None => std::io::read_to_string(std::io::stdin())?,
@@ -77,11 +98,41 @@ fn main() -> Result<()> {
         }
         Cmd::Doc { path, rel } => {
             let vault = Vault::open(&path)?;
-            let mut k = Kernel::open(vault);
+            let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
             k.sync_all().context("sync")?;
             let m = k.get_doc(&rel)?;
             println!("{}", serde_json::to_string_pretty(&m)?);
         }
+        Cmd::Asset { path, file, name } => {
+            let vault = Vault::open(&path)?;
+            let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
+            let bytes = std::fs::read(&file)?;
+            let display = name.unwrap_or_else(|| {
+                file.file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "asset".into())
+            });
+            let meta = k.put_asset(&file.to_string_lossy(), &bytes)?;
+            println!("hash: {}", meta.hash);
+            println!("path: {}", meta.rel);
+            println!("mime: {}  size: {}", meta.mime, meta.size);
+            println!("\n{}", kernel_core::Kernel::asset_markdown(&meta, &display));
+        }
+        Cmd::Refs { path, hash } => {
+            let vault = Vault::open(&path)?;
+            let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+            for doc in k.asset_docs(&hash)? {
+                println!("{doc}");
+            }
+        }
     }
     Ok(())
+}
+
+fn now_hms() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    format!("{:02}:{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60, secs % 60)
 }

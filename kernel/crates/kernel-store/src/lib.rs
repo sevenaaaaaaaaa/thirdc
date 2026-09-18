@@ -9,6 +9,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+pub mod index;
+pub mod refs;
+
 pub const CONFIG_FILE: &str = "thirdc.toml";
 pub const SIDECAR_DIR: &str = ".thirdc";
 
@@ -20,6 +23,8 @@ pub enum StoreError {
     Io(#[from] io::Error),
     #[error("config: {0}")]
     Config(String),
+    #[error("index: {0}")]
+    Index(#[from] rusqlite::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -160,6 +165,35 @@ impl Cas {
 
     pub fn path_for(base: &Path, hash: &str) -> PathBuf {
         base.join(&hash[..2]).join(&hash[2..4]).join(hash)
+    }
+
+    /// 带扩展名的内容寻址（附件用：Obsidian 等可直接渲染）。
+    pub fn path_for_ext(base: &Path, hash: &str, ext: &str) -> PathBuf {
+        let name = if ext.is_empty() {
+            hash.to_string()
+        } else {
+            format!("{hash}.{ext}")
+        };
+        base.join(&hash[..2]).join(&hash[2..4]).join(name)
+    }
+
+    /// 写入附件字节，保留扩展名；返回 (hash, 绝对路径)。已存在则天然去重。
+    pub fn put_with_ext(
+        base: &Path,
+        data: &[u8],
+        ext: &str,
+    ) -> Result<(String, PathBuf), StoreError> {
+        let hash = Self::hash_hex(data);
+        let path = Self::path_for_ext(base, &hash, ext);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if !path.exists() {
+            let tmp = path.with_extension("tmp");
+            fs::write(&tmp, data)?;
+            fs::rename(&tmp, &path)?;
+        }
+        Ok((hash, path))
     }
 
     pub fn hash_hex(data: &[u8]) -> String {
