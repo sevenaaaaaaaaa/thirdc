@@ -345,7 +345,8 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
       发布 = 渲染为自包含 AI-HTML（语义标签 + 内嵌 JSON-LD），产出 <code style="font-family:var(--font-mono)">llms.txt</code> 便于 agent 发现。
       对象存储 / GitHub Pages 目标规划中。
     </p>
-    <div id="pub-list"></div>
+    <div class="dv-sec" style="margin-top:0"><h4>发布目标</h4><div id="pub-targets"></div></div>
+    <div class="dv-sec"><h4>单页预览产物</h4><div id="pub-list"></div></div>
   </div>
 </div></div>
 
@@ -836,6 +837,40 @@ async function doPublish(path){
     await loadPublishList();openOverlay('pub-ov');
   }catch(e){toast('发布失败：'+e.message,'err');}
 }
+async function loadPublishTargets(){
+  const box=$('pub-targets');
+  let d;
+  try{ d=await api('/publish/targets'); }catch(e){ box.innerHTML='<div class="dv-meta">读取失败：'+e.message+'</div>'; return; }
+  box.innerHTML='';
+  (d.targets||[]).forEach(t=>{
+    const el=document.createElement('div');el.className='pub-item';
+    const kindLabel={local:'本地',git:'Git（Pages）',s3:'S3 兼容',"cf-pages":'Cloudflare Pages'}[t.kind]||t.kind;
+    el.innerHTML=`<span class="badge ${t.kind==='s3'||t.kind==='cf-pages'?'plan':'ok'}">${kindLabel}</span>
+      <span class="t" style="flex:1">${t.name}${t.is_default?' · 默认':''}</span>
+      <span class="h" style="font-family:var(--font-mono);font-size:10.5px;color:var(--faint);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.dir||''}</span>
+      <button class="act" data-build="${t.name}" style="height:28px;padding:0 10px">构建</button>
+      <button class="act" data-deploy="${t.name}" style="height:28px;padding:0 10px">部署</button>`;
+    box.appendChild(el);
+  });
+  box.querySelectorAll('[data-build]').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;b.textContent='构建中…';
+    try{const r=await api('/publish/site',{method:'POST',json:{target:b.dataset.build}});
+      toast(`站点已构建：${r.files} 个文件 → ${r.site_dir}`,'ok');
+    }catch(e){toast('构建失败：'+e.message,'err');}
+    b.disabled=false;b.textContent='构建';
+  });
+  box.querySelectorAll('[data-deploy]').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;b.textContent='部署中…';
+    try{const r=await api('/publish/deploy',{method:'POST',json:{target:b.dataset.deploy}});
+      toast(`[${r.target}/${r.kind}] 上传 ${r.uploaded} · 跳过 ${r.skipped}`,'ok');
+      if(r.detail) addMsg('studio',`发布完成：${r.detail}${r.url?`\n地址：${r.url}`:''}`);
+    }catch(e){toast('部署失败：'+e.message,'err');}
+    b.disabled=false;b.textContent='部署';
+  });
+  const dir=document.createElement('div');dir.className='dv-meta';
+  dir.textContent=`站点目录 ${d.site_dir}${d.base_url?' · 公开地址 '+d.base_url:''}`;
+  box.appendChild(dir);
+}
 async function loadPublishList(){
   const r=await api('/publish');const box=$('pub-list');
   if(!r.items.length){box.innerHTML='<div style="color:var(--faint);font-size:13px">还没有发布产物。选中节点 → 发布为 AI-HTML。</div>';return;}
@@ -843,7 +878,7 @@ async function loadPublishList(){
     <a href="${i.url}" target="_blank">${i.url}</a><span class="h" style="font-family:var(--font-mono);font-size:11px;color:var(--faint)">${(i.bytes/1024).toFixed(1)}KB</span></div>`).join('')
     +`<div class="pub-item"><span class="badge plan">llms.txt</span><a href="${r.llms_txt}" target="_blank">${r.llms_txt}</a></div>`;
 }
-$('pub-btn').onclick=async()=>{await loadPublishList();openOverlay('pub-ov');};
+$('pub-btn').onclick=async()=>{await Promise.all([loadPublishTargets(),loadPublishList()]);openOverlay('pub-ov');};
 
 /* ───────── 路线图（让规划可见） ───────── */
 const ROAD=[
@@ -993,7 +1028,7 @@ const CMDS=[
   ['整理布局','t',()=>{closeAll();tidy();}],
   ['适配视图','f',()=>{closeAll();fit();}],
   ['切换明暗','d',()=>{closeAll();$('theme').click();}],
-  ['打开发布面板','p',async()=>{await loadPublishList();openOverlay('pub-ov');}],
+  ['打开发布面板','p',async()=>{await Promise.all([loadPublishTargets(),loadPublishList()]);openOverlay('pub-ov');}],
   ['查看路线图','r',()=>{renderRoad();openOverlay('road-ov');}],
   ['导入设计规范','g',async()=>{await openDesign();}],
   ['切换到时间线','1',()=>{closeAll();document.querySelector('[data-view=timeline]').click();}],

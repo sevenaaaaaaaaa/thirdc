@@ -8,6 +8,7 @@ members = [
     "kernel/crates/kernel-design",
     "kernel/crates/kernel-browser",
     "kernel/crates/kernel-a2ui",
+    "kernel/crates/kernel-deploy",
     "server",
     "mcp",
     "cli",

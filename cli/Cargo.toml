@@ -12,6 +12,7 @@ path = "src/main.rs"
 kernel-core = { path = "../kernel/crates/kernel-core" }
 thirdc-server = { path = "../server" }
 thirdc-mcp = { path = "../mcp" }
+kernel-deploy = { path = "../kernel/crates/kernel-deploy" }
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

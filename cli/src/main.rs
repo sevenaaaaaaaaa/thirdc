@@ -58,6 +58,16 @@ enum Cmd {
     },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
+    /// 发布：构建站点并推送到目标
+    Publish {
+        path: PathBuf,
+        /// 目标名（缺省用 [publish].default_target，否则 local）
+        #[arg(long)]
+        target: Option<String>,
+        /// 只构建站点，不推送
+        #[arg(long)]
+        build_only: bool,
+    },
     /// 设计规范：列表 / 导入 / 激活
     Design {
         #[command(subcommand)]
@@ -229,6 +239,48 @@ fn main() -> Result<()> {
                     writeln!(out, "{resp}")?;
                     out.flush()?;
                 }
+            }
+        }
+        Cmd::Publish { path, target, build_only } => {
+            let vault = Vault::open(&path)?;
+            let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
+            let cfg = k.vault.config.publish.clone();
+            let name = target
+                .clone()
+                .or_else(|| cfg.default_target.clone())
+                .unwrap_or_else(|| "local".to_string());
+            let t = cfg
+                .targets
+                .iter()
+                .find(|t| t.name == name)
+                .cloned()
+                .unwrap_or(kernel_core::PublishTarget {
+                    name: name.clone(),
+                    kind: "local".into(),
+                    dir: Some(cfg.site_dir.clone()),
+                    ..Default::default()
+                });
+            let dir = k.vault.root.join(kernel_deploy::target_dir(&t, &cfg.site_dir));
+            let m = k.build_site(&dir, cfg.base_url.as_deref())?;
+            println!(
+                "站点已构建：{}（{} 个文件，{:.1} KB）",
+                dir.display(),
+                m.files.len(),
+                m.files.iter().map(|f| f.bytes).sum::<u64>() as f64 / 1024.0
+            );
+            for f in m.files.iter().take(12) {
+                println!("  {}", f.path);
+            }
+            if build_only {
+                return Ok(());
+            }
+            let report = kernel_deploy::deploy(&dir, &k.vault.sidecar(), &t)?;
+            println!(
+                "部署 [{} / {}]：上传 {} · 跳过 {} · {}",
+                report.target, report.kind, report.uploaded, report.skipped, report.detail
+            );
+            if let Some(u) = report.url {
+                println!("地址：{u}");
             }
         }
         Cmd::Design { cmd } => match cmd {

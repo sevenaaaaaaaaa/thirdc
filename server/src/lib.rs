@@ -75,6 +75,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/publish", get(publish_list).post(publish))
+        .route("/publish/targets", get(publish_targets))
+        .route("/publish/site", post(publish_site))
+        .route("/publish/deploy", post(publish_deploy))
         .route("/publish/{name}", get(publish_file))
         .route("/search", get(search))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
@@ -1322,6 +1325,128 @@ async fn design_scope(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
     let k = st.kernel.lock().unwrap();
     match k.set_design_scope(scope, name) {
         Ok(()) => Json(json!({ "scope": scope, "name": name, "scopes": k.design_scopes() })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+// ---------- 发布目标（站点构建 + 推送） ----------
+
+fn publish_targets_of(k: &kernel_core::Kernel) -> Vec<Value> {
+    let cfg = &k.vault.config.publish;
+    let mut out: Vec<Value> = Vec::new();
+    if cfg.targets.is_empty() {
+        out.push(json!({ "name": "local", "kind": "local", "dir": cfg.site_dir, "is_default": true }));
+    }
+    for t in &cfg.targets {
+        let dir = kernel_deploy::target_dir(t, &cfg.site_dir);
+        out.push(json!({
+            "name": t.name, "kind": t.kind, "dir": dir.display().to_string(),
+            "remote": t.remote, "branch": t.branch, "bucket": t.bucket,
+            "endpoint": t.endpoint, "project": t.project,
+            "is_default": cfg.default_target.as_deref() == Some(t.name.as_str()),
+        }));
+    }
+    out
+}
+
+async fn publish_targets(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let cfg = &k.vault.config.publish;
+    Json(json!({
+        "targets": publish_targets_of(&k),
+        "site_dir": cfg.site_dir,
+        "base_url": cfg.base_url,
+        "default": cfg.default_target,
+    }))
+    .into_response()
+}
+
+/// 构建站点（不推送）。
+async fn publish_site(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let target_name = req.get("target").and_then(|t| t.as_str()).unwrap_or("");
+    let mut k = st.kernel.lock().unwrap();
+    let cfg = k.vault.config.publish.clone();
+    let dir = match cfg.targets.iter().find(|t| t.name == target_name) {
+        Some(t) => kernel_deploy::target_dir(t, &cfg.site_dir),
+        None => std::path::PathBuf::from(&cfg.site_dir),
+    };
+    let out = k.vault.root.join(&dir);
+    let base = cfg.base_url.clone();
+    match k.build_site(&out, base.as_deref()) {
+        Ok(m) => Json(json!({
+            "site_dir": dir.display().to_string(),
+            "files": m.files.len(),
+            "bytes": m.files.iter().map(|f| f.bytes).sum::<u64>(),
+            "base_url": m.base_url,
+            "files_preview": m.files.iter().take(20).map(|f| f.path.clone()).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// 构建并推送到目标。
+async fn publish_deploy(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let name = req
+        .get("target")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let (dir, target, sidecar, base) = {
+        let mut k = st.kernel.lock().unwrap();
+        let cfg = k.vault.config.publish.clone();
+        let target = cfg
+            .targets
+            .iter()
+            .find(|t| t.name == name)
+            .cloned()
+            .or_else(|| {
+                if name.is_empty() || name == "local" {
+                    Some(kernel_core::PublishTarget {
+                        name: "local".into(),
+                        kind: "local".into(),
+                        dir: Some(cfg.site_dir.clone()),
+                        ..Default::default()
+                    })
+                } else {
+                    None
+                }
+            });
+        let Some(target) = target else {
+            return err(StatusCode::BAD_REQUEST, format!("未知目标：{name}")).into_response();
+        };
+        let dir = k.vault.root.join(kernel_deploy::target_dir(&target, &cfg.site_dir));
+        let sidecar = k.vault.sidecar();
+        let base = cfg.base_url.clone();
+        if let Err(e) = k.build_site(&dir, base.as_deref()) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+        }
+        (dir, target, sidecar, base)
+    };
+
+    let t2 = target.clone();
+    let r = tokio::task::spawn_blocking(move || kernel_deploy::deploy(&dir, &sidecar, &t2))
+        .await
+        .unwrap_or_else(|j| Err(kernel_deploy::DeployError::Io(std::io::Error::other(format!("join: {j}")))));
+    match r {
+        Ok(mut report) => {
+            if report.url.is_none() {
+                report.url = base.clone();
+            }
+            Json(serde_json::to_value(report).unwrap_or(json!({}))).into_response()
+        }
         Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
     }
 }

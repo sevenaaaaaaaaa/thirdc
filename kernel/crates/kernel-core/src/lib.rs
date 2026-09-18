@@ -12,8 +12,8 @@ pub use kernel_design::{
 };
 pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
 pub use kernel_store::{
-    AiConfig, BrowserConfig, Cas, ConnectionConfig, StoreError, Vault, VaultConfig, events_dir,
-    list_docs, new_doc_id, refs,
+    AiConfig, BrowserConfig, Cas, ConnectionConfig, PublishConfig, PublishTarget, StoreError, Vault,
+    VaultConfig, events_dir, list_docs, new_doc_id, refs,
 };
 pub use kernel_sync::{OpLog, SyncError, is_html_rel};
 
@@ -463,4 +463,217 @@ mod tests {
         k.put_doc("Notes/with-asset.md", "# 带图\n\n无图了\n").unwrap();
         assert!(k.asset_docs(&m1.hash).unwrap().is_empty());
     }
+}
+
+/// 站点文件条目（增量部署用）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SiteFile {
+    pub path: String,
+    pub hash: String,
+    pub bytes: u64,
+}
+
+/// 站点清单。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct SiteManifest {
+    pub title: String,
+    pub generated_at: u64,
+    pub files: Vec<SiteFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+impl Kernel {
+    /// 构建静态站点：把库中每篇文档渲成自包含 AI-HTML（套用有效设计规范），
+    /// 复制附件，生成 index / llms.txt / sitemap.xml / manifest.json。
+    ///
+    /// 只覆盖不清理（便于 git 目标：`.git` 必须留着）；上一版清单里消失的文件会被删除。
+    pub fn build_site(
+        &mut self,
+        out: &std::path::Path,
+        base_url: Option<&str>,
+    ) -> Result<SiteManifest, SyncError> {
+        self.sync_all()?;
+        std::fs::create_dir_all(out)?;
+        let previous = read_manifest(out);
+
+        let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
+        let mut entries: Vec<(String, String, String)> = Vec::new(); // (slug, title, excerpt)
+        let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for rel in &docs {
+            let rel_str = rel.to_string_lossy().into_owned();
+            let model = match self.get_doc(&rel_str) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let title = model.title.clone().unwrap_or_else(|| {
+                rel.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| rel_str.clone())
+            });
+            let html = match self.render_doc_html(&rel_str) {
+                Ok(h) => h,
+                Err(_) => to_html(&model),
+            };
+            let mut slug = slugify(&title);
+            if slug.is_empty() {
+                slug = slugify(rel.file_stem().unwrap_or_default().to_string_lossy().as_ref());
+            }
+            if slug.is_empty() {
+                slug = format!("doc-{}", &Cas::hash_hex(rel_str.as_bytes())[..8]);
+            }
+            // slug 去重
+            let mut candidate = slug.clone();
+            let mut n = 2;
+            while used.contains(&candidate) {
+                candidate = format!("{slug}-{n}");
+                n += 1;
+            }
+            used.insert(candidate.clone());
+            let fname = format!("{candidate}.html");
+            write_if_changed(&out.join(&fname), html.as_bytes())?;
+            let excerpt: String = to_markdown(&model)
+                .lines()
+                .filter(|l| {
+                    let t = l.trim();
+                    !t.is_empty() && !t.starts_with('#') && !t.starts_with('>') && !t.starts_with('-')
+                })
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(140)
+                .collect();
+            entries.push((fname, title, excerpt));
+        }
+
+        // 附件：保持 Assets/ 相对路径，文档里的引用才能直接工作
+        let assets_root = self.vault.assets_dir();
+        if assets_root.is_dir() {
+            for entry in walkdir::WalkDir::new(&assets_root).into_iter().filter_map(|e| e.ok()) {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let rel = entry.path().strip_prefix(&self.vault.root).unwrap_or(entry.path());
+                let dest = out.join(rel);
+                if let Some(p) = dest.parent() {
+                    std::fs::create_dir_all(p)?;
+                }
+                let bytes = std::fs::read(entry.path())?;
+                write_if_changed(&dest, &bytes)?;
+            }
+        }
+
+        // index.html
+        let profile_css = self.active_design().map(|p| p.to_css()).unwrap_or_default();
+        let mut list = String::new();
+        for (fname, title, excerpt) in &entries {
+            list.push_str(&format!(
+                "<li><a href=\"{fname}\">{}</a><p>{}</p></li>\n",
+                esc_html(title),
+                esc_html(excerpt)
+            ));
+        }
+        let index = format!(
+            "<!doctype html>\n<html lang=\"zh\"><head><meta charset=\"utf-8\">\n\
+<title>{}</title>\n<style>\n{}\n\
+body{{max-width:46rem;margin:2rem auto;padding:0 1rem;font:16px/1.7 system-ui,sans-serif}}\n\
+ul{{list-style:none;padding:0}}li{{padding:12px 0;border-bottom:1px solid #0002}}\n\
+a{{text-decoration:none;font-weight:600}}p{{margin:4px 0 0;opacity:.72;font-size:14px}}\n\
+</style></head><body><h1>{}</h1><ul>\n{}\n</ul></body></html>\n",
+            esc_html(&self.vault.config.name),
+            profile_css,
+            esc_html(&self.vault.config.name),
+            list
+        );
+        write_if_changed(&out.join("index.html"), index.as_bytes())?;
+
+        // llms.txt：让 agent 发现站点内容
+        let mut llms = format!("# {}\n\n", self.vault.config.name);
+        for (fname, title, excerpt) in &entries {
+            llms.push_str(&format!("- [{title}]({fname}) — {excerpt}\n"));
+        }
+        write_if_changed(&out.join("llms.txt"), llms.as_bytes())?;
+
+        // sitemap.xml（有 base_url 才生成）
+        if let Some(base) = base_url {
+            let mut sm = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+            sm.push_str(&format!("  <url><loc>{}/index.html</loc></url>\n", base.trim_end_matches('/')));
+            for (fname, _, _) in &entries {
+                sm.push_str(&format!("  <url><loc>{}/{fname}</loc></url>\n", base.trim_end_matches('/')));
+            }
+            sm.push_str("</urlset>\n");
+            write_if_changed(&out.join("sitemap.xml"), sm.as_bytes())?;
+        }
+
+        // 清理上一版残留（保留 .git 等非站点文件）
+        let manifest = collect_manifest(out, &self.vault.config.name, base_url)?;
+        if let Some(prev) = previous {
+            let now: std::collections::HashSet<&str> =
+                manifest.files.iter().map(|f| f.path.as_str()).collect();
+            for f in prev.files {
+                if !now.contains(f.path.as_str()) && !f.path.starts_with(".git") {
+                    let _ = std::fs::remove_file(out.join(&f.path));
+                }
+            }
+        }
+        std::fs::write(
+            out.join("manifest.json"),
+            serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+        )?;
+        Ok(manifest)
+    }
+}
+
+fn esc_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn write_if_changed(path: &std::path::Path, bytes: &[u8]) -> Result<(), SyncError> {
+    if let Ok(existing) = std::fs::read(path) {
+        if existing == bytes {
+            return Ok(());
+        }
+    }
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn read_manifest(out: &std::path::Path) -> Option<SiteManifest> {
+    let t = std::fs::read_to_string(out.join("manifest.json")).ok()?;
+    serde_json::from_str(&t).ok()
+}
+
+/// 遍历站点目录，生成带内容哈希的清单（跳过 manifest.json 自身）。
+pub fn collect_manifest(
+    out: &std::path::Path,
+    title: &str,
+    base_url: Option<&str>,
+) -> Result<SiteManifest, SyncError> {
+    let mut files = Vec::new();
+    for entry in walkdir::WalkDir::new(out).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(out)
+            .unwrap_or(entry.path())
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.starts_with(".git/") || rel == "manifest.json" {
+            continue;
+        }
+        let bytes = std::fs::read(entry.path())?;
+        files.push(SiteFile {
+            path: rel,
+            hash: Cas::hash_hex(&bytes),
+            bytes: bytes.len() as u64,
+        });
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(SiteManifest {
+        title: title.to_string(),
+        generated_at: now_secs() as u64,
+        files,
+        base_url: base_url.map(|s| s.to_string()),
+    })
 }

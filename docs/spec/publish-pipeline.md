@@ -1,6 +1,6 @@
 # Publish Pipeline Spec — 发布是管道，不是导出
 
-状态：Phase 1 落地
+状态：Phase 1 已落地（站点构建 + local/git 目标）；目标适配器见 publish-targets.md
 
 ## 管线
 

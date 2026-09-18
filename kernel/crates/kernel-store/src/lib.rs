@@ -46,6 +46,69 @@ pub struct VaultConfig {
     /// 浏览器后端（页面消化：ego-lite / headless Chromium / CDP）
     #[serde(default)]
     pub browser: BrowserConfig,
+    /// 发布：站点构建目录与推送目标
+    #[serde(default)]
+    pub publish: PublishConfig,
+}
+
+/// 发布配置。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PublishConfig {
+    /// 站点构建目录（相对库根；git 目标会改写到各自的部署目录）
+    #[serde(default = "default_site_dir")]
+    pub site_dir: String,
+    /// 默认目标名
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_target: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<PublishTarget>,
+    /// 公开站点根地址（用于 sitemap / 复制链接）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+fn default_site_dir() -> String {
+    ".thirdc/site".into()
+}
+
+/// 一个发布目标。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PublishTarget {
+    pub name: String,
+    /// local | git（GitHub Pages / Cloudflare Pages 的 Git 集成）| s3 | cf-pages
+    pub kind: String,
+    /// 部署目录（相对库根）；缺省：git 用 .thirdc/deploy/<name>，local 用 site_dir
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+    // ---- git ----
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+    // ---- s3 兼容（S3 / R2 / OSS / COS / MinIO）----
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+    // ---- cloudflare pages ----
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_base_url: Option<String>,
 }
 
 /// 页面消化后端配置。

@@ -927,8 +927,23 @@ dependencies = [
  "kernel-store",
  "kernel-sync",
  "notify",
+ "serde",
  "serde_json",
  "tempfile",
+ "walkdir",
+]
+
+[[package]]
+name = "kernel-deploy"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "kernel-store",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1693,6 +1708,7 @@ dependencies = [
  "anyhow",
  "clap",
  "kernel-core",
+ "kernel-deploy",
  "serde_json",
  "thirdc-mcp",
  "thirdc-server",
@@ -1720,6 +1736,7 @@ dependencies = [
  "futures-util",
  "kernel-a2ui",
  "kernel-core",
+ "kernel-deploy",
  "notify",
  "serde_json",
  "tempfile",

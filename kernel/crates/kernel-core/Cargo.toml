@@ -11,6 +11,8 @@ kernel-sync = { path = "../kernel-sync" }
 kernel-design = { path = "../kernel-design" }
 kernel-browser = { path = "../kernel-browser" }
 serde_json.workspace = true
+walkdir.workspace = true
+serde.workspace = true
 notify.workspace = true
 
 [dev-dependencies]
