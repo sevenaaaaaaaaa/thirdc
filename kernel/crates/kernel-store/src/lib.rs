@@ -40,6 +40,37 @@ pub struct VaultConfig {
     /// 外部数据源连接（MCP server 等），"对接所有"的入口配置。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connections: Vec<ConnectionConfig>,
+    /// 对话/agent 使用的模型端点（OpenAI 兼容）。缺省则对话走本地命令模式。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<AiConfig>,
+}
+
+/// OpenAI 兼容的模型端点配置（OpenAI / DeepSeek / Ollama / vLLM / 任意兼容服务）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiConfig {
+    /// 形如 https://api.openai.com/v1 或 http://localhost:11434/v1
+    pub base_url: String,
+    /// 可直接写，也可留空并用环境变量 THIRDC_AI_API_KEY（更安全）
+    #[serde(default)]
+    pub api_key: String,
+    pub model: String,
+    /// 单轮对话最大工具步数
+    #[serde(default = "default_max_steps")]
+    pub max_steps: usize,
+}
+
+fn default_max_steps() -> usize {
+    6
+}
+
+impl AiConfig {
+    /// 密钥解析：配置优先，其次环境变量。
+    pub fn resolved_key(&self) -> String {
+        if !self.api_key.is_empty() {
+            return self.api_key.clone();
+        }
+        std::env::var("THIRDC_AI_API_KEY").unwrap_or_default()
+    }
 }
 
 /// 一个外部数据源连接。MCP server 以子进程方式启动并走 stdio 协议。

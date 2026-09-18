@@ -3,7 +3,7 @@
 pub mod watch;
 
 pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
-pub use kernel_store::{Cas, ConnectionConfig, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
+pub use kernel_store::{AiConfig, Cas, ConnectionConfig, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
 pub use kernel_sync::{OpLog, SyncError};
 
 use kernel_store::index::Index;
@@ -205,6 +205,21 @@ impl Kernel {
     /// 已采集条目数。
     pub fn items_count(&self) -> Result<usize, StoreError> {
         self.index.items_count()
+    }
+
+    /// 全部附件 (hash, path, mime)。
+    pub fn asset_list(&self) -> Result<Vec<(String, String, String)>, StoreError> {
+        Ok(self
+            .index
+            .list_assets()?
+            .into_iter()
+            .map(|a| (a.hash, a.path, a.mime))
+            .collect())
+    }
+
+    /// 文档 → 附件引用关系全量。
+    pub fn doc_asset_pairs(&self) -> Result<Vec<(String, String)>, StoreError> {
+        self.index.list_doc_assets()
     }
 
     /// 读取一篇文档的当前块模型。

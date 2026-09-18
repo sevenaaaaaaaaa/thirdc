@@ -9,6 +9,7 @@ kernel-core = { path = "../kernel/crates/kernel-core" }
 serde_json.workspace = true
 base64.workspace = true
 anyhow.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

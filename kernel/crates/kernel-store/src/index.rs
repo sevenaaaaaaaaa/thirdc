@@ -214,6 +214,37 @@ impl Index {
         Ok(out)
     }
 
+    /// 全部附件（画布 / 图谱用）。
+    pub fn list_assets(&self) -> Result<Vec<AssetRow>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT hash, path, mime, size FROM assets ORDER BY path")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(AssetRow {
+                hash: r.get(0)?,
+                path: r.get(1)?,
+                mime: r.get(2)?,
+                size: r.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// 文档 → 附件引用关系全量（图谱连线用）。
+    pub fn list_doc_assets(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let mut stmt = self.conn.prepare("SELECT doc, hash FROM doc_assets")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// 已索引的全部路径。
     pub fn list_paths(&self) -> Result<Vec<String>, StoreError> {
         let mut stmt = self.conn.prepare("SELECT path FROM docs")?;

@@ -31,9 +31,36 @@ impl McpServer {
         Ok(Self::new(Arc::new(Mutex::new(Kernel::open(vault)?))))
     }
 
+    /// 供 agent / HTTP 层复用的工具调用入口。
+    pub fn call_tool_public(&self, name: &str, args: Value) -> Result<Value, String> {
+        self.tools_call(&serde_json::json!({ "name": name, "arguments": args }))
+            .map_err(|(_, m)| m)
+    }
+
+    /// 工具定义转换为 OpenAI function calling 格式。
+    pub fn tools_for_llm(&self) -> Value {
+        let defs = tool_definitions();
+        let arr: Vec<Value> = defs
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t["description"],
+                        "parameters": t["inputSchema"],
+                    }
+                })
+            })
+            .collect();
+        Value::Array(arr)
+    }
+
     /// 处理一条 JSON-RPC 消息。通知返回 None（无需响应）。
-    pub fn handle(&self, raw: &str) -> Option<String> {
-        let msg: Value = match serde_json::from_str(raw) {
+    pub fn handle(&self, raw: &str) -> Option<String> {        let msg: Value = match serde_json::from_str(raw) {
             Ok(v) => v,
             Err(e) => {
                 return Some(error_response(Value::Null, -32700, &format!("parse error: {e}")));
@@ -315,6 +342,23 @@ impl McpServer {
             }))
         })
     }
+}
+
+/// 从工具结果中提取可读文本（content[].text）。
+pub fn extract_tool_text(result: &Value) -> String {
+    if let Some(arr) = result.get("content").and_then(|c| c.as_array()) {
+        let joined: Vec<String> = arr
+            .iter()
+            .filter_map(|c| c.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+            .collect();
+        if !joined.is_empty() {
+            return joined.join("\n");
+        }
+        if let Some(sc) = result.get("structuredContent") {
+            return serde_json::to_string_pretty(sc).unwrap_or_default();
+        }
+    }
+    result.to_string()
 }
 
 /// MCP tools/call 结果：文本 + 结构化内容双份。
@@ -748,5 +792,127 @@ for line in sys.stdin:
         assert_eq!(k.items_count().unwrap(), 1);
         let docs = kernel_core::list_docs(&k.vault).unwrap();
         assert_eq!(docs.len(), 1, "重复采集不应产生第二篇文档");
+    }
+}
+
+/// 对话式 agent：LLM（OpenAI 兼容）驱动内核工具；未配置模型时退化为命令模式。
+pub mod agent {
+    use crate::McpServer;
+    use kernel_core::AiConfig;
+    use serde_json::{Value, json};
+
+    pub struct Step {
+        pub tool: String,
+        pub args: Value,
+        pub ok: bool,
+        pub summary: String,
+    }
+
+    pub struct Outcome {
+        pub mode: &'static str,
+        pub reply: String,
+        pub steps: Vec<Step>,
+    }
+
+    /// 命令模式：无需模型即可驱动（"搜索 X" / "新建 X" / "同步" / "采集 <连接>" / "列出"）。
+    pub fn command_mode(server: &McpServer, message: &str) -> Outcome {
+        let msg = message.trim();
+        let (verb, rest) = match msg.split_once(char::is_whitespace) {
+            Some((v, r)) => (v.trim_start_matches('/'), r.trim()),
+            None => (msg.trim_start_matches('/'), ""),
+        };
+        let (tool, args, label): (&str, Value, String) = match verb {
+            "搜索" | "找" | "search" => ("search_vault", json!({ "query": rest }), format!("检索「{rest}」")),
+            "列出" | "列表" | "ls" | "list" => ("list_docs", json!({}), "列出全部文档".into()),
+            "同步" | "sync" => ("vault_status", json!({}), "同步并查看状态".into()),
+            "状态" | "status" => ("vault_status", json!({}), "查看库状态".into()),
+            _ => {
+                // 未识别：整句当作检索
+                ("search_vault", json!({ "query": msg }), format!("检索「{msg}」"))
+            }
+        };
+        let mut steps = Vec::new();
+        let reply = match server.call_tool_public(tool, args.clone()) {
+            Ok(v) => {
+                let text = crate::extract_tool_text(&v);
+                steps.push(Step { tool: tool.into(), args, ok: true, summary: label });
+                text
+            }
+            Err(e) => {
+                steps.push(Step { tool: tool.into(), args, ok: false, summary: e.clone() });
+                format!("执行失败：{e}")
+            }
+        };
+        Outcome { mode: "command", reply, steps }
+    }
+
+    /// AI 模式：模型选择工具 → 执行 → 回灌结果，直到给出最终答复。
+    pub async fn run_ai(
+        server: &McpServer,
+        cfg: &AiConfig,
+        message: &str,
+    ) -> anyhow::Result<Outcome> {
+        let tools = server.tools_for_llm();
+        let mut messages = vec![
+            json!({ "role": "system", "content":
+                "你是 ThirdC 知识库里的协作者。优先用工具了解库中现有内容再回答；\
+                 写文档前先 search_vault 查重。回答简洁，用中文。\
+                 当用户要求整理/汇总时，用 write_doc 把结果沉淀成文档。" }),
+            json!({ "role": "user", "content": message }),
+        ];
+        let key = cfg.resolved_key();
+        let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
+        let client = reqwest::Client::new();
+        let mut steps = Vec::new();
+
+        for _ in 0..cfg.max_steps.max(1) {
+            let mut req = client.post(&url).json(&json!({
+                "model": cfg.model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "auto",
+            }));
+            if !key.is_empty() {
+                req = req.bearer_auth(&key);
+            }
+            let resp = req.send().await?;
+            let status = resp.status();
+            let body: Value = resp.json().await?;
+            if !status.is_success() {
+                anyhow::bail!("模型接口返回 {status}: {}", body);
+            }
+            let choice = body["choices"].get(0).cloned().unwrap_or(Value::Null);
+            let msg = choice["message"].clone();
+            let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
+
+            if tool_calls.is_empty() {
+                let reply = msg["content"].as_str().unwrap_or("(模型没有返回内容)").to_string();
+                return Ok(Outcome { mode: "ai", reply, steps });
+            }
+
+            messages.push(msg.clone());
+            for call in tool_calls {
+                let name = call["function"]["name"].as_str().unwrap_or("").to_string();
+                let args: Value = call["function"]["arguments"]
+                    .as_str()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or(json!({}));
+                let (ok, summary) = match server.call_tool_public(&name, args.clone()) {
+                    Ok(v) => (true, crate::extract_tool_text(&v)),
+                    Err(e) => (false, format!("失败：{e}")),
+                };
+                steps.push(Step { tool: name.clone(), args: args.clone(), ok, summary: summary.clone() });
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call["id"].clone(),
+                    "content": summary,
+                }));
+            }
+        }
+        Ok(Outcome {
+            mode: "ai",
+            reply: "已达到工具调用步数上限，未得到最终答复。可细化问题后重试。".into(),
+            steps,
+        })
     }
 }
