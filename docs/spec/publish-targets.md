@@ -18,7 +18,7 @@
 |---|---|---|
 | `local` | ✅ 已落地 | 站点落在 sidecar，daemon 直接托管；用于本地预览/离线分发 |
 | `git` | ✅ 已落地 | 站点目录变成 git 仓库并 push 到分支 —— **GitHub Pages 与 Cloudflare Pages 的 Git 集成都走这条** |
-| `s3` | 下一步 | S3 / R2 / OSS / COS / MinIO，SigV4 直传（配置字段已就绪） |
+| `s3` | ✅ 已落地 | S3 / R2 / OSS / COS / MinIO：SigV4 直传，path-style + prefix，按内容哈希增量 |
 | `cf-pages` | 下一步 | Cloudflare Pages 直传 API（多部分上传 + manifest）；当前可用 git 目标接 Git 集成 |
 
 ### 配置（thirdc.toml）
@@ -47,7 +47,24 @@ force = true                       # 生成站点目标默认允许强推
 # kind = "git"
 # remote = "git@github.com:me/kb.git"
 # branch = "gh-pages"
+
+[[publish.targets]]                # S3 / R2 / OSS / COS / MinIO 通用
+name = "r2"
+kind = "s3"
+endpoint = "https://<account>.r2.cloudflarestorage.com"
+bucket = "kb"
+region = "auto"                    # AWS 用真实 region，R2 用 auto
+prefix = "site"                    # 可选，对象键前缀
+access_key_env = "R2_ACCESS_KEY_ID"      # 从环境变量读，不落盘
+secret_key_env = "R2_SECRET_ACCESS_KEY"
+public_base_url = "https://kb.example.com"   # 复制链接/Sitemap 用
 ```
+
+`s3` 目标细节：
+- **path-style** 请求（`{endpoint}/{bucket}/{key}`），兼容 R2/MinIO/OSS/COS 等；固定走 `PUT` 对象。
+- 每对象带 `x-amz-content-sha256`（真实负载哈希）与 `x-amz-date`，`content-type` 按扩展名。
+- **增量**：`DeployState` 记录每个路径的内容哈希，未变即跳过，不产生请求。
+- 密钥只从环境变量读取，**任何情况下不写入库配置**。
 
 `git` 目标细节：
 - 仓库不存在则 `git init -b <branch>`；远端 URL 变了自动 `set-url`。
@@ -70,7 +87,14 @@ force = true                       # 生成站点目标默认允许强推
 
 - `kernel-deploy` 单测：**真建一个裸仓库**，部署 → `git show gh-pages:index.html` 能看到内容；
   再次部署报告「无变更」；改内容后再部署，裸仓库内容更新。
-- 端到端：`thirdc publish` 构建 15 个文件 → 推送到裸仓库 → 二次发布上传 0 / 跳过 16。
+- **SigV4 黄金向量**：`tests/vectors/sigv4.json` 由本机 **botocore 1.42.97**（AWS 官方 Python SDK）
+  在固定时间与 AWS 测试凭据下生成（含中文与空格/`+`/`~` 路径）。Rust 实现逐条比对
+  canonical request / string-to-sign / signature / Authorization，并断言我们的 URI 编码器
+  与 botocore 完全一致。（其中 `GET /` 的签名与 AWS 官方 SigV4 测试套件 `get-vanilla` 相同。）
+- **S3 集成测试**：本地起极简 HTTP 服务当"桶"，验证每次 PUT 都带 SigV4 与内容哈希、
+  path-style + prefix 正确、内容未变时不再发请求、改一个文件只传一个。
+- 端到端（真实进程 + 活 mock 桶）：`thirdc publish --target r2-mock` → **16 个签名 PUT**，
+  对象键形如 `/kb/site/agent-%E7%9A%84-html.html`；二次发布 0 请求。
 - HTTP：`/publish/site` 返回 15 文件 183KB；`/publish/deploy` 返回 `uploaded=16`。
 
 ## 五、下一步
@@ -78,7 +102,7 @@ force = true                       # 生成站点目标默认允许强推
 | 里程碑 | 内容 |
 |---|---|
 | PUB-1 | 站点构建器 + local/git 目标 + CLI/HTTP/客户端 | ✅ 已落地 |
-| PUB-2 | S3 兼容 SigV4 直传（含断点/去重、CDN 刷新） |
+| PUB-2 | S3 兼容 SigV4 直传（增量去重） | ✅ 已落地 |
 | PUB-3 | Cloudflare Pages 直传（多部分上传 + manifest 哈希） |
 | PUB-4 | 发布前检查钩子：国内合规（机审/备案）、链接检查、图片图床解析 |
 | PUB-5 | 定时/变更触发自动发布（event log 驱动） |

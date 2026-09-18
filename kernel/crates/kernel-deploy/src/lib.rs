@@ -8,6 +8,8 @@
 //!
 //! 增量：state 文件记录已上传内容哈希；git 由 git 自己算差异。
 
+pub mod s3;
+
 use kernel_store::PublishTarget;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -133,26 +135,33 @@ pub fn deploy(
     match target.kind.as_str() {
         "local" => deploy_local(site_dir, target),
         "git" => deploy_git(site_dir, target),
-        "s3" => Err(DeployError::Unsupported(
-            "s3 目标：SigV4 直传在下一步（配置字段已就绪）".into(),
-        )),
+        "s3" => {
+            let mut st = load_state(&state_path(sidecar, &target.name));
+            let r = s3::deploy_s3(site_dir, target, &mut st);
+            if r.is_ok() {
+                let _ = save_state(&state_path(sidecar, &target.name), &st);
+            }
+            r
+        }
         "cf-pages" => Err(DeployError::Unsupported(
             "cf-pages 直传：下一步（配置字段已就绪；也可用 git 目标接 Cloudflare Pages 的 Git 集成）".into(),
         )),
         other => Err(DeployError::Unsupported(other.to_string())),
     }
     .map(|r| {
-        // 记录状态（供后续增量与审计）
-        let sp = state_path(sidecar, &target.name);
-        let mut st = load_state(&sp);
-        if let Ok(files) = walk(site_dir) {
-            for (rel, p) in files {
-                if let Ok(h) = hash_file(&p) {
-                    st.files.insert(rel, h);
+        // 记录状态（供后续增量与审计）；s3 在适配器内部已按上传结果维护
+        if target.kind != "s3" {
+            let sp = state_path(sidecar, &target.name);
+            let mut st = load_state(&sp);
+            if let Ok(files) = walk(site_dir) {
+                for (rel, p) in files {
+                    if let Ok(h) = hash_file(&p) {
+                        st.files.insert(rel, h);
+                    }
                 }
             }
+            let _ = save_state(&sp, &st);
         }
-        let _ = save_state(&sp, &st);
         r
     })
 }
@@ -341,9 +350,17 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_kinds_are_explicit() {
+    fn s3_without_config_is_a_clear_error() {
         let dir = tempfile::tempdir().unwrap();
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
         let e = deploy(dir.path(), dir.path(), &target("s3", "s3")).unwrap_err();
+        assert!(e.to_string().contains("endpoint"), "配置缺失要说清楚：{e}");
+    }
+
+    #[test]
+    fn cf_pages_direct_upload_reports_next_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = deploy(dir.path(), dir.path(), &target("cf", "cf-pages")).unwrap_err();
         assert!(e.to_string().contains("下一步"), "未实现的目标要明确说明：{e}");
     }
 
