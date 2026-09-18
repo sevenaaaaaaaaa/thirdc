@@ -50,6 +50,12 @@ enum Cmd {
     },
     /// 反查：哪些文档引用了该附件
     Refs { path: PathBuf, hash: String },
+    /// 启动本地 daemon（HTTP API + 文件监听）
+    Serve {
+        path: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:7700")]
+        addr: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -124,6 +130,17 @@ fn main() -> Result<()> {
             for doc in k.asset_docs(&hash)? {
                 println!("{doc}");
             }
+        }
+        Cmd::Serve { path, addr } => {
+            let vault = Vault::open(&path)?;
+            let state = thirdc_server::build_state(vault).context("build state")?;
+            thirdc_server::spawn_watcher(state.clone()).context("spawn watcher")?;
+            println!("thirdc daemon listening on http://{addr}");
+            println!("api token: {}", state.token);
+            println!("(Authorization: Bearer <token>，或 header x-thirdc-token)");
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async move { thirdc_server::serve(&addr, state).await })
+                .context("serve")?;
         }
     }
     Ok(())

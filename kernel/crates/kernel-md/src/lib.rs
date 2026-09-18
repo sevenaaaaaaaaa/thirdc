@@ -5,6 +5,7 @@
 //! 同一块模型永远产出字节相同的 MD，保证 git diff 干净、外部编辑器互操作无损。
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,7 +14,8 @@ pub enum MdError {
     Parse { line: usize, msg: String },
 }
 
-/// 块 ID：由确定性序列化内容派生，外部编辑不破坏身份。
+/// 块 ID：内容派生（编辑后身份改变，未编辑的块跨外部编辑保持身份），
+/// 这是块级 CRDT 合并的基础（ADR-0004）。
 pub type BlockId = String;
 
 /// 规范块模型。V1 支持核心类型；其余进 Raw 容器。
@@ -36,6 +38,71 @@ pub enum Block {
     Divider { id: BlockId },
     /// 原样保留块：任何无法结构化的内容，原字节保真。
     Raw { id: BlockId, text: String },
+}
+
+impl Block {
+    pub fn id(&self) -> &str {
+        match self {
+            Block::Paragraph { id, .. }
+            | Block::Heading { id, .. }
+            | Block::Code { id, .. }
+            | Block::Quote { id, .. }
+            | Block::List { id, .. }
+            | Block::Table { id, .. }
+            | Block::Divider { id, .. }
+            | Block::Raw { id, .. } => id,
+        }
+    }
+
+    pub fn set_id(&mut self, new_id: String) {
+        match self {
+            Block::Paragraph { id, .. }
+            | Block::Heading { id, .. }
+            | Block::Code { id, .. }
+            | Block::Quote { id, .. }
+            | Block::List { id, .. }
+            | Block::Table { id, .. }
+            | Block::Divider { id, .. }
+            | Block::Raw { id, .. } => *id = new_id,
+        }
+    }
+
+    /// 块类型名。
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Block::Paragraph { .. } => "paragraph",
+            Block::Heading { .. } => "heading",
+            Block::Code { .. } => "code",
+            Block::Quote { .. } => "quote",
+            Block::List { .. } => "list",
+            Block::Table { .. } => "table",
+            Block::Divider { .. } => "divider",
+            Block::Raw { .. } => "raw",
+        }
+    }
+
+    /// 内容指纹（不含 id 本身）：kind + 载荷 的 sha256 前 4 字节。
+    pub fn fingerprint(&self) -> String {
+        let mut cleaned = self.clone();
+        cleaned.set_id(String::new());
+        let payload = serde_json::to_string(&cleaned).unwrap_or_default();
+        let mut h = Sha256::new();
+        Digest::update(&mut h, self.kind().as_bytes());
+        Digest::update(&mut h, payload.as_bytes());
+        hex::encode(&h.finalize()[..4])
+    }
+}
+
+/// 为文档内所有块分配内容派生的稳定 ID。
+/// 完全相同的块用出现序号区分，保证同文档内唯一。
+pub fn assign_stable_ids(doc: &mut DocModel) {
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for b in doc.blocks.iter_mut() {
+        let fp = b.fingerprint();
+        let n = counts.entry(fp.clone()).or_insert(0);
+        b.set_id(format!("b{fp}-{n}"));
+        *n += 1;
+    }
 }
 
 /// 一篇文档 = 有序块序列 + 元数据。
@@ -167,11 +234,8 @@ pub fn from_markdown(src: &str) -> Result<DocModel, MdError> {
         }
     }
 
-    let mut counter = 0usize;
-    let mut next_id = || {
-        counter += 1;
-        format!("b{counter:04}")
-    };
+    // 解析阶段先占位，末尾统一分配内容派生的稳定 ID
+    let next_id = String::new;
 
     while i < lines.len() {
         let line = lines[i];
@@ -334,6 +398,7 @@ pub fn from_markdown(src: &str) -> Result<DocModel, MdError> {
         });
     }
 
+    assign_stable_ids(&mut doc);
     Ok(doc)
 }
 

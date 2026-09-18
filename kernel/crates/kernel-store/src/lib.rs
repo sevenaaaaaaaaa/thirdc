@@ -69,6 +69,13 @@ fn default_asset_mode() -> String {
     "vault".into()
 }
 
+/// 设备身份与本地 API 令牌。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MachineConfig {
+    pub device_id: String,
+    pub token: String,
+}
+
 /// 已打开的库。
 #[derive(Debug, Clone)]
 pub struct Vault {
@@ -132,6 +139,26 @@ impl Vault {
     }
     pub fn blobs_dir(&self) -> PathBuf {
         self.sidecar().join("blobs")
+    }
+
+    /// 读取/生成设备身份与本地 API 令牌（.thirdc/machine.toml）。
+    pub fn ensure_machine(&self) -> Result<MachineConfig, StoreError> {
+        let path = self.sidecar().join("machine.toml");
+        if path.is_file() {
+            let raw = fs::read_to_string(&path)?;
+            let m: MachineConfig = toml::from_str(&raw).map_err(|e| StoreError::Config(e.to_string()))?;
+            if !m.token.is_empty() {
+                return Ok(m);
+            }
+        }
+        let m = MachineConfig {
+            device_id: ulid::Ulid::new().to_string(),
+            // 两段 ULID = 128 位随机量，仅用于本机回环认证
+            token: format!("{}{}", ulid::Ulid::new(), ulid::Ulid::new()).to_lowercase(),
+        };
+        let raw = toml::to_string_pretty(&m).map_err(|e| StoreError::Config(e.to_string()))?;
+        fs::write(&path, raw)?;
+        Ok(m)
     }
 }
 

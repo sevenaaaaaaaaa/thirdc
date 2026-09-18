@@ -2,7 +2,7 @@
 
 pub mod watch;
 
-pub use kernel_md::{Block, DocModel};
+pub use kernel_md::{Block, DocModel, from_markdown, to_markdown};
 pub use kernel_store::{Cas, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
 pub use kernel_sync::{OpLog, SyncError};
 

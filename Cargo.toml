@@ -5,6 +5,7 @@ members = [
     "kernel/crates/kernel-md",
     "kernel/crates/kernel-store",
     "kernel/crates/kernel-sync",
+    "server",
     "cli",
 ]
 
@@ -28,6 +29,9 @@ notify = "6"
 rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 lto = "thin"

@@ -75,10 +75,11 @@ MV3，Chrome / Edge / Firefox / Safari：
 
 ## 8. 里程碑映射
 
-| 里程碑 | 内容 |
-|---|---|
-| M4 | daemon + HTTP API + MCP stdio/server（先让 agent 能用库） |
-| M5 | 浏览器扩展 MV3 采集 + native messaging |
-| M6 | Tauri 桌面客户端 |
-| M7 | Web（PWA + WASM 内核） |
-| M8 | browser 模块（CDP + ego-lite）、computer-use 能力分级 |
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| M4 | daemon + HTTP API（`thirdc serve`）+ 块级 CRDT 合并 | 已落地 |
+| M5 | 浏览器扩展 MV3 采集 + native messaging | 待办 |
+| M6 | Tauri 桌面客户端 | 待办 |
+| M7 | Web（PWA + WASM 内核） | 待办 |
+| M8 | browser 模块（CDP + ego-lite）、computer-use 能力分级 | 待办 |
+| M9 | MCP server（出口）与 MCP client（入口，把 MCP server 变数据源） | 待办 |
