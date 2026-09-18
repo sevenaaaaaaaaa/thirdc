@@ -683,7 +683,7 @@ async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
     tokio::spawn(async move {
         let result = match ai {
             Some(cfg) if !cfg.base_url.is_empty() => {
-                let mut tx_step = tx.clone();
+                let tx_step = tx.clone();
                 thirdc_mcp::agent::run_ai_with(&server, &cfg, &message, move |s| {
                     let _ = tx_step.send(ev(
                         "step",
