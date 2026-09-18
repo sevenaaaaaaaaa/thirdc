@@ -37,6 +37,22 @@ pub struct VaultConfig {
     /// 图床策略：vault | s3 | github | custom（Phase 1 落地）
     #[serde(default)]
     pub assets: AssetConfig,
+    /// 外部数据源连接（MCP server 等），"对接所有"的入口配置。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<ConnectionConfig>,
+}
+
+/// 一个外部数据源连接。MCP server 以子进程方式启动并走 stdio 协议。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConnectionConfig {
+    /// 连接名（导入路径与去重键的一部分）。
+    pub name: String,
+    /// 启动命令，如 npx / uvx / 本地二进制。
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub env: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

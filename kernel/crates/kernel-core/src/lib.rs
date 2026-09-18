@@ -3,7 +3,7 @@
 pub mod watch;
 
 pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
-pub use kernel_store::{Cas, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
+pub use kernel_store::{Cas, ConnectionConfig, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
 pub use kernel_sync::{OpLog, SyncError};
 
 use kernel_store::index::Index;
@@ -140,6 +140,65 @@ impl Kernel {
         self.index.assets_count()
     }
 
+    /// 采集管道落点：把外部来源的内容导入为文档。
+    ///
+    /// - 同一 `connection + uri` 重复采集会**更新同一篇文档**（不产生副本）。
+    /// - 文档落在 `Notes/Sources/<connection>/<slug>.md`，顶部加一行可见来源，机器溯源存 items 表。
+    pub fn import_capture(
+        &mut self,
+        connection: &str,
+        uri: &str,
+        title: Option<&str>,
+        content: &str,
+        mime: &str,
+    ) -> Result<String, SyncError> {
+        let rel = match self.index.item_rel(connection, uri).map_err(SyncError::Store)? {
+            Some(existing) => existing,
+            None => {
+                let slug = slugify(title.unwrap_or(uri));
+                let slug = if slug.is_empty() {
+                    format!("item-{}", &Cas::hash_hex(uri.as_bytes())[..8])
+                } else {
+                    slug
+                };
+                let candidate = format!("Notes/Sources/{connection}/{slug}.md");
+                let abs = self.vault.root.join(&candidate);
+                if abs.exists() {
+                    format!("Notes/Sources/{connection}/{slug}-{}.md", &Cas::hash_hex(uri.as_bytes())[..6])
+                } else {
+                    candidate
+                }
+            }
+        };
+
+        let mut body = String::new();
+        if let Some(t) = title {
+            if !content.trim_start().starts_with("# ") {
+                body.push_str(&format!("# {t}\n\n"));
+            }
+        }
+        let source_line = format!(
+            "> 来源：[{uri}]({uri})　连接：{connection}　类型：{mime}　采集：{}\n\n",
+            now_secs()
+        );
+        body.push_str(&source_line);
+        body.push_str(content);
+        if !body.ends_with('\n') {
+            body.push('\n');
+        }
+
+        self.put_doc(&rel, &body)?;
+        self.index
+            .upsert_item(connection, uri, &rel, now_secs())
+            .map_err(SyncError::Store)?;
+        Ok(rel)
+    }
+
+    /// 已采集条目数。
+    pub fn items_count(&self) -> Result<usize, StoreError> {
+        self.index.items_count()
+    }
+
     /// 读取一篇文档的当前块模型。
     pub fn get_doc(&mut self, rel: &str) -> Result<DocModel, SyncError> {
         self.log.current_model(&self.vault, rel)
@@ -171,6 +230,26 @@ pub fn is_safe_doc_path(p: &str) -> bool {
         && !p.contains("..")
         && !p.starts_with('/')
         && !p.contains('\\')
+}
+
+/// 生成安全、可读的文件名：保留 Unicode 字母数字（含中文），其余转连字符。
+pub fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            if c.is_ascii_uppercase() {
+                out.push(c.to_ascii_lowercase());
+            } else {
+                out.push(c);
+            }
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
 }
 
 #[cfg(test)]

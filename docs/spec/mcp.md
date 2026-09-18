@@ -55,8 +55,45 @@ Claude Desktop（`claude_desktop_config.json`）/ Cursor（`~/.cursor/mcp.json`�
 - 错误码：`-32700` 解析失败、`-32601` 未知方法、`-32602` 参数/路径非法、`-32603` 内部错误。
 - stdio 模式无网络暴露；写入动作计入文件真相，天然可 diff、可回溯。
 
-## 入口（待办）：任意 MCP server 变成数据源
+## 入口：任意 MCP server 变成数据源（已落地）
 
-- 内核作 MCP client：连接用户配置的 MCP servers，把其 tools/resources 抽成 `Item` 入采集管道。
-- 目标：Notion/飞书/GitHub/数据库等第三方 MCP server 零改代码接入，实现"对接所有"。
-- 需要的能力：连接管理（配置 + 授权）、tool 调用 → 文档/块映射、定时/事件触发采集。
+内核作 MCP **client**，以子进程方式启动第三方 MCP server 并走 stdio 协议。
+
+### 配置（thirdc.toml）
+
+```toml
+[[connections]]
+name = "knowledge-base"
+command = "python3"          # 或 npx / uvx / 本地二进制
+args = ["/path/to/server.py"]
+# env = { TOKEN = "..." }
+```
+
+### CLI
+
+| 命令 | 说明 |
+|---|---|
+| `thirdc conn list <vault>` | 列出已配置连接 |
+| `thirdc conn probe <vault> <name>` | 握手 + 列出 tools / resources |
+| `thirdc conn pull <vault> <name>` | 采集该连接**全部 resources** 入库 |
+| `thirdc conn call <vault> <name> <tool> --args '{"k":"v"}' [--import]` | 调用 tool；`--import` 把返回文本也入库 |
+
+### 采集语义
+
+- 落点：`Notes/Sources/<connection>/<标题>.md`（Unicode 标题保留为可读文件名）。
+- 顶部插入可见来源行：`> 来源：[uri](uri)　连接：name　类型：mime　采集：时间戳`。
+- 机器溯源存索引 `items(connection, uri, rel, fetched_at)` 表。
+- **幂等**：同一 `connection + uri` 重复采集**更新同一篇文档**，不产生副本。
+- 采集结果走正常管道：文件真相 + op-log + 全文索引，立即可检索、可协作。
+
+### 实现要点
+
+- 子进程 stdio + 独立读线程 + mpsc 通道，请求级别超时（30s），不会因 server 卡死而挂住内核。
+- initialize 握手后自动发送 `notifications/initialized`；请求按 id 匹配，跳过通知与无关输出。
+- 失败隔离：单个 resource 读取失败只 skip 并报告，不影响其余采集。
+
+### 待办
+
+- HTTP/SSE 与 Streamable HTTP 传输（远程 MCP server）。
+- 定时/事件触发采集（自动化触发器）。
+- 工具调用 → 结构化块的映射（当前为文本入库）。

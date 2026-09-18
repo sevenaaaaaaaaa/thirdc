@@ -11,6 +11,8 @@ use kernel_core::{Kernel, Vault, is_safe_doc_path, to_html, to_markdown};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
+pub mod client;
+
 /// 本端支持的最新协议版本；客户端请求的版本在 SUPPORTED 内则回显。
 pub const LATEST_PROTOCOL: &str = "2025-06-18";
 pub const SUPPORTED_PROTOCOLS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
@@ -554,5 +556,197 @@ mod tests {
             json!({ "name": "put_asset", "arguments": { "name": "x.png", "content_base64": "!!!" } }),
         );
         assert_eq!(b["error"]["code"], -32602);
+    }
+}
+
+/// 入口侧高层操作：连接配置 → 采集到库。
+pub mod pull {
+    use super::client::{McpClient, extract_mime, extract_text};
+    use kernel_core::{ConnectionConfig, Kernel};
+    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
+
+    pub struct PullReport {
+        pub server: String,
+        pub tools: Vec<String>,
+        pub imported: Vec<(String, String)>, // (uri, rel)
+        pub skipped: Vec<String>,
+    }
+
+    /// 探测：握手 + 列出 tools / resources。
+    pub fn probe(cfg: &ConnectionConfig) -> anyhow::Result<(String, Vec<String>, Vec<String>)> {
+        let mut c = McpClient::connect(cfg)?;
+        let tools = c
+            .list_tools()?
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+            .collect();
+        let resources = c
+            .list_resources()?
+            .iter()
+            .filter_map(|r| r.get("uri").and_then(|n| n.as_str()).map(|s| s.to_string()))
+            .collect();
+        Ok((c.server_name(), tools, resources))
+    }
+
+    /// 通用工具调用（结果文本直接返回）。
+    pub fn call(cfg: &ConnectionConfig, tool: &str, args: Value) -> anyhow::Result<Value> {
+        let mut c = McpClient::connect(cfg)?;
+        c.call_tool(tool, args)
+    }
+
+    /// 把该连接的**全部 resources** 采集入库（同一 uri 重复采集即更新原文档）。
+    pub fn pull_resources(
+        cfg: &ConnectionConfig,
+        kernel: &Arc<Mutex<Kernel>>,
+    ) -> anyhow::Result<PullReport> {
+        let mut c = McpClient::connect(cfg)?;
+        let server = c.server_name();
+        let tools = c
+            .list_tools()?
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+            .collect();
+        let resources = c.list_resources()?;
+
+        let mut imported = Vec::new();
+        let mut skipped = Vec::new();
+        for r in resources {
+            let uri = match r.get("uri").and_then(|u| u.as_str()) {
+                Some(u) => u.to_string(),
+                None => continue,
+            };
+            let read = match c.read_resource(&uri) {
+                Ok(v) => v,
+                Err(e) => {
+                    skipped.push(format!("{uri}: {e}"));
+                    continue;
+                }
+            };
+            let Some(text) = extract_text(&read) else {
+                skipped.push(format!("{uri}: no text content"));
+                continue;
+            };
+            let mime = extract_mime(&read);
+            let title = r
+                .get("title")
+                .or_else(|| r.get("name"))
+                .and_then(|t| t.as_str());
+            let mut k = kernel.lock().map_err(|_| anyhow::anyhow!("kernel lock poisoned"))?;
+            let rel = k.import_capture(&cfg.name, &uri, title, &text, &mime)?;
+            imported.push((uri, rel));
+        }
+        Ok(PullReport {
+            server,
+            tools,
+            imported,
+            skipped,
+        })
+    }
+}
+
+#[cfg(test)]
+mod client_tests {
+    use super::client::{McpClient, extract_text};
+    use super::pull;
+    use kernel_core::{ConnectionConfig, Kernel, Vault};
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+
+    const MOCK_SERVER: &str = r##"
+import sys, json
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in sys.stdin:
+    if not line.strip(): continue
+    try: msg = json.loads(line)
+    except Exception: continue
+    if "id" not in msg: continue
+    rid = msg["id"]; m = msg.get("method")
+    if m == "initialize":
+        send({"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"mock","version":"0.0"}}})
+    elif m == "tools/list":
+        send({"jsonrpc":"2.0","id":rid,"result":{"tools":[{"name":"echo","description":"echo","inputSchema":{"type":"object"}}]}})
+    elif m == "tools/call":
+        a = msg.get("params",{}).get("arguments",{})
+        send({"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"echo: " + str(a.get("text",""))}]}})
+    elif m == "resources/list":
+        send({"jsonrpc":"2.0","id":rid,"result":{"resources":[{"uri":"mock://note/1","name":"note1","title":"模拟笔记","mimeType":"text/markdown"}]}})
+    elif m == "resources/read":
+        send({"jsonrpc":"2.0","id":rid,"result":{"contents":[{"uri":"mock://note/1","mimeType":"text/markdown","text":"# 模拟笔记\n\n来自模拟 MCP server 的内容。\n"}]}})
+    else:
+        send({"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":"method not found"}})
+"##;
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        cfg: ConnectionConfig,
+        kernel: Arc<Mutex<Kernel>>,
+    }
+
+    fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("mock_mcp.py");
+        std::fs::write(&script, MOCK_SERVER).unwrap();
+        let vault = Vault::init(dir.path().join("vault"), "mcp-entry").unwrap();
+        let cfg = ConnectionConfig {
+            name: "mock".into(),
+            command: "python3".into(),
+            args: vec![script.to_string_lossy().into_owned()],
+            env: Default::default(),
+        };
+        Fixture {
+            _dir: dir,
+            cfg,
+            kernel: Arc::new(Mutex::new(Kernel::open(vault).unwrap())),
+        }
+    }
+
+    #[test]
+    fn connect_and_call_tool() {
+        let f = fixture();
+        let mut c = McpClient::connect(&f.cfg).unwrap();
+        assert_eq!(c.server_name(), "mock");
+        assert_eq!(c.protocol_version, "2024-11-05");
+
+        let tools = c.list_tools().unwrap();
+        assert_eq!(tools[0]["name"], "echo");
+
+        let r = c.call_tool("echo", json!({ "text": "hi" })).unwrap();
+        assert_eq!(extract_text(&r).unwrap(), "echo: hi");
+    }
+
+    #[test]
+    fn probe_lists_tools_and_resources() {
+        let f = fixture();
+        let (server, tools, resources) = pull::probe(&f.cfg).unwrap();
+        assert_eq!(server, "mock");
+        assert_eq!(tools, vec!["echo".to_string()]);
+        assert_eq!(resources, vec!["mock://note/1".to_string()]);
+    }
+
+    #[test]
+    fn pull_imports_resource_into_vault_and_is_idempotent() {
+        let f = fixture();
+        let report = pull::pull_resources(&f.cfg, &f.kernel).unwrap();
+        assert_eq!(report.imported.len(), 1);
+        let (uri, rel) = &report.imported[0];
+        assert_eq!(uri, "mock://note/1");
+        assert_eq!(rel, "Notes/Sources/mock/模拟笔记.md", "中文标题应保留为可读文件名");
+
+        // 文档落盘、带来源行、可检索
+        let k = f.kernel.lock().unwrap();
+        let text = std::fs::read_to_string(k.vault.root.join(rel)).unwrap();
+        assert!(text.contains("mock://note/1"));
+        assert!(text.contains("来自模拟 MCP server 的内容"));
+        drop(k);
+
+        // 再次采集：更新同一文档，不产生副本
+        let report2 = pull::pull_resources(&f.cfg, &f.kernel).unwrap();
+        assert_eq!(report2.imported[0].1, *rel);
+        let k = f.kernel.lock().unwrap();
+        assert_eq!(k.items_count().unwrap(), 1);
+        let docs = kernel_core::list_docs(&k.vault).unwrap();
+        assert_eq!(docs.len(), 1, "重复采集不应产生第二篇文档");
     }
 }

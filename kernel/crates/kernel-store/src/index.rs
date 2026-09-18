@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS doc_assets(
     hash TEXT NOT NULL,
     PRIMARY KEY(doc, hash)
 );
+CREATE TABLE IF NOT EXISTS items(
+    connection TEXT NOT NULL,
+    uri TEXT NOT NULL,
+    rel TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY(connection, uri)
+);
 "#;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +156,57 @@ impl Index {
             .conn
             .prepare("SELECT doc FROM doc_assets WHERE hash = ?1 ORDER BY doc")?;
         let rows = stmt.query_map([hash], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    // ---------- 采集登记表（外部数据源 → 文档 的去重映射） ----------
+
+    /// 记录/更新一次采集（同一 connection+uri 始终映射到同一文档，重复采集即更新）。
+    pub fn upsert_item(
+        &self,
+        connection: &str,
+        uri: &str,
+        rel: &str,
+        fetched_at: i64,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO items(connection, uri, rel, fetched_at) VALUES (?1,?2,?3,?4)",
+            rusqlite::params![connection, uri, rel, fetched_at],
+        )?;
+        Ok(())
+    }
+
+    /// 该来源是否已采集过，返回已有文档路径。
+    pub fn item_rel(&self, connection: &str, uri: &str) -> Result<Option<String>, StoreError> {
+        let r = self
+            .conn
+            .query_row(
+                "SELECT rel FROM items WHERE connection = ?1 AND uri = ?2",
+                rusqlite::params![connection, uri],
+                |r| r.get::<_, String>(0),
+            )
+            .ok();
+        Ok(r)
+    }
+
+    pub fn items_count(&self) -> Result<usize, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM items", [], |r| r.get::<_, i64>(0))?
+            as usize)
+    }
+
+    pub fn list_items(&self) -> Result<Vec<(String, String, String)>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT connection, uri, rel FROM items ORDER BY connection, uri")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);

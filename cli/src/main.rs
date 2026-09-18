@@ -58,6 +58,32 @@ enum Cmd {
     },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
+    /// 外部数据源连接管理（MCP 入口侧）
+    Conn {
+        #[command(subcommand)]
+        cmd: ConnCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConnCmd {
+    /// 列出库中配置的连接
+    List { path: PathBuf },
+    /// 探测连接：握手 + 列出 tools/resources
+    Probe { path: PathBuf, name: String },
+    /// 采集该连接的全部 resources 入库
+    Pull { path: PathBuf, name: String },
+    /// 调用连接的某个 tool
+    Call {
+        path: PathBuf,
+        name: String,
+        tool: String,
+        #[arg(long, default_value = "{}")]
+        args: String,
+        /// 把返回文本也导入为一篇文档
+        #[arg(long)]
+        import: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -162,8 +188,85 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Cmd::Conn { cmd } => match cmd {
+            ConnCmd::List { path } => {
+                let vault = Vault::open(&path)?;
+                if vault.config.connections.is_empty() {
+                    println!("(no connections configured in thirdc.toml)");
+                }
+                for c in &vault.config.connections {
+                    println!("{:12}  {} {}", c.name, c.command, c.args.join(" "));
+                }
+            }
+            ConnCmd::Probe { path, name } => {
+                let vault = Vault::open(&path)?;
+                let cfg = find_conn(&vault, &name)?;
+                let (server, tools, resources) = thirdc_mcp::pull::probe(&cfg)?;
+                println!("server: {server}");
+                println!("tools ({}): {}", tools.len(), tools.join(", "));
+                println!("resources ({}):", resources.len());
+                for r in resources {
+                    println!("  {r}");
+                }
+            }
+            ConnCmd::Pull { path, name } => {
+                let vault = Vault::open(&path)?;
+                let cfg = find_conn(&vault, &name)?;
+                let kernel = std::sync::Arc::new(std::sync::Mutex::new(
+                    kernel_core::Kernel::open(vault).context("open kernel")?,
+                ));
+                let report = thirdc_mcp::pull::pull_resources(&cfg, &kernel)?;
+                println!(
+                    "server {} · tools {} · imported {} · skipped {}",
+                    report.server,
+                    report.tools.len(),
+                    report.imported.len(),
+                    report.skipped.len()
+                );
+                for (uri, rel) in &report.imported {
+                    println!("  {uri}  ->  {rel}");
+                }
+                for s in &report.skipped {
+                    println!("  skipped: {s}");
+                }
+            }
+            ConnCmd::Call {
+                path,
+                name,
+                tool,
+                args,
+                import,
+            } => {
+                let vault = Vault::open(&path)?;
+                let cfg = find_conn(&vault, &name)?;
+                let parsed: serde_json::Value = serde_json::from_str(&args)?;
+                let result = thirdc_mcp::pull::call(&cfg, &tool, parsed)?;
+                let text = thirdc_mcp::client::extract_text(&result)
+                    .unwrap_or_else(|| result.to_string());
+                println!("{text}");
+                if import {
+                    let kernel = std::sync::Arc::new(std::sync::Mutex::new(
+                        kernel_core::Kernel::open(vault).context("open kernel")?,
+                    ));
+                    let uri = format!("tool://{name}/{tool}");
+                    let mut k = kernel.lock().unwrap();
+                    let rel = k.import_capture(&name, &uri, Some(&tool), &text, "text/markdown")?;
+                    println!("imported: {rel}");
+                }
+            }
+        },
     }
     Ok(())
+}
+
+fn find_conn(vault: &Vault, name: &str) -> Result<kernel_core::ConnectionConfig> {
+    vault
+        .config
+        .connections
+        .iter()
+        .find(|c| c.name == name)
+        .cloned()
+        .with_context(|| format!("connection '{name}' not found in thirdc.toml"))
 }
 
 fn now_hms() -> String {
