@@ -172,17 +172,25 @@ impl Kernel {
         };
 
         let mut body = String::new();
-        if let Some(t) = title {
-            if !content.trim_start().starts_with("# ") {
-                body.push_str(&format!("# {t}\n\n"));
+        // H1 必须在最前（标题提升依赖首行），来源行紧随其后
+        let (heading, rest) = match content.lines().next() {
+            Some(first) if first.starts_with("# ") => {
+                let h = first[2..].trim().to_string();
+                let rest = content[first.len()..].trim_start_matches('\n').to_string();
+                (Some(h), rest)
             }
+            Some(_) => (title.map(|t| t.to_string()), content.to_string()),
+            None => (title.map(|t| t.to_string()), String::new()),
+        };
+        if let Some(h) = heading {
+            body.push_str(&format!("# {h}\n\n"));
         }
         let source_line = format!(
             "> 来源：[{uri}]({uri})　连接：{connection}　类型：{mime}　采集：{}\n\n",
             now_secs()
         );
         body.push_str(&source_line);
-        body.push_str(content);
+        body.push_str(&rest);
         if !body.ends_with('\n') {
             body.push('\n');
         }

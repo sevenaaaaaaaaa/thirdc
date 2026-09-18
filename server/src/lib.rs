@@ -47,16 +47,46 @@ fn check_token(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode,
     }
 }
 
-/// 构建带认证的 API 路由。
+/// 构建带认证的 API 路由。`/` 为客户端页面（本身不需要令牌，页面内用令牌调 API）。
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/", get(app))
         .route("/health", get(health))
         .route("/status", get(status))
+        .route("/docs", get(list_docs_api))
         .route("/search", get(search))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
         .route("/sync", post(sync))
         .with_state(state)
+}
+
+/// 内嵌的 Web 客户端（单文件，无构建步骤）。
+async fn app() -> impl IntoResponse {
+    axum::response::Html(include_str!("../web/index.html"))
+}
+
+async fn list_docs_api(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let mut k = st.kernel.lock().unwrap();
+    if let Err(e) = k.sync_all() {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let docs = match kernel_core::list_docs(&k.vault) {
+        Ok(d) => d,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let arr: Vec<Value> = docs
+        .iter()
+        .filter_map(|p| p.to_str())
+        .map(|p| {
+            let title = k.get_doc(p).ok().and_then(|m| m.title).unwrap_or_default();
+            json!({ "path": p, "title": title })
+        })
+        .collect();
+    Json(json!({ "docs": arr })).into_response()
 }
 
 async fn health(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
