@@ -6,6 +6,7 @@ members = [
     "kernel/crates/kernel-store",
     "kernel/crates/kernel-sync",
     "server",
+    "mcp",
     "cli",
 ]
 
@@ -32,6 +33,7 @@ tempfile = "3"
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tower = { version = "0.5", features = ["util"] }
+base64 = "0.22"
 
 [profile.release]
 lto = "thin"

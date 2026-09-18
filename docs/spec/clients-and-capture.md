@@ -82,4 +82,4 @@ MV3，Chrome / Edge / Firefox / Safari：
 | M6 | Tauri 桌面客户端 | 待办 |
 | M7 | Web（PWA + WASM 内核） | 待办 |
 | M8 | browser 模块（CDP + ego-lite）、computer-use 能力分级 | 待办 |
-| M9 | MCP server（出口）与 MCP client（入口，把 MCP server 变数据源） | 待办 |
+| M9 | MCP server（出口，`thirdc mcp`）与 MCP client（入口，把 MCP server 变数据源） | 出口已落地 |

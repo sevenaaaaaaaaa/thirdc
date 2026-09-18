@@ -412,6 +412,76 @@ fn parse_table_row(line: &str) -> Vec<String> {
     t.split('|').map(|c| c.trim().to_string()).collect()
 }
 
+/// HTML 转义（文本节点）。
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// 渲染为自包含 AI-HTML：语义化标签 + 内嵌 JSON-LD 块模型（人与 agent 双可读）。
+/// Raw 块按原样内联（其存在意义就是保真外来结构）；应用内渲染时须置于沙箱。
+pub fn to_html(doc: &DocModel) -> String {
+    let title = doc.title.clone().unwrap_or_else(|| "Untitled".to_string());
+    // JSON 内嵌 HTML：转义 < > &，防止 </script> 提前闭合造成注入
+    let ld = serde_json::to_string(doc)
+        .unwrap_or_else(|_| "{}".into())
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026");
+    let mut body = String::new();
+    for b in &doc.blocks {
+        match b {
+            Block::Paragraph { text, .. } => body.push_str(&format!("<p>{}</p>\n", esc(text))),
+            Block::Heading { level, text, .. } => {
+                let l = (*level).clamp(1, 6);
+                body.push_str(&format!("<h{l}>{}</h{l}>\n", esc(text)))
+            }
+            Block::Code { lang, text, .. } => {
+                let cls = lang
+                    .as_deref()
+                    .map(|l| format!(" class=\"language-{}\"", esc(l)))
+                    .unwrap_or_default();
+                body.push_str(&format!("<pre><code{cls}>{}</code></pre>\n", esc(text)))
+            }
+            Block::Quote { lines, .. } => {
+                let inner: String = lines.iter().map(|l| format!("<p>{}</p>", esc(l))).collect();
+                body.push_str(&format!("<blockquote>{inner}</blockquote>\n"))
+            }
+            Block::List { ordered, items, .. } => {
+                let (open, close) = if *ordered { ("ol", "ol") } else { ("ul", "ul") };
+                let inner: String = items.iter().map(|i| format!("<li>{}</li>", esc(i))).collect();
+                body.push_str(&format!("<{open}>{inner}</{close}>\n"))
+            }
+            Block::Table { header, rows, .. } => {
+                let th: String = header.iter().map(|h| format!("<th>{}</th>", esc(h))).collect();
+                let trs: String = rows
+                    .iter()
+                    .map(|r| {
+                        let tds: String = r.iter().map(|c| format!("<td>{}</td>", esc(c))).collect();
+                        format!("<tr>{tds}</tr>")
+                    })
+                    .collect();
+                body.push_str(&format!(
+                    "<table><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>\n"
+                ))
+            }
+            Block::Divider { .. } => body.push_str("<hr>\n"),
+            Block::Raw { text, .. } => body.push_str(text),
+        }
+    }
+    format!(
+        "<!doctype html>\n<html lang=\"zh\"><head><meta charset=\"utf-8\">\n\
+<title>{title_esc}</title>\n\
+<script type=\"application/ld+json\">{ld}</script>\n\
+<style>body{{max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.7;font-family:system-ui,sans-serif}}pre{{overflow:auto;padding:.75rem;background:#f6f8fa}}table{{border-collapse:collapse}}th,td{{border:1px solid #ddd;padding:.3rem .6rem}}</style>\n\
+</head><body><article data-kb-format=\"ai-html\" data-block-count=\"{n}\">\n{body}</article></body></html>\n",
+        title_esc = esc(&title),
+        n = doc.blocks.len(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +542,21 @@ tc:block raw -->
     #[test]
     fn unterminated_fence_is_error() {
         assert!(from_markdown("```rust\nfn x()").is_err());
+    }
+
+    #[test]
+    fn html_render_escapes_and_embeds_model() {
+        let doc = from_markdown(
+            "# 标题\n\n<script>alert(1)</script>\n\n```rust\nfn main() {}\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n",
+        )
+        .unwrap();
+        let html = to_html(&doc);
+        assert!(html.contains("<article data-kb-format=\"ai-html\""));
+        assert!(html.contains("application/ld+json"));
+        assert!(html.contains("&lt;script&gt;"), "必须转义脚本");
+        assert!(!html.contains("<script>alert"), "不得注入原始脚本");
+        assert!(html.contains("<table>"));
+        assert!(html.contains("language-rust"));
+        assert!(html.contains("<title>标题</title>"));
     }
 }

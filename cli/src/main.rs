@@ -56,6 +56,8 @@ enum Cmd {
         #[arg(long, default_value = "127.0.0.1:7700")]
         addr: String,
     },
+    /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
+    Mcp { path: PathBuf },
 }
 
 fn main() -> Result<()> {
@@ -141,6 +143,24 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async move { thirdc_server::serve(&addr, state).await })
                 .context("serve")?;
+        }
+        Cmd::Mcp { path } => {
+            use std::io::{BufRead, Write};
+            let vault = Vault::open(&path)?;
+            let server = thirdc_mcp::McpServer::open(vault).context("open mcp server")?;
+            let stdin = std::io::stdin();
+            let stdout = std::io::stdout();
+            for line in stdin.lock().lines() {
+                let line = line?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if let Some(resp) = server.handle(&line) {
+                    let mut out = stdout.lock();
+                    writeln!(out, "{resp}")?;
+                    out.flush()?;
+                }
+            }
         }
     }
     Ok(())

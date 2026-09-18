@@ -2,7 +2,7 @@
 
 pub mod watch;
 
-pub use kernel_md::{Block, DocModel, from_markdown, to_markdown};
+pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
 pub use kernel_store::{Cas, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
 pub use kernel_sync::{OpLog, SyncError};
 
@@ -161,6 +161,16 @@ fn now_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// 文档路径安全校验：仅允许 Notes/ 下的相对路径（防目录穿越）。
+/// server 与 mcp 共用同一规则，保证入口一致。
+pub fn is_safe_doc_path(p: &str) -> bool {
+    !p.is_empty()
+        && p.starts_with("Notes/")
+        && !p.contains("..")
+        && !p.starts_with('/')
+        && !p.contains('\\')
 }
 
 #[cfg(test)]
