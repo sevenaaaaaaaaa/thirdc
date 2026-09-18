@@ -11,8 +11,11 @@ pub use kernel_design::{
     import_path, parse_css, parse_design_md,
 };
 pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
-pub use kernel_store::{AiConfig, Cas, ConnectionConfig, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
-pub use kernel_sync::{OpLog, SyncError};
+pub use kernel_store::{
+    AiConfig, BrowserConfig, Cas, ConnectionConfig, StoreError, Vault, VaultConfig, events_dir,
+    list_docs, new_doc_id, refs,
+};
+pub use kernel_sync::{OpLog, SyncError, is_html_rel};
 
 use kernel_store::index::Index;
 use std::fs;
@@ -206,8 +209,11 @@ impl Kernel {
         }
         fs::write(&abs, md)?;
         self.log.import_file(&self.vault, rel, md)?;
-        // 物化：把确定性序列化写回，保证文件即规范形态
-        self.log.materialize_to_file(&self.vault, rel)?;
+        // 物化：把确定性序列化写回，保证文件即规范形态。
+        // HTML 一等文档保留作者原文（不被规范化改写），Markdown 走规范化。
+        if !is_html_rel(rel) {
+            self.log.materialize_to_file(&self.vault, rel)?;
+        }
         // 索引
         let text = fs::read_to_string(&abs).unwrap_or_default();
         let hash = kernel_store::Cas::hash_hex(text.as_bytes());

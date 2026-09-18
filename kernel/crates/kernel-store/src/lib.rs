@@ -201,6 +201,11 @@ impl Vault {
     pub fn ops_dir(&self) -> PathBuf {
         self.sidecar().join("ops")
     }
+    /// 事件/审计目录（append-only 日志）。
+    pub fn events_dir(&self) -> PathBuf {
+        self.sidecar().join("events")
+    }
+
     pub fn blobs_dir(&self) -> PathBuf {
         self.sidecar().join("blobs")
     }
@@ -294,6 +299,11 @@ impl Cas {
     }
 }
 
+/// 事件目录（server 侧使用）。
+pub fn events_dir(vault: &Vault) -> PathBuf {
+    vault.events_dir()
+}
+
 /// 生成文档 ID（ULID，时间有序）。
 pub fn new_doc_id() -> String {
     ulid::Ulid::new().to_string()
@@ -307,7 +317,10 @@ pub fn list_docs(vault: &Vault) -> Result<Vec<PathBuf>, StoreError> {
         .filter_map(|e| e.ok())
     {
         let p = entry.path();
-        if p.is_file() && p.extension().map_or(false, |e| e == "md") {
+        if p.is_file()
+            && p.extension()
+                .map_or(false, |e| e == "md" || e == "html" || e == "htm")
+        {
             out.push(p.strip_prefix(&vault.root).unwrap().to_path_buf());
         }
     }

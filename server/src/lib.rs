@@ -70,6 +70,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/design/scope", post(design_scope))
         .route("/design/import-url", post(design_import_url))
         .route("/design/{name}", get(design_get))
+        .route("/a2ui/render", post(a2ui_render))
+        .route("/a2ui/action", post(a2ui_action))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/publish", get(publish_list).post(publish))
@@ -274,6 +276,56 @@ async fn asset_file(
     }
 }
 
+/// A2UI（Agent-to-User Interface）渲染：JSONL 流 → 自包含 HTML。
+/// 这是 Google A2UI 协议的**原生渲染入口**：agent 推 surfaceUpdate/dataModelUpdate/beginRendering，
+/// 客户端按目录渲染；我们同时提供 HTML 产物，便于发布与沙箱预览。
+async fn a2ui_render(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let title = req.get("title").and_then(|t| t.as_str()).unwrap_or("A2UI");
+    // 三种输入：jsonl 字符串 / messages 数组 / 单条消息对象
+    let jsonl = if let Some(s) = req.get("jsonl").and_then(|v| v.as_str()) {
+        s.to_string()
+    } else if let Some(arr) = req.get("messages").and_then(|v| v.as_array()) {
+        arr.iter().map(|m| m.to_string()).collect::<Vec<_>>().join("\n")
+    } else if req.get("surfaceUpdate").is_some() || req.get("beginRendering").is_some() {
+        req.to_string()
+    } else {
+        return err(StatusCode::BAD_REQUEST, "需要 jsonl / messages / 单条消息").into_response();
+    };
+    match kernel_a2ui::render_jsonl(&jsonl, title) {
+        Ok(html) => Json(json!({ "html": html, "bytes": html.len() })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// A2UI 用户交互回传（客户端 → agent）。当前记录并回显，接入 agent 会话后转发。
+async fn a2ui_action(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let v: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    let k = st.kernel.lock().unwrap();
+    let log = kernel_core::events_dir(&k.vault).join("a2ui-actions.jsonl");
+    if let Some(dir) = log.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = writeln!(f, "{}", v);
+    }
+    Json(json!({ "ok": true, "action": name, "note": "已记录；接入 agent 会话后转发给模型" })).into_response()
+}
+
 /// 对话：有 `[ai]` 配置走模型工具循环，否则命令模式。
 async fn chat(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) {
@@ -402,10 +454,14 @@ async fn get_doc(
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     let html = k.render_doc_html(&path).ok();
+    let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
+    let format = if kernel_core::is_html_rel(&path) { "html" } else { "markdown" };
     match k.get_doc(&path) {
         Ok(model) => Json(json!({
             "path": path,
             "title": model.title,
+            "format": format,
+            "source": source,
             "blocks": model.blocks,
             "markdown": kernel_core::to_markdown(&model),
             "html": html,

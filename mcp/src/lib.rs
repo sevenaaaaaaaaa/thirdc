@@ -204,11 +204,15 @@ impl McpServer {
             k.sync_all()?;
             let model = k.get_doc(&path)?;
             let md = to_markdown(&model);
+            let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
+            let format = if kernel_core::is_html_rel(&path) { "html" } else { "markdown" };
             Ok(tool_result(
                 md.clone(),
                 json!({
                     "path": path,
                     "title": model.title,
+                    "format": format,
+                    "source": source,
                     "markdown": md,
                     "html": to_html(&model),
                     "blocks": model.blocks,
@@ -223,19 +227,25 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .ok_or((-32602, "missing 'path'".to_string()))?
             .to_string();
-        let markdown = args
+        // 两种内容：markdown（默认）或 html（HTML 一等文档，路径需 .html/.htm）
+        let content = args
             .get("markdown")
+            .or_else(|| args.get("html"))
             .and_then(|v| v.as_str())
-            .ok_or((-32602, "missing 'markdown'".to_string()))?
+            .ok_or((-32602, "missing 'markdown' or 'html'".to_string()))?
             .to_string();
+        if args.get("html").is_some() && !kernel_core::is_html_rel(&path) {
+            return Err((-32602, "html 内容需要 Notes/xxx.html 路径".into()));
+        }
         if !is_safe_doc_path(&path) {
             return Err((-32602, "path must be under Notes/".into()));
         }
         self.with_kernel(|k| {
-            k.put_doc(&path, &markdown)?;
+            k.put_doc(&path, &content)?;
+            let format = if kernel_core::is_html_rel(&path) { "html" } else { "markdown" };
             Ok(tool_result(
-                format!("written: {path}"),
-                json!({ "path": path, "written": true }),
+                format!("written: {path} ({format})"),
+                json!({ "path": path, "format": format, "written": true }),
             ))
         })
     }
@@ -540,7 +550,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "read_doc",
-            "description": "读取一篇文档，返回 Markdown、AI-HTML 渲染与块模型。",
+            "description": "读取一篇文档。返回格式（markdown/html）、源文、Markdown、AI-HTML 渲染与块模型；HTML 一等文档同样可读。",
             "inputSchema": {
                 "type": "object",
                 "properties": { "path": { "type": "string", "description": "如 Notes/foo.md" } },
@@ -549,12 +559,13 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "write_doc",
-            "description": "创建或覆盖一篇文档（写文件 + op-log + 索引）。markdown 为完整文档内容。",
+            "description": "创建或覆盖一篇文档（写文件 + op-log + 索引）。内容用 markdown，或对 Notes/xxx.html 路径用 html（HTML 一等文档，会被解析成块模型并保留原文）。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "如 Notes/foo.md，必须在 Notes/ 下" },
-                    "markdown": { "type": "string" }
+                    "markdown": { "type": "string", "description": "Markdown 内容" },
+                    "html": { "type": "string", "description": "HTML 内容（路径需 .html/.htm）" }
                 },
                 "required": ["path", "markdown"]
             }

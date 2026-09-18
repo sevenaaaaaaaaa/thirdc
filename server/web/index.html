@@ -228,6 +228,9 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 .axis-line{position:absolute;background:var(--axis);width:1px}
 .node.compact{width:260px}
 .node.drop{box-shadow:0 0 0 3px var(--accent),var(--node-shadow)}
+.a2ui-host{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--bg-soft)}
+.a2ui-frame{width:100%;height:260px;border:none;display:block;background:var(--bg)}
+.a2ui-loading{padding:14px;color:var(--faint);font-size:12.5px;font-family:var(--font-mono)}
 #toast{position:fixed;right:16px;bottom:44px;z-index:120;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
@@ -310,6 +313,7 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
     <button data-cmd="状态">库状态</button>
     <button data-cmd="同步">同步</button>
     <button data-cmd="搜索 融合内核">试搜索</button>
+    <button id="a2ui-demo">A2UI 示例</button>
   </div>
   <div class="dockbar">
     <input id="say" placeholder="和知识库对话…「搜索 CRDT」「列出」">
@@ -506,6 +510,8 @@ function updateEdges(ids){
   });
   svg.setAttribute('width',20000);svg.setAttribute('height',20000);svg.innerHTML=d;
 }
+function kernel_core_format(p){return /\.html?$/i.test(p||'')?'HTML 一等文档':'Markdown'};
+
 function selectNode(id){
   selected=id;
   document.querySelectorAll('.node').forEach(el=>el.classList.toggle('on',el.dataset.id===id));
@@ -515,7 +521,8 @@ function selectNode(id){
   $('ins-title').textContent=n.title||n.path.split('/').pop();
   $('ins-path').textContent=n.path||'';
   const kinds={doc:'文档',capture:'采集',asset:'附件',query:'检索结果'};
-  $('ins-meta').textContent=`类型 ${kinds[n.kind]||n.kind} · ${n.mime||'text/markdown'}`;
+  const fmt=kernel_core_format(n.path);
+  $('ins-meta').textContent=`类型 ${kinds[n.kind]||n.kind} · ${fmt}`;
 }
 function fit(){
   const placed=layout();
@@ -663,7 +670,10 @@ async function refreshAll(){await Promise.all([loadGraph(),loadRail(),loadStatus
 /* ───────── 抽屉 ───────── */
 async function openDoc(path){
   try{const d=await api('/doc?path='+encodeURIComponent(path));
-    current=path;dirty=false;$('d-path').textContent=path;$('editor').value=d.markdown;$('preview').srcdoc=d.html;
+    current=path;dirty=false;currentFormat=d.format||'markdown';
+    $('d-path').textContent=path+(currentFormat==='html'?'  ·  HTML':'');
+    $('editor').value=currentFormat==='html'?d.source:d.markdown;
+    $('preview').srcdoc=d.html;
     $('drawer').classList.add('open');selectNode('doc:'+path);loadRail();
   }catch(e){toast('打开失败：'+e.message,'err');}
 }
@@ -751,7 +761,13 @@ async function chat(message){
           chipFor(d.tool+(d.ok?' ✓':' ✕'),d.ok?'':'err');
         }else if(ev==='reply'){
           $('dock').classList.remove('thinking');$('aura').classList.remove('on');
-          body.innerHTML='';typeInto(ai,d.reply);
+          const a2ui=extractA2ui(d.reply);
+          if(a2ui){
+            body.textContent=d.reply.replace(/```a2ui[\s\S]*?```/,'').trim();
+            renderA2ui(ai,a2ui);
+          }else{
+            body.innerHTML='';typeInto(ai,d.reply);
+          }
         }else if(ev==='error'){
           chipFor('error','err');body.textContent='出错了：'+d.message;
         }
@@ -765,7 +781,53 @@ async function chat(message){
 }
 $('send').onclick=()=>chat();
 $('say').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chat();}});
-document.querySelectorAll('.quick button').forEach(b=>b.onclick=()=>chat(b.dataset.cmd));
+document.querySelectorAll('.quick button').forEach(b=>{if(b.dataset.cmd)b.onclick=()=>chat(b.dataset.cmd)});
+$('a2ui-demo').onclick=()=>{
+  const el=document.createElement('div');el.className='msg ai';
+  el.innerHTML='<div class="who">A2UI · 本地示例</div>';
+  $('thread').appendChild(el);$('thread').scrollTop=1e9;
+  renderA2ui(el,A2UI_DEMO,'A2UI 示例');
+};
+
+/* ───────── A2UI（Agent-to-User Interface）原生渲染 ───────── */
+function extractA2ui(text){
+  const m=/```a2ui\s*([\s\S]*?)```/.exec(text||'');
+  return m?m[1].trim():null;
+}
+const A2UI_BRIDGE=`<script>document.addEventListener('click',function(e){var b=e.target.closest('[data-action]');if(!b)return;
+parent.postMessage({type:'a2ui-action',name:b.dataset.action,sourceComponentId:b.dataset.component,context:{}},'*');});<\/script>`;
+async function renderA2ui(msgEl,jsonl,title){
+  const host=document.createElement('div');host.className='a2ui-host';
+  host.innerHTML='<div class="a2ui-loading">正在渲染 A2UI surface…</div>';
+  msgEl.appendChild(host);
+  try{
+    const r=await api('/a2ui/render',{method:'POST',json:{jsonl,title:title||'A2UI'}});
+    const frame=document.createElement('iframe');
+    frame.className='a2ui-frame';frame.setAttribute('sandbox','allow-scripts');
+    frame.srcdoc=r.html.replace('</body>',A2UI_BRIDGE+'</body>');
+    host.innerHTML='';host.appendChild(frame);
+  }catch(e){host.innerHTML='<div class="a2ui-loading">A2UI 渲染失败：'+e.message+'</div>';}
+}
+window.addEventListener('message',async e=>{
+  const d=e.data||{};
+  if(d.type!=='a2ui-action')return;
+  try{
+    const r=await api('/a2ui/action',{method:'POST',json:d});
+    toast(`A2UI 动作「${d.name||'?'}」已回传（${r.note?'已记录':'ok'}）`,'ok');
+  }catch(err){toast('A2UI 动作回传失败：'+err.message,'err');}
+});
+const A2UI_DEMO=[
+ {"surfaceUpdate":{"components":[{"id":"root","component":{"Column":{"children":{"explicitList":["card"]}}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"card","component":{"Card":{"child":"col"}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"col","component":{"Column":{"children":{"explicitList":["title","body_t","row"]}}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"title","component":{"Text":{"usageHint":"h3","text":{"literalString":"A2UI 原生表面"}}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"body_t","component":{"Text":{"text":{"path":"/note"}}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"row","component":{"Row":{"children":{"explicitList":["btn","btn_label"]}}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"btn","component":{"Button":{"child":"btn_label","action":{"name":"approve"}}}}]}},
+ {"surfaceUpdate":{"components":[{"id":"btn_label","component":{"Text":{"text":{"literalString":"采纳这个方案"}}}}]}},
+ {"dataModelUpdate":{"path":"","contents":[{"key":"note","valueString":"这是 agent 流式推来的声明式 UI，客户端用自己的组件渲染，不执行任意代码。"}]}},
+ {"beginRendering":{"root":"root"}}
+].map(x=>JSON.stringify(x)).join('\n');
 
 /* ───────── 发布 ───────── */
 async function doPublish(path){
@@ -938,6 +1000,7 @@ const CMDS=[
   ['切换到看板','2',()=>{closeAll();document.querySelector('[data-view=kanban]').click();}],
   ['切换到画布','3',()=>{closeAll();document.querySelector('[data-view=canvas]').click();}],
   ['管理画布','b',async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();}],
+  ['A2UI 示例','a',()=>{closeAll();$('a2ui-demo').click();}],
 ];
 function renderPalette(q){
   const box=$('palette-list');box.innerHTML='';

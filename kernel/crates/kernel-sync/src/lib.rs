@@ -16,7 +16,7 @@
 use automerge::Value;
 use automerge::sync::{Message as SyncMessage, State as SyncState, SyncDoc};
 use automerge::{ActorId, ChangeHash, ReadDoc, transaction::Transactable};
-use kernel_md::{Block, DocModel, from_markdown, to_markdown};
+use kernel_md::{Block, DocModel, from_html, from_markdown, to_html, to_markdown};
 use kernel_store::{StoreError, Vault};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -45,6 +45,12 @@ pub enum SyncError {
     Notify(String),
     #[error("doc not loaded: {0}")]
     NotLoaded(String),
+}
+
+/// 是否为 HTML 一等文档（.html / .htm / .ai.html）。
+pub fn is_html_rel(rel: &str) -> bool {
+    let l = rel.to_ascii_lowercase();
+    l.ends_with(".html") || l.ends_with(".htm")
 }
 
 fn ae<E: std::fmt::Display>(e: E) -> SyncError {
@@ -99,8 +105,13 @@ impl OpLog {
     }
 
     /// 文件 → ops：块级 diff，只增删变化块（未编辑块跨端保持身份与顺序键）。
-    pub fn import_file(&mut self, vault: &Vault, rel: &str, md_text: &str) -> Result<(), SyncError> {
-        let model: DocModel = from_markdown(md_text).map_err(|e| SyncError::Md(e.to_string()))?;
+    /// 按扩展名分流：`.html/.htm` 走语义 HTML 解析，其余走 Markdown。
+    pub fn import_file(&mut self, vault: &Vault, rel: &str, source_text: &str) -> Result<(), SyncError> {
+        let model: DocModel = if is_html_rel(rel) {
+            from_html(source_text).map_err(|e| SyncError::Md(e.to_string()))?
+        } else {
+            from_markdown(source_text).map_err(|e| SyncError::Md(e.to_string()))?
+        };
         self.ensure_loaded(vault, rel)?;
         let doc = &self.docs[rel].doc;
 
@@ -173,11 +184,16 @@ impl OpLog {
         self.persist(vault, rel)
     }
 
-    /// ops → 文件：物化当前块模型为确定性 MD 并回写。
+    /// ops → 文件：物化回写。`.html` 文档写成规范化 AI-HTML（语义 + 内嵌 JSON-LD），
+    /// 其余写成确定性 Markdown。
     pub fn materialize_to_file(&mut self, vault: &Vault, rel: &str) -> Result<bool, SyncError> {
         self.ensure_loaded(vault, rel)?;
         let model = materialize(&self.docs[rel].doc);
-        let md = to_markdown(&model);
+        let md = if is_html_rel(rel) {
+            to_html(&model)
+        } else {
+            to_markdown(&model)
+        };
         let abs = vault.root.join(rel);
         let existing = fs::read_to_string(&abs).unwrap_or_default();
         if existing == md {
@@ -186,7 +202,7 @@ impl OpLog {
         if let Some(parent) = abs.parent() {
             fs::create_dir_all(parent)?;
         }
-        let tmp = abs.with_extension("md.tc-tmp");
+        let tmp = abs.with_extension("tc-tmp");
         fs::write(&tmp, &md)?;
         fs::rename(&tmp, &abs)?;
         Ok(true)

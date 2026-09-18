@@ -896,6 +896,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel-a2ui"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "kernel-browser"
 version = "0.1.0"
 dependencies = [
@@ -1709,6 +1718,7 @@ dependencies = [
  "anyhow",
  "axum",
  "futures-util",
+ "kernel-a2ui",
  "kernel-core",
  "notify",
  "serde_json",

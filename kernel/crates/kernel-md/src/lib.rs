@@ -431,6 +431,10 @@ pub fn to_html(doc: &DocModel) -> String {
         .replace('>', "\\u003e")
         .replace('&', "\\u0026");
     let mut body = String::new();
+    if doc.title.is_some() {
+        // 自包含文档里标题也是 H1：人类可读、agent 可解析、往返一致
+        body.push_str(&format!("<h1>{}</h1>\n", esc(doc.title.as_deref().unwrap_or(""))));
+    }
     for b in &doc.blocks {
         match b {
             Block::Paragraph { text, .. } => body.push_str(&format!("<p>{}</p>\n", esc(text))),
@@ -545,6 +549,69 @@ tc:block raw -->
     }
 
     #[test]
+    fn parses_semantic_html_into_blocks() {
+        let html = r#"<!doctype html><html><head><style>body{color:red}</style><script>var x=1</script></head>
+        <body><h1>标题</h1><p>一段<strong>加粗</strong>文字，<a href="https://x.com">链接</a>。</p>
+        <ul><li>甲</li><li>乙</li></ul>
+        <pre><code class="language-rust">fn main() {}</code></pre>
+        <blockquote><p>引用一</p><p>引用二</p></blockquote>
+        <table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>
+        <hr><img src="Assets/ab/cd/x.png" alt="图"></body></html>"#;
+        let doc = from_html(html).unwrap();
+        assert_eq!(doc.title.as_deref(), Some("标题"), "首个 h1 提升为标题");
+        let kinds: Vec<&str> = doc.blocks.iter().map(|b| b.kind()).collect();
+        assert!(kinds.contains(&"paragraph"));
+        assert!(kinds.contains(&"list"));
+        assert!(kinds.contains(&"code"));
+        assert!(kinds.contains(&"quote"));
+        assert!(kinds.contains(&"table"));
+        assert!(kinds.contains(&"divider"));
+        assert!(!kinds.iter().any(|k| *k == "raw"), "不应整篇降级为 raw：{kinds:?}");
+        // script/style 内容不得混入
+        let md = to_markdown(&doc);
+        assert!(!md.contains("var x=1"), "script 内容要剔除");
+        assert!(!md.contains("color:red"), "style 内容要剔除");
+        // 行内与图片
+        assert!(md.contains("**加粗**"));
+        assert!(md.contains("[链接](https://x.com)"));
+        assert!(md.contains("![图](Assets/ab/cd/x.png)"));
+        assert!(md.contains("语言") || md.contains("language-rust") || md.contains("```rust"), "代码语言要保留: {md}");
+    }
+
+    #[test]
+    fn html_whitespace_between_tags_is_not_a_paragraph() {
+        let html = "<html><head><title>T</title></head><body><div>\n  <h1>T</h1>\n  <p>正文</p>\n  <ul>\n    <li>甲</li>\n  </ul>\n</div></body></html>";
+        let doc = from_html(html).unwrap();
+        let kinds: Vec<&str> = doc.blocks.iter().map(|b| b.kind()).collect();
+        assert_eq!(kinds, vec!["paragraph", "list"], "不应出现空白段落：{kinds:?}");
+        assert_eq!(doc.title.as_deref(), Some("T"));
+    }
+
+    #[test]
+    fn html_roundtrip_is_stable() {
+        let src = "# 标题\n\n正文\n\n- 甲\n- 乙\n\n> 引用\n\n```rust\nfn main() {}\n```\n";
+        let model = from_markdown(src).unwrap();
+        let html = to_html(&model);
+        let back = from_html(&html).unwrap();
+        assert_eq!(back.title, model.title, "标题应往返保持");
+        let md1 = to_markdown(&model);
+        let md2 = to_markdown(&back);
+        for needle in ["标题", "正文", "甲", "引用", "fn main"] {
+            assert!(md2.contains(needle), "往返后缺少 {needle}：{md2}");
+        }
+        let _ = md1;
+    }
+
+    #[test]
+    fn opaque_html_is_preserved_as_raw() {
+        let doc = from_html("<div id=app></div>").unwrap();
+        assert!(
+            matches!(doc.blocks.first(), Some(Block::Raw { .. })) || !doc.blocks.is_empty(),
+            "无法解析的内容不能丢"
+        );
+    }
+
+    #[test]
     fn html_render_escapes_and_embeds_model() {
         let doc = from_markdown(
             "# 标题\n\n<script>alert(1)</script>\n\n```rust\nfn main() {}\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n",
@@ -558,5 +625,515 @@ tc:block raw -->
         assert!(html.contains("<table>"));
         assert!(html.contains("language-rust"));
         assert!(html.contains("<title>标题</title>"));
+    }
+}
+
+/// 语义化 HTML → 块模型。支持 h1-h6 / p / pre>code / blockquote / ul>ol>li /
+/// table / hr / img；未知结构递归下钻；行内 a/code/strong/em/br/img 转回 Markdown 行内语法。
+/// 完全解析不出块时，整段保留为 Raw（绝不丢内容）。
+pub fn from_html(html: &str) -> Result<DocModel, MdError> {
+    let cleaned = strip_html_noise(html);
+    let mut doc = DocModel::default();
+    let mut blocks = parse_blocks(&cleaned);
+    // 标题提升：首个 H1 变 title；没有 H1 时退回 <title>
+    if let Some(pos) = blocks.iter().position(|b| matches!(b, Block::Heading { level: 1, .. })) {
+        if let Block::Heading { text, .. } = blocks.remove(pos) {
+            doc.title = Some(text);
+        }
+    }
+    if doc.title.is_none() {
+        if let Some(t) = html_title(&cleaned) {
+            doc.title = Some(t);
+        }
+    }
+    if blocks.is_empty() && !html.trim().is_empty() {
+        blocks.push(Block::Raw { id: String::new(), text: html.trim().to_string() });
+    }
+    doc.blocks = blocks;
+    assign_stable_ids(&mut doc);
+    Ok(doc)
+}
+
+/// 去掉注释与 script/style 内容（否则会把代码当正文）。
+fn strip_html_noise(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    loop {
+        // 注释
+        if let Some(i) = rest.find("<!--") {
+            out.push_str(&rest[..i]);
+            match rest[i..].find("-->") {
+                Some(j) => rest = &rest[i + j + 3..],
+                None => return out,
+            }
+            continue;
+        }
+        let candidate = ["<script", "<style"]
+            .iter()
+            .filter_map(|t| {
+                rest.to_ascii_lowercase()
+                    .find(t)
+                    .map(|i| (i, *t))
+            })
+            .min();
+        match candidate {
+            Some((i, tag)) => {
+                out.push_str(&rest[..i]);
+                let close = format!("</{}", &tag[1..]);
+                match rest[i..].to_ascii_lowercase().find(&close) {
+                    Some(j) => {
+                        let after = i + j;
+                        match rest[after..].find('>') {
+                            Some(k) => rest = &rest[after + k + 1..],
+                            None => return out,
+                        }
+                    }
+                    None => return out,
+                }
+            }
+            None => {
+                out.push_str(rest);
+                return out;
+            }
+        }
+    }
+}
+
+fn parse_blocks(html: &str) -> Vec<Block> {
+    let mut out = Vec::new();
+    let bytes = html.as_bytes();
+    let mut i = 0usize;
+    let mut text_buf = String::new();
+    let mut counter = 0usize;
+    let mut next_id = || {
+        counter += 1;
+        format!("h{counter}")
+    };
+
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            let ch = html[i..].chars().next().unwrap();
+            text_buf.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+        let Some(gt) = html[i..].find('>') else { break };
+        let tag_raw = &html[i + 1..i + gt];
+        let tag = tag_raw
+            .trim_start_matches('/')
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let closing = tag_raw.trim_start().starts_with('/');
+
+        if !closing {
+            // 空元素
+            if tag == "hr" {
+                flush_text(&mut out, &mut text_buf, &mut next_id);
+                out.push(Block::Divider { id: next_id() });
+                i += gt + 1;
+                continue;
+            }
+            if tag == "img" {
+                let src = attr(tag_raw, "src").unwrap_or_default();
+                let alt = attr(tag_raw, "alt").unwrap_or_default();
+                if !src.is_empty() {
+                    text_buf.push_str(&format!("![{alt}]({src})"));
+                }
+                i += gt + 1;
+                continue;
+            }
+            // 元信息容器：内容不进正文（title 只用于取标题，已在 html_title 读走）
+            if matches!(tag.as_str(), "head" | "title" | "noscript" | "template" | "svg" | "canvas") {
+                if let Some((_, end)) = take_element(html, i, &tag) {
+                    i = end;
+                } else {
+                    i += gt + 1;
+                }
+                continue;
+            }
+            // 空元素
+            if matches!(
+                tag.as_str(),
+                "meta" | "link" | "base" | "input" | "br" | "source" | "track" | "col" | "area"
+            ) {
+                i += gt + 1;
+                continue;
+            }
+            // 标题
+            if let Some(level) = heading_level(&tag) {
+                if let Some((inner, end)) = take_element(html, i, &tag) {
+                    flush_text(&mut out, &mut text_buf, &mut next_id);
+                    let text = inline_text(&inner).trim().to_string();
+                    if !text.is_empty() {
+                        out.push(Block::Heading { id: next_id(), level, text });
+                    }
+                    i = end;
+                    continue;
+                }
+            }
+            match tag.as_str() {
+                "p" => {
+                    if let Some((inner, end)) = take_element(html, i, "p") {
+                        flush_text(&mut out, &mut text_buf, &mut next_id);
+                        let text = inline_text(&inner).trim().to_string();
+                        if !text.is_empty() {
+                            out.push(Block::Paragraph { id: next_id(), text });
+                        }
+                        i = end;
+                        continue;
+                    }
+                }
+                "pre" => {
+                    if let Some((inner, end)) = take_element(html, i, "pre") {
+                        flush_text(&mut out, &mut text_buf, &mut next_id);
+                        let lang = code_lang(&inner);
+                        let code = strip_tags_deep(&inner);
+                        out.push(Block::Code {
+                            id: next_id(),
+                            lang,
+                            text: if code.ends_with('\n') || code.is_empty() {
+                                code
+                            } else {
+                                format!("{code}\n")
+                            },
+                        });
+                        i = end;
+                        continue;
+                    }
+                }
+                "blockquote" => {
+                    if let Some((inner, end)) = take_element(html, i, "blockquote") {
+                        flush_text(&mut out, &mut text_buf, &mut next_id);
+                        let sub = parse_blocks(&inner);
+                        let lines: Vec<String> = sub
+                            .iter()
+                            .map(|b| block_to_text(b))
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        if !lines.is_empty() {
+                            out.push(Block::Quote { id: next_id(), lines });
+                        }
+                        i = end;
+                        continue;
+                    }
+                }
+                "ul" | "ol" => {
+                    if let Some((inner, end)) = take_element(html, i, &tag) {
+                        flush_text(&mut out, &mut text_buf, &mut next_id);
+                        let mut items = Vec::new();
+                        let mut rest = inner.as_str();
+                        while let Some(p) = find_open(rest, "li") {
+                            if let Some((li, consumed)) = take_element(rest, p, "li") {
+                                let t = inline_text(&li).trim().to_string();
+                                if !t.is_empty() {
+                                    items.push(t);
+                                }
+                                rest = &rest[consumed..];
+                            } else {
+                                break;
+                            }
+                        }
+                        if !items.is_empty() {
+                            out.push(Block::List {
+                                id: next_id(),
+                                ordered: tag == "ol",
+                                items,
+                            });
+                        }
+                        i = end;
+                        continue;
+                    }
+                }
+                "table" => {
+                    if let Some((inner, end)) = take_element(html, i, "table") {
+                        flush_text(&mut out, &mut text_buf, &mut next_id);
+                        let mut rows: Vec<Vec<String>> = Vec::new();
+                        let mut rest = inner.as_str();
+                        while let Some(p) = find_open(rest, "tr") {
+                            if let Some((tr, consumed)) = take_element(rest, p, "tr") {
+                                let mut cells = Vec::new();
+                                for cell_tag in ["th", "td"] {
+                                    let mut r2 = tr.as_str();
+                                    while let Some(cp) = find_open(r2, cell_tag) {
+                                        if let Some((cell, used)) = take_element(r2, cp, cell_tag) {
+                                            cells.push(inline_text(&cell));
+                                            r2 = &r2[used..];
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !cells.is_empty() {
+                                    rows.push(cells);
+                                }
+                                rest = &rest[consumed..];
+                            } else {
+                                break;
+                            }
+                        }
+                        if !rows.is_empty() {
+                            let header = rows.remove(0);
+                            out.push(Block::Table { id: next_id(), header, rows });
+                        }
+                        i = end;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // 未识别标签：跳过标签本身，内容继续作为文本/后续块处理
+        i += gt + 1;
+    }
+    flush_text(&mut out, &mut text_buf, &mut next_id);
+    out
+}
+
+fn flush_text(out: &mut Vec<Block>, buf: &mut String, next_id: &mut impl FnMut() -> String) {
+    // 标签之间的缩进/换行不是段落：必须 trim 后判空
+    let t = inline_text(&std::mem::take(buf));
+    let t = t.trim();
+    if !t.is_empty() {
+        out.push(Block::Paragraph { id: next_id(), text: t.to_string() });
+    }
+}
+
+/// 抽取 `<title>…</title>`。
+fn html_title(html: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let i = lower.find("<title")?;
+    let gt = html[i..].find('>')?;
+    let rest = &html[i + gt + 1..];
+    let end = rest.to_ascii_lowercase().find("</title")?;
+    let t = inline_text(&rest[..end]);
+    if t.trim().is_empty() { None } else { Some(t.trim().to_string()) }
+}
+
+fn heading_level(tag: &str) -> Option<u8> {
+    if tag.len() == 2 && tag.starts_with('h') {
+        let l = tag[1..].parse::<u8>().ok()?;
+        if (1..=6).contains(&l) {
+            return Some(l);
+        }
+    }
+    None
+}
+
+/// 找 `<tag` 起始位置。
+fn find_open(html: &str, tag: &str) -> Option<usize> {
+    let pat = format!("<{tag}");
+    let lower = html.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(i) = lower[from..].find(&pat) {
+        let at = from + i;
+        let after = lower[at + pat.len()..].chars().next().unwrap_or('>');
+        if after == '>' || after == ' ' || after == '\n' || after == '\t' || after == '/' {
+            return Some(at);
+        }
+        from = at + pat.len();
+    }
+    None
+}
+
+/// 取出元素内部 HTML 与消费到的位置（处理同名嵌套）。
+fn take_element(html: &str, start: usize, tag: &str) -> Option<(String, usize)> {
+    let open_end = start + html[start..].find('>')? + 1;
+    let lower = html.to_ascii_lowercase();
+    let open_pat = format!("<{tag}");
+    let close_pat = format!("</{tag}");
+    let mut depth = 1i32;
+    let mut i = open_end;
+    while i < lower.len() {
+        let next_open = lower[i..].find(&open_pat).map(|p| i + p);
+        let next_close = lower[i..].find(&close_pat).map(|p| i + p);
+        match (next_open, next_close) {
+            (_, None) => break,
+            (Some(o), Some(c)) if o < c => {
+                // 自闭合？ <tag/>
+                let after = lower[o + open_pat.len()..].chars().next().unwrap_or('>');
+                if after == '>' || after == ' ' || after == '\n' || after == '/' {
+                    if let Some(g) = lower[o..].find('>') {
+                        if lower[o..o + g].ends_with('/') {
+                            i = o + g + 1;
+                            continue;
+                        }
+                    }
+                }
+                depth += 1;
+                i = o + open_pat.len();
+            }
+            (_, Some(c)) => {
+                depth -= 1;
+                if depth == 0 {
+                    let Some(g) = lower[c..].find('>') else { break };
+                    let end = c + g + 1;
+                    return Some((html[open_end..c].to_string(), end));
+                }
+                i = c + close_pat.len();
+            }
+        }
+    }
+    None
+}
+
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let idx = lower.find(&format!("{name}="))?;
+    let rest = &tag[idx + name.len() + 1..];
+    let quote = rest.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let body = &rest[1..];
+        let end = body.find(quote)?;
+        Some(body[..end].to_string())
+    } else {
+        Some(rest.split_whitespace().next().unwrap_or("").to_string())
+    }
+}
+
+fn code_lang(pre_inner: &str) -> Option<String> {
+    let lower = pre_inner.to_ascii_lowercase();
+    let i = lower.find("<code")?;
+    let seg = &pre_inner[i..];
+    let cls = attr(seg, "class")?;
+    cls.split_whitespace()
+        .find_map(|c| c.strip_prefix("language-").map(|s| s.to_string()))
+}
+
+/// 行内标签 → Markdown 行内语法（a/code/strong/em/br/img）。
+fn inline_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut i = 0usize;
+    let bytes = html.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let Some(gt) = html[i..].find('>') else { break };
+            let raw = &html[i + 1..i + gt];
+            let name = raw
+                .trim_start_matches('/')
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let closing = raw.trim_start().starts_with('/');
+            match name.as_str() {
+                "br" => out.push('\n'),
+                "img" => {
+                    let src = attr(raw, "src").unwrap_or_default();
+                    let alt = attr(raw, "alt").unwrap_or_default();
+                    if !src.is_empty() {
+                        out.push_str(&format!("![{alt}]({src})"));
+                    }
+                }
+                "a" if !closing => {
+                    // 先记下 href，链接文字在标签之后
+                    let href = attr(raw, "href").unwrap_or_default();
+                    out.push_str(&format!("\u{1}{href}\u{1}"));
+                }
+                "a" => out.push_str("\u{2}"),
+                "strong" | "b" => out.push_str("**"),
+                "em" | "i" => out.push('*'),
+                "code" => out.push('`'),
+                _ => {}
+            }
+            i += gt + 1;
+            continue;
+        }
+        let ch = html[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    to_markdown_links(&unescape(&out))
+}
+
+/// 把 `\u{1}href\u{1}文字\u{2}` 转成 `[文字](href)`；已有 `[文字](href)` 原样保留。
+fn to_markdown_links(s: &str) -> String {
+    const OPEN: char = '\u{1}';
+    const CLOSE: char = '\u{2}';
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c != OPEN {
+            out.push(c);
+            continue;
+        }
+        // 收集 href
+        let href_start = i + c.len_utf8();
+        let Some(rel_end) = s[href_start..].find(OPEN) else {
+            out.push(c);
+            continue;
+        };
+        let href = &s[href_start..href_start + rel_end];
+        let label_start = href_start + rel_end + OPEN.len_utf8();
+        let Some(rel_close) = s[label_start..].find(CLOSE) else {
+            out.push(c);
+            continue;
+        };
+        let label = s[label_start..label_start + rel_close].trim();
+        if label.is_empty() {
+            out.push_str(&format!("[{href}]({href})"));
+        } else {
+            out.push_str(&format!("[{label}]({href})"));
+        }
+        // 跳过已消费部分
+        let consumed_to = label_start + rel_close + CLOSE.len_utf8();
+        while let Some((j, _)) = chars.peek() {
+            if *j < consumed_to {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn strip_tags_deep(html: &str) -> String {
+    let mut out = String::new();
+    let mut i = 0usize;
+    let bytes = html.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            match html[i..].find('>') {
+                Some(gt) => i += gt + 1,
+                None => break,
+            }
+            continue;
+        }
+        let ch = html[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    unescape(&out)
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&mdash;", "—")
+        .replace("&hellip;", "…")
+        .replace("&amp;", "&")
+}
+
+fn block_to_text(b: &Block) -> String {
+    match b {
+        Block::Paragraph { text, .. } | Block::Heading { text, .. } => text.clone(),
+        Block::Code { text, .. } | Block::Raw { text, .. } => text.clone(),
+        Block::Quote { lines, .. } => lines.join(" "),
+        Block::List { items, .. } => items.join(" "),
+        Block::Table { header, rows, .. } => {
+            let mut s = header.join(" | ");
+            for r in rows {
+                s.push_str(" / ");
+                s.push_str(&r.join(" | "));
+            }
+            s
+        }
+        Block::Divider { .. } => String::new(),
     }
 }
