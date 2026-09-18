@@ -59,6 +59,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/docs", get(list_docs_api))
         .route("/graph", get(graph))
         .route("/board", get(get_board).put(put_board))
+        .route("/boards", get(boards_list).post(boards_create))
+        .route("/boards/{name}", axum::routing::delete(boards_delete))
+        .route("/doc/move", post(move_doc))
         .route("/asset-file", get(asset_file))
         .route("/connections", get(connections))
         .route("/design", get(design_list))
@@ -127,13 +130,18 @@ async fn graph(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespon
     }
 }
 
-/// 画布布局（sidecar，非真相，可重建）。
-async fn get_board(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+/// 画布布局（sidecar，非真相，可重建）。多画布：?name=
+async fn get_board(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) {
         return e.into_response();
     }
+    let name = q.get("name").cloned().unwrap_or_else(|| "main".into());
     let k = st.kernel.lock().unwrap();
-    match board_load(&k, "main") {
+    match board_load(&k, &name) {
         Ok(v) => Json(v).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
@@ -142,20 +150,102 @@ async fn get_board(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRe
 async fn put_board(
     State(st): State<Arc<AppState>>,
     h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) {
         return e.into_response();
     }
+    let name = q.get("name").cloned().unwrap_or_else(|| "main".into());
     let v: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
     };
     let k = st.kernel.lock().unwrap();
-    match board_save(&k, "main", &v) {
-        Ok(()) => Json(json!({ "saved": true })).into_response(),
+    match board_save(&k, &name, &v) {
+        Ok(()) => Json(json!({ "saved": true, "name": name })).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
+}
+
+/// 多画布列表。
+async fn boards_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    Json(json!({ "boards": board_names(&k) })).into_response()
+}
+
+async fn boards_create(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").trim().to_string();
+    if name.is_empty() || name.contains('/') || name.contains("..") {
+        return err(StatusCode::BAD_REQUEST, "invalid board name").into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    if let Err(e) = board_save(&k, &name, &json!({ "nodes": {} })) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    Json(json!({ "created": name, "boards": board_names(&k) })).into_response()
+}
+
+async fn boards_delete(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    if name == "main" {
+        return err(StatusCode::BAD_REQUEST, "main board cannot be deleted").into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let p = board_path(&k, &name);
+    let _ = std::fs::remove_file(p);
+    Json(json!({ "deleted": name, "boards": board_names(&k) })).into_response()
+}
+
+/// 移动文档（看板拖拽 = 真实移动文件）。
+async fn move_doc(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let from = req.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let to = req.get("to").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if !kernel_core::is_safe_doc_path(&from) || !kernel_core::is_safe_doc_path(&to) {
+        return err(StatusCode::BAD_REQUEST, "paths must be under Notes/").into_response();
+    }
+    let mut k = st.kernel.lock().unwrap();
+    let src = k.vault.root.join(&from);
+    let dst = k.vault.root.join(&to);
+    if !src.is_file() {
+        return err(StatusCode::NOT_FOUND, "source not found").into_response();
+    }
+    if dst.exists() {
+        return err(StatusCode::CONFLICT, "target exists").into_response();
+    }
+    if let Some(dir) = dst.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+        }
+    }
+    if let Err(e) = std::fs::rename(&src, &dst) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let _ = k.sync_all();
+    Json(json!({ "from": from, "to": to })).into_response()
 }
 
 /// 直接读取真相区文件（附件预览用），仅允许 Assets/ 下。
@@ -561,6 +651,21 @@ mod tests {
 
 // ---------- 图谱 / 画布布局 辅助 ----------
 
+/// 看板分栏依据：Notes/ 下第一层目录；根目录文档归入「(根)」。
+fn collection_of(path: &str) -> String {
+    let rest = path.strip_prefix("Notes/").unwrap_or(path);
+    match rest.split_once('/') {
+        Some((seg, _)) => {
+            if seg == "Sources" {
+                "采集".to_string()
+            } else {
+                seg.to_string()
+            }
+        }
+        None => "(根)".to_string(),
+    }
+}
+
 /// 抽取 `[[wiki 链接]]` 目标。
 fn extract_wikilinks(md: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -612,7 +717,17 @@ fn build_graph(k: &mut Kernel) -> anyhow::Result<Value> {
             .take(160)
             .collect();
         let kind = if path.contains("/Sources/") { "capture" } else { "doc" };
-        nodes.push(json!({ "id": format!("doc:{path}"), "kind": kind, "path": path, "title": title, "excerpt": excerpt }));
+        let mtime = std::fs::metadata(k.vault.root.join(&path))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let collection = collection_of(&path);
+        nodes.push(json!({
+            "id": format!("doc:{path}"), "kind": kind, "path": path, "title": title,
+            "excerpt": excerpt, "mtime": mtime, "collection": collection
+        }));
         bodies.push((path, md));
     }
     for (path, md) in &bodies {
@@ -628,8 +743,15 @@ fn build_graph(k: &mut Kernel) -> anyhow::Result<Value> {
     }
 
     for (hash, path, mime) in k.asset_list()? {
+        let mtime = std::fs::metadata(k.vault.root.join(&path))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         nodes.push(json!({
-            "id": format!("asset:{hash}"), "kind": "asset", "path": path, "mime": mime
+            "id": format!("asset:{hash}"), "kind": "asset", "path": path, "mime": mime,
+            "mtime": mtime, "collection": "附件"
         }));
     }
     for (doc, hash) in k.doc_asset_pairs()? {
@@ -642,6 +764,22 @@ fn build_graph(k: &mut Kernel) -> anyhow::Result<Value> {
 
 fn board_path(k: &Kernel, name: &str) -> std::path::PathBuf {
     k.vault.sidecar().join("boards").join(format!("{name}.json"))
+}
+
+fn board_names(k: &Kernel) -> Vec<String> {
+    let dir = k.vault.sidecar().join("boards");
+    let mut out: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_str().map(|s| s.trim_end_matches(".json").to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !out.iter().any(|n| n == "main") {
+        out.push("main".to_string());
+    }
+    out.sort();
+    out
 }
 
 fn board_load(k: &Kernel, name: &str) -> anyhow::Result<Value> {

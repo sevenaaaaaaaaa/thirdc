@@ -1,15 +1,9 @@
 /* ─────────────────────────────────────────────────────────────────────────
  * ThirdC Studio · tokens.css
- * 契约来源：OpenFlow 前台设计系统（docs/DESIGN-SYSTEM.md + assets/tokens.css）
+ * 契约来源：OpenFlow 前台设计系统（oklch / 零 hex / 弹簧缓动 / 圆角三档 / 玻璃）
  *
- * 继承的硬规则：
- *   - 全 oklch 色彩体系，零 hex、零 rgb；颜色派生用 color-mix(in oklab, …)
- *   - 弹簧缓动 cubic-bezier(.32,.72,0,1) 贯穿所有动效
- *   - 圆角 26 / 18 / 12 三档；玻璃表面（--surface / --glass）
- *   - 图标只有一种：24×24 线框 svg，stroke-width 1.8，颜色跟 currentColor
- *   - --faint 保证正文级小字 ≥4.5:1（WCAG AA）
- *
- * ThirdC 增补：画布与对话专用 token（--node-* / --chat-* / 数据类型色）
+ * 本版重点：**深色不再纯黑**——暗色底从 19% L 提到 26% L，层级用亮度差表达，
+ * 而不是靠把背景压黑。亮色为暖纸感。默认跟随系统（data-theme=auto 由 JS 落定）。
  * ─────────────────────────────────────────────────────────────────────── */
 @font-face{font-family:"Space Grotesk";src:url("/assets/fonts/space-grotesk-400.woff2") format("woff2");font-weight:400;font-display:swap}
 @font-face{font-family:"Space Grotesk";src:url("/assets/fonts/space-grotesk-500.woff2") format("woff2");font-weight:500;font-display:swap}
@@ -19,34 +13,36 @@
 @font-face{font-family:"JetBrains Mono";src:url("/assets/fonts/jetbrains-mono-500.woff2") format("woff2");font-weight:500;font-display:swap}
 @font-face{font-family:"JetBrains Mono";src:url("/assets/fonts/jetbrains-mono-600.woff2") format("woff2");font-weight:600;font-display:swap}
 
-:root{
-  --bg: oklch(96.5% .016 85);
-  --bg-soft: oklch(94% .02 85);
-  --surface: oklch(100% 0 0/.62);
-  --surface-strong: oklch(100% 0 0/.88);
-  --fg: oklch(22% .02 70);
-  --muted: oklch(46% .016 70);
-  --faint: oklch(51% .014 75);
-  --border: oklch(86% .014 80);
-  --border-strong: oklch(76% .02 80);
-  --border-soft: oklch(86% .014 80/.55);
-  --hover: oklch(22% .02 70/.055);
-  --hover-strong: oklch(22% .02 70/.11);
-  --accent: oklch(52% .17 258);
-  --accent-strong: oklch(46% .17 258);
-  --accent-soft: oklch(52% .17 258/.12);
+/* ── 亮色 · 暖纸 ── */
+:root,[data-theme="light"]{
+  --bg: oklch(97.4% .012 85);
+  --bg-soft: oklch(95.2% .015 84);
+  --bg-deep: oklch(92.6% .018 83);
+  --surface: oklch(100% 0 0/.74);
+  --surface-strong: oklch(100% 0 0/.93);
+  --fg: oklch(24% .022 70);
+  --muted: oklch(47% .018 72);
+  --faint: oklch(53% .016 76);
+  --border: oklch(88% .012 82);
+  --border-strong: oklch(79% .018 80);
+  --border-soft: oklch(88% .012 82/.6);
+  --hover: oklch(24% .02 70/.055);
+  --hover-strong: oklch(24% .02 70/.11);
+  --accent: oklch(54% .17 258);
+  --accent-strong: oklch(48% .17 258);
+  --accent-soft: oklch(54% .17 258/.13);
   --on-accent: oklch(100% 0 0);
-  --ok: oklch(58% .17 152);        --ok-soft: oklch(58% .17 152/.12);
-  --warn: oklch(66% .15 75);       --warn-soft: oklch(66% .15 75/.14);
+  --ok: oklch(56% .16 152);        --ok-soft: oklch(56% .16 152/.13);
+  --warn: oklch(64% .15 72);       --warn-soft: oklch(64% .15 72/.15);
   --danger: oklch(55% .2 25);      --danger-soft: oklch(55% .2 25/.12);
-  --glass: oklch(100% 0 0/.5);
-  --glass-bright: oklch(100% 0 0/.66);
-  --glass-border: oklch(100% 0 0/.68);
-  --blob-a: oklch(72% .12 262/.30);
-  --blob-b: oklch(70% .13 305/.24);
-  --blob-c: oklch(74% .11 200/.22);
-  --shadow: 0 24px 60px -24px oklch(30% .04 80/.28);
-  --shadow-sm: 0 10px 28px -14px oklch(30% .04 80/.22);
+  --glass: oklch(100% 0 0/.55);
+  --glass-bright: oklch(100% 0 0/.72);
+  --glass-border: oklch(100% 0 0/.7);
+  --blob-a: oklch(76% .12 262/.34);
+  --blob-b: oklch(74% .13 305/.26);
+  --blob-c: oklch(78% .11 200/.24);
+  --shadow: 0 22px 56px -26px oklch(38% .05 80/.30);
+  --shadow-sm: 0 10px 26px -14px oklch(38% .05 80/.22);
   --r-lg: 26px; --r-md: 18px; --r-sm: 12px;
   --chrome-h: 56px; --sb-w: 248px; --container: 1120px;
   --font-display: "Space Grotesk","PingFang SC","HarmonyOS Sans SC","MiSans","Segoe UI",system-ui,sans-serif;
@@ -55,47 +51,68 @@
   --ease-spring: cubic-bezier(.32,.72,0,1);
   --ease-out: cubic-bezier(.22,1,.36,1);
 
-  /* ── ThirdC 增补：画布 / 对话 / 数据类型 ── */
-  --node-bg: oklch(100% 0 0/.78);
-  --node-bg-active: oklch(100% 0 0/.94);
+  /* ThirdC 画布 / 对话 / 数据类型 */
+  --node-bg: oklch(100% 0 0/.86);
+  --node-bg-active: oklch(100% 0 0/.98);
   --node-w: 300px;
-  --node-shadow: 0 18px 44px -20px oklch(30% .04 80/.30);
-  --chat-bg: color-mix(in oklab, var(--bg) 88%, transparent);
-  --chat-w: 420px;
-  --grid-dot: oklch(22% .02 70/.10);
-  --edge: oklch(52% .17 258/.30);
-  --edge-soft: oklch(22% .02 70/.14);
-  --type-doc: oklch(52% .17 258);
-  --type-capture: oklch(58% .17 152);
-  --type-asset: oklch(66% .15 75);
-  --type-query: oklch(60% .16 305);
+  --node-shadow: 0 16px 40px -22px oklch(38% .05 80/.32);
+  --chat-bg: color-mix(in oklab, var(--bg) 86%, transparent);
+  --grid-dot: oklch(24% .02 70/.12);
+  --edge: oklch(54% .17 258/.34);
+  --edge-soft: oklch(24% .02 70/.14);
+  --col-bg: oklch(100% 0 0/.42);
+  --col-head: oklch(100% 0 0/.6);
+  --type-doc: oklch(54% .17 258);
+  --type-capture: oklch(56% .16 152);
+  --type-asset: oklch(64% .15 72);
+  --type-query: oklch(58% .16 305);
+  --axis: oklch(24% .02 70/.28);
   color-scheme: light;
 }
+
+/* ── 暗色 · 石墨（不是纯黑）── */
 [data-theme="dark"]{
-  --bg: oklch(19% .014 70); --bg-soft: oklch(22.5% .014 72);
-  --surface: oklch(27% .016 75/.55); --surface-strong: oklch(30% .016 75/.82);
-  --fg: oklch(93% .008 85); --muted: oklch(70% .014 80); --faint: oklch(64% .014 80);
-  --border: oklch(100% 0 0/.1); --border-strong: oklch(100% 0 0/.2);
-  --border-soft: oklch(100% 0 0/.06);
-  --hover: oklch(93% .008 85/.07); --hover-strong: oklch(93% .008 85/.13);
-  --accent: oklch(74% .13 258); --accent-strong: oklch(80% .12 258);
-  --accent-soft: oklch(74% .13 258/.15); --on-accent: oklch(16% .03 260);
-  --ok: oklch(74% .15 152); --ok-soft: oklch(74% .15 152/.15);
-  --warn: oklch(76% .13 75); --warn-soft: oklch(76% .13 75/.16);
-  --danger: oklch(72% .16 25); --danger-soft: oklch(72% .16 25/.14);
-  --glass: oklch(30% .014 75/.5); --glass-bright: oklch(34% .014 75/.62); --glass-border: oklch(100% 0 0/.15);
-  --blob-a: oklch(62% .13 262/.18); --blob-b: oklch(58% .14 305/.15); --blob-c: oklch(60% .12 200/.13);
-  --shadow: 0 24px 60px -24px oklch(0% 0 0/.55); --shadow-sm: 0 10px 28px -14px oklch(0% 0 0/.5);
-  --node-bg: oklch(28% .016 75/.82);
-  --node-bg-active: oklch(33% .018 75/.92);
-  --node-shadow: 0 18px 44px -20px oklch(0% 0 0/.6);
-  --chat-bg: color-mix(in oklab, var(--bg) 90%, transparent);
-  --grid-dot: oklch(93% .008 85/.10);
-  --edge: oklch(74% .13 258/.38);
-  --edge-soft: oklch(93% .008 85/.14);
-  --type-doc: oklch(74% .13 258);
-  --type-capture: oklch(74% .15 152);
-  --type-asset: oklch(76% .13 75);
-  --type-query: oklch(72% .15 305);
+  --bg: oklch(26% .012 75);
+  --bg-soft: oklch(29.5% .013 75);
+  --bg-deep: oklch(23% .012 75);
+  --surface: oklch(35% .014 75/.62);
+  --surface-strong: oklch(40% .016 75/.86);
+  --fg: oklch(95% .006 85);
+  --muted: oklch(77% .012 80);
+  --faint: oklch(70% .012 80);
+  --border: oklch(100% 0 0/.14);
+  --border-strong: oklch(100% 0 0/.26);
+  --border-soft: oklch(100% 0 0/.09);
+  --hover: oklch(95% .006 85/.08);
+  --hover-strong: oklch(95% .006 85/.15);
+  --accent: oklch(78% .12 258);
+  --accent-strong: oklch(84% .11 258);
+  --accent-soft: oklch(78% .12 258/.18);
+  --on-accent: oklch(22% .03 260);
+  --ok: oklch(78% .14 152); --ok-soft: oklch(78% .14 152/.18);
+  --warn: oklch(80% .12 75); --warn-soft: oklch(80% .12 75/.19);
+  --danger: oklch(76% .15 25); --danger-soft: oklch(76% .15 25/.18);
+  --glass: oklch(38% .014 75/.5);
+  --glass-bright: oklch(44% .014 75/.64);
+  --glass-border: oklch(100% 0 0/.18);
+  --blob-a: oklch(66% .13 262/.24);
+  --blob-b: oklch(62% .14 305/.20);
+  --blob-c: oklch(64% .12 200/.18);
+  --shadow: 0 24px 58px -26px oklch(0% 0 0/.5);
+  --shadow-sm: 0 10px 26px -14px oklch(0% 0 0/.42);
+  --node-bg: oklch(33% .014 75/.86);
+  --node-bg-active: oklch(39% .016 75/.94);
+  --node-shadow: 0 16px 40px -22px oklch(0% 0 0/.55);
+  --chat-bg: color-mix(in oklab, var(--bg) 84%, transparent);
+  --grid-dot: oklch(95% .006 85/.12);
+  --edge: oklch(78% .12 258/.40);
+  --edge-soft: oklch(95% .006 85/.16);
+  --col-bg: oklch(31% .013 75/.5);
+  --col-head: oklch(36% .014 75/.7);
+  --type-doc: oklch(78% .12 258);
+  --type-capture: oklch(78% .14 152);
+  --type-asset: oklch(80% .12 75);
+  --type-query: oklch(76% .14 305);
+  --axis: oklch(95% .006 85/.30);
   color-scheme: dark;
 }
