@@ -58,11 +58,34 @@ enum Cmd {
     },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
+    /// 设计规范：列表 / 导入 / 激活
+    Design {
+        #[command(subcommand)]
+        cmd: DesignCmd,
+    },
     /// 外部数据源连接管理（MCP 入口侧）
     Conn {
         #[command(subcommand)]
         cmd: ConnCmd,
     },
+}
+
+#[derive(Subcommand)]
+enum DesignCmd {
+    /// 列出已导入的设计规范
+    List { path: PathBuf },
+    /// 导入 design.md / SKILL 目录 / tokens.css / 页面 HTML
+    Add {
+        path: PathBuf,
+        file: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        /// 导入后立即激活
+        #[arg(long)]
+        activate: bool,
+    },
+    /// 激活某个规范（空名恢复内置契约）
+    Use { path: PathBuf, name: String },
 }
 
 #[derive(Subcommand)]
@@ -188,6 +211,49 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Cmd::Design { cmd } => match cmd {
+            DesignCmd::List { path } => {
+                let vault = Vault::open(&path)?;
+                let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+                let active = k.active_design().map(|p| p.name).unwrap_or_default();
+                for p in k.designs()? {
+                    let mark = if p.name == active { "●" } else { "○" };
+                    println!(
+                        "{mark} {:16} {:11} token {:3} · 组件 {:3} · 规则 {:3}  {}",
+                        p.name,
+                        p.kind,
+                        p.tokens.len(),
+                        p.archetypes.len(),
+                        p.rules.len(),
+                        p.source
+                    );
+                }
+            }
+            DesignCmd::Add { path, file, name, activate } => {
+                let vault = Vault::open(&path)?;
+                let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+                let p = k.import_design_path(&file, name.as_deref())?;
+                println!(
+                    "导入「{}」（{}）：token {} · 字体 {} · 组件 {} · 规则 {}",
+                    p.name, p.kind, p.tokens.len(), p.fonts.len(), p.archetypes.len(), p.rules.len()
+                );
+                if activate {
+                    k.set_active_design(&p.name)?;
+                    println!("已激活 {}", p.name);
+                }
+            }
+            DesignCmd::Use { path, name } => {
+                let vault = Vault::open(&path)?;
+                let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+                if name.is_empty() {
+                    k.clear_active_design()?;
+                    println!("已恢复内置契约");
+                } else {
+                    k.set_active_design(&name)?;
+                    println!("已激活 {name}");
+                }
+            }
+        },
         Cmd::Conn { cmd } => match cmd {
             ConnCmd::List { path } => {
                 let vault = Vault::open(&path)?;

@@ -127,6 +127,9 @@ impl McpServer {
             "delete_doc" => self.t_delete_doc(args),
             "put_asset" => self.t_put_asset(args),
             "vault_status" => self.t_status(args),
+            "import_design" => self.t_import_design(args),
+            "list_designs" => self.t_list_designs(args),
+            "set_design" => self.t_set_design(args),
             _ => Err((-32602, format!("unknown tool: {name}"))),
         }
     }
@@ -279,8 +282,7 @@ impl McpServer {
         })
     }
 
-    fn t_status(&self, _args: Value) -> Result<Value, (i32, String)> {
-        self.with_kernel(|k| {
+    fn t_status(&self, _args: Value) -> Result<Value, (i32, String)> {        self.with_kernel(|k| {
             k.sync_all()?;
             let docs = kernel_core::list_docs(&k.vault)?.len();
             let indexed = k.indexed_count().unwrap_or(0);
@@ -291,6 +293,67 @@ impl McpServer {
                     "vault": k.vault.config.name,
                     "docs": docs, "indexed": indexed, "assets": assets
                 }),
+            ))
+        })
+    }
+
+    fn t_import_design(&self, args: Value) -> Result<Value, (i32, String)> {
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or((-32602, "missing 'name'".to_string()))?
+            .to_string();
+        self.with_kernel(|k| {
+            let profile = if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                k.import_design_path(std::path::Path::new(path), Some(&name))?
+            } else {
+                let content = args
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("需要 content 或 path"))?;
+                k.import_design_text(&name, content)?
+            };
+            Ok(tool_result(
+                profile.summary(),
+                json!({
+                    "name": profile.name, "kind": profile.kind,
+                    "tokens": profile.tokens, "fonts": profile.fonts,
+                    "rules": profile.rules, "archetypes": profile.archetypes,
+                }),
+            ))
+        })
+    }
+
+    fn t_list_designs(&self, _args: Value) -> Result<Value, (i32, String)> {
+        self.with_kernel(|k| {
+            let list = k.designs()?;
+            let active = k.active_design().map(|p| p.name).unwrap_or_default();
+            let arr: Vec<Value> = list
+                .iter()
+                .map(|p| json!({ "name": p.name, "kind": p.kind, "tokens": p.tokens.len(), "active": p.name == active }))
+                .collect();
+            Ok(tool_result(
+                format!("{} 个设计规范，当前激活：{}", arr.len(), if active.is_empty() { "（无，使用内置契约）" } else { &active }),
+                json!({ "designs": arr, "active": active }),
+            ))
+        })
+    }
+
+    fn t_set_design(&self, args: Value) -> Result<Value, (i32, String)> {
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or((-32602, "missing 'name'".to_string()))?
+            .to_string();
+        self.with_kernel(|k| {
+            if name.is_empty() {
+                k.clear_active_design()?;
+            } else {
+                k.set_active_design(&name)?;
+            }
+            Ok(tool_result(
+                format!("已激活设计规范：{}", if name.is_empty() { "内置契约" } else { &name }),
+                json!({ "active": name }),
             ))
         })
     }
@@ -314,6 +377,15 @@ impl McpServer {
                     })
                 })
                 .collect();
+            let mut resources = resources;
+            if let Some(p) = k.active_design() {
+                resources.insert(0, json!({
+                    "uri": "design://active",
+                    "name": format!("design:{}", p.name),
+                    "title": format!("设计规范 · {}", p.name),
+                    "mimeType": "text/plain"
+                }));
+            }
             Ok(json!({ "resources": resources }))
         })
     }
@@ -323,6 +395,20 @@ impl McpServer {
             .get("uri")
             .and_then(|v| v.as_str())
             .ok_or((-32602, "missing 'uri'".to_string()))?;
+        if uri == "design://active" {
+            return self.with_kernel(|k| match k.active_design() {
+                Some(p) => Ok(json!({ "contents": [{
+                    "uri": "design://active",
+                    "mimeType": "text/plain",
+                    "text": format!("{}\n\n--- CSS 变量 ---\n{}", p.summary(), p.to_css())
+                }] })),
+                None => Ok(json!({ "contents": [{
+                    "uri": "design://active",
+                    "mimeType": "text/plain",
+                    "text": "尚未导入设计规范，渲染使用内置契约。可用 import_design 导入 design.md / SKILL 目录 / tokens.css / 页面 HTML。"
+                }] })),
+            });
+        }
         let path = uri
             .strip_prefix("knowledge://")
             .ok_or((-32602, "uri must be knowledge://<path>".to_string()))?
@@ -432,6 +518,33 @@ fn tool_definitions() -> Value {
                     "content_base64": { "type": "string" }
                 },
                 "required": ["name", "content_base64"]
+            }
+        },
+        {
+            "name": "import_design",
+            "description": "导入设计规范（design.md / 设计 SKILL 目录 / tokens.css / 任意页面 HTML 的排版摘要），保存为可复用规范。之后渲染与生成都会遵循它。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "规范名，如 openflow" },
+                    "content": { "type": "string", "description": "规范文本（markdown/css/html）" },
+                    "path": { "type": "string", "description": "或从本地路径导入（文件或目录）" }
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "list_designs",
+            "description": "列出已导入的设计规范及当前激活项。",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "set_design",
+            "description": "激活/切换设计规范（传空字符串恢复内置契约）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
             }
         },
         {

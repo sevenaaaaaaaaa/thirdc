@@ -2,6 +2,10 @@
 
 pub mod watch;
 
+pub use kernel_design::{
+    Archetype, DesignError, DesignProfile, DesignStore, apply_to_html, digest_html, import_path,
+    parse_css, parse_design_md,
+};
 pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
 pub use kernel_store::{AiConfig, Cas, ConnectionConfig, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
 pub use kernel_sync::{OpLog, SyncError};
@@ -23,15 +27,80 @@ pub struct Kernel {
     pub vault: Vault,
     pub log: OpLog,
     index: Index,
+    designs: DesignStore,
 }
 
 impl Kernel {
     pub fn open(vault: Vault) -> Result<Self, StoreError> {
         let index = Index::open(&vault)?;
+        let designs = DesignStore::open(&vault.sidecar())
+            .map_err(|e| StoreError::Config(e.to_string()))?;
         Ok(Kernel {
             vault,
             log: OpLog::new(),
             index,
+            designs,
+        })
+    }
+
+    // ---------- 设计规范（一等知识对象） ----------
+
+    /// 从文本导入设计规范（design.md / css / html 摘要），保存并返回。
+    pub fn import_design_text(&self, name: &str, content: &str) -> Result<DesignProfile, SyncError> {
+        let looks_html = content.trim_start().starts_with("<!doctype") || content.contains("<html");
+        let looks_css = content.contains("--") && content.contains('{') && !content.contains("# ");
+        let profile = if looks_html {
+            digest_html(name, "(pasted html)", content)
+        } else if looks_css && !content.contains("\n## ") {
+            parse_css(name, "(pasted css)", content)
+        } else {
+            parse_design_md(name, "(pasted markdown)", content)
+        };
+        if profile.is_empty() {
+            return Err(SyncError::Md(format!("未从「{name}」解析出任何 token/字体/规则")));
+        }
+        self.designs
+            .save(&profile)
+            .map_err(|e| SyncError::Md(e.to_string()))?;
+        Ok(profile)
+    }
+
+    /// 从路径导入（文件或目录 / skill 包）。
+    pub fn import_design_path(&self, path: &std::path::Path, name: Option<&str>) -> Result<DesignProfile, SyncError> {
+        let profile = import_path(path, name).map_err(|e| SyncError::Md(e.to_string()))?;
+        self.designs
+            .save(&profile)
+            .map_err(|e| SyncError::Md(e.to_string()))?;
+        Ok(profile)
+    }
+
+    pub fn designs(&self) -> Result<Vec<DesignProfile>, SyncError> {
+        self.designs.list().map_err(|e| SyncError::Md(e.to_string()))
+    }
+
+    pub fn active_design(&self) -> Option<DesignProfile> {
+        self.designs.active().ok().flatten()
+    }
+
+    pub fn set_active_design(&self, name: &str) -> Result<(), SyncError> {
+        self.designs
+            .set_active(name)
+            .map_err(|e| SyncError::Md(e.to_string()))
+    }
+
+    pub fn clear_active_design(&self) -> Result<(), SyncError> {
+        self.designs
+            .clear_active()
+            .map_err(|e| SyncError::Md(e.to_string()))
+    }
+
+    /// 渲染文档为 HTML，套用当前激活的设计规范（无规范则用内置契约）。
+    pub fn render_doc_html(&mut self, rel: &str) -> Result<String, SyncError> {
+        let model = self.get_doc(rel)?;
+        let html = to_html(&model);
+        Ok(match self.active_design() {
+            Some(p) => apply_to_html(&html, &p),
+            None => html,
         })
     }
 

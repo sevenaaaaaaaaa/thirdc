@@ -61,6 +61,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/board", get(get_board).put(put_board))
         .route("/asset-file", get(asset_file))
         .route("/connections", get(connections))
+        .route("/design", get(design_list))
+        .route("/design/import", post(design_import))
+        .route("/design/active", post(design_active))
+        .route("/design/{name}", get(design_get))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/publish", get(publish_list).post(publish))
@@ -305,18 +309,16 @@ async fn get_doc(
     if let Err(e) = k.sync_all() {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
+    let html = k.render_doc_html(&path).ok();
     match k.get_doc(&path) {
-        Ok(model) => {
-            let html: Option<String> = None;
-            Json(json!({
-                "path": path,
-                "title": model.title,
-                "blocks": model.blocks,
-                "markdown": kernel_core::to_markdown(&model),
-                "html": html,
-            }))
-            .into_response()
-        }
+        Ok(model) => Json(json!({
+            "path": path,
+            "title": model.title,
+            "blocks": model.blocks,
+            "markdown": kernel_core::to_markdown(&model),
+            "html": html,
+        }))
+        .into_response(),
         Err(e) => err(StatusCode::NOT_FOUND, e).into_response(),
     }
 }
@@ -751,7 +753,10 @@ async fn publish(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> 
         Err(e) => return err(StatusCode::NOT_FOUND, e).into_response(),
     };
     let title = model.title.clone().unwrap_or_else(|| path.clone());
-    let html = kernel_core::to_html(&model);
+    let html = match k.render_doc_html(&path) {
+        Ok(h) => h,
+        Err(_) => kernel_core::to_html(&model),
+    };
     let slug = {
         let s = kernel_core::slugify(&title);
         if s.is_empty() {
@@ -864,4 +869,119 @@ async fn connections(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl Into
         .map(|a| json!({ "model": a.model, "base_url": a.base_url, "configured": !a.base_url.is_empty() }))
         .unwrap_or(Value::Null);
     Json(json!({ "connections": list, "ai": ai })).into_response()
+}
+
+// ---------- 设计规范 ----------
+
+async fn design_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let profiles = match k.designs() {
+        Ok(p) => p,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let active = k.active_design().map(|p| p.name).unwrap_or_default();
+    let arr: Vec<Value> = profiles
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name, "kind": p.kind, "source": p.source,
+                "tokens": p.tokens, "fonts": p.fonts, "rules": p.rules,
+                "archetypes": p.archetypes, "active": p.name == active,
+            })
+        })
+        .collect();
+    Json(json!({ "profiles": arr, "active": active })).into_response()
+}
+
+async fn design_import(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let name = req
+        .get("name")
+        .and_then(|n| n.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "design".into());
+    let k = st.kernel.lock().unwrap();
+
+    // 路径导入（文件或目录 / skill 包）
+    if let Some(path) = req.get("path").and_then(|p| p.as_str()) {
+        return match k.import_design_path(std::path::Path::new(path), Some(&name)) {
+            Ok(p) => Json(json!({
+                "name": p.name, "kind": p.kind, "tokens": p.tokens.len(),
+                "fonts": p.fonts, "rules": p.rules.len(), "archetypes": p.archetypes.len()
+            }))
+            .into_response(),
+            Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+        };
+    }
+
+    let content = req.get("content").and_then(|c| c.as_str()).unwrap_or("");
+    if content.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "需要 content 或 path").into_response();
+    }
+    match k.import_design_text(&name, content) {
+        Ok(p) => Json(json!({
+            "name": p.name, "kind": p.kind, "tokens": p.tokens, "fonts": p.fonts,
+            "rules": p.rules, "archetypes": p.archetypes
+        }))
+        .into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn design_active(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    let k = st.kernel.lock().unwrap();
+    let r = if name.is_empty() {
+        k.clear_active_design()
+    } else {
+        k.set_active_design(name)
+    };
+    match r {
+        Ok(()) => Json(json!({ "active": name })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn design_get(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    match k.designs().ok().and_then(|list| list.into_iter().find(|p| p.name == name)) {
+        Some(p) => Json(json!({
+            "name": p.name, "kind": p.kind, "source": p.source, "tokens": p.tokens,
+            "fonts": p.fonts, "rules": p.rules, "archetypes": p.archetypes,
+            "summary": p.summary(),
+        }))
+        .into_response(),
+        None => err(StatusCode::NOT_FOUND, "design not found").into_response(),
+    }
 }

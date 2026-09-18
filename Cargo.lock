@@ -883,11 +883,24 @@ dependencies = [
 name = "kernel-core"
 version = "0.1.0"
 dependencies = [
+ "kernel-design",
  "kernel-md",
  "kernel-store",
  "kernel-sync",
  "notify",
  "tempfile",
+]
+
+[[package]]
+name = "kernel-design"
+version = "0.1.0"
+dependencies = [
+ "kernel-md",
+ "kernel-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

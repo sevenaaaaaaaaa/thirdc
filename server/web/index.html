@@ -190,6 +190,23 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 .pub-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:11px;background:var(--hover);margin-bottom:7px}
 .pub-item a{color:var(--accent);font-family:var(--font-mono);font-size:12px;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pub-item a:hover{text-decoration:underline}
+.swatches{display:flex;flex-wrap:wrap;gap:6px}
+.sw{width:30px;height:30px;border-radius:9px;border:1px solid var(--border);position:relative}
+.sw span{position:absolute;left:50%;bottom:-15px;transform:translateX(-50%);font-family:var(--font-mono);font-size:8.5px;color:var(--faint);white-space:nowrap}
+.swrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:22px 8px;padding-bottom:6px}
+.dv-profile{border:1px solid var(--border);border-radius:var(--r-md);padding:11px 12px;margin-bottom:9px;background:var(--surface)}
+.dv-profile.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.dv-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.dv-head .n{font-family:var(--font-display);font-weight:700;flex:1}
+.dv-meta{font-family:var(--font-mono);font-size:10.5px;color:var(--faint);margin-bottom:8px;word-break:break-all}
+.dv-sec{margin-top:10px}
+.dv-sec h4{margin:0 0 6px;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.dv-rules{margin:0;padding-left:16px;font-size:12.5px;color:var(--muted);line-height:1.7}
+.dv-arch{display:flex;flex-wrap:wrap;gap:5px}
+.dv-arch code{font-family:var(--font-mono);font-size:11px;padding:3px 7px;border-radius:7px;background:var(--hover);color:var(--muted)}
+.drop{border:1px dashed var(--border-strong);border-radius:var(--r-md);padding:18px;text-align:center;color:var(--muted);font-size:13px;margin-bottom:10px}
+.drop.hot{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.inp{width:100%;height:38px;padding:0 12px;border-radius:11px;border:1px solid var(--border);background:var(--surface);color:var(--fg);font:13px var(--font-body);outline:none;margin-bottom:8px}
 #toast{position:fixed;right:16px;bottom:44px;z-index:120;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
@@ -229,6 +246,7 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
   <button class="icon-btn" id="fit" title="适配视图 (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
   <button class="icon-btn" id="tidy" title="整理布局 (T)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
   <button class="icon-btn" id="pub-btn" title="发布面板"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+  <button class="icon-btn" id="design-btn" title="设计规范"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="14.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="15.5" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20"/></svg></button>
   <button class="icon-btn" id="road-btn" title="路线图"><svg viewBox="0 0 24 24"><path d="M4 20V8l6-4 4 3 6-3v12l-6 3-4-3-6 3Z"/></svg></button>
   <button class="icon-btn" id="theme" title="明暗切换"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button>
   <button class="icon-btn" id="sync" title="同步外部改动"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg></button>
@@ -302,6 +320,17 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
       对象存储 / GitHub Pages 目标规划中。
     </p>
     <div id="pub-list"></div>
+  </div>
+</div></div>
+
+<div class="overlay" id="design-ov"><div class="panel">
+  <div class="panel-head"><h3>设计规范</h3><span class="badge plan" id="design-active-badge">内置契约</span><button class="icon-btn" data-close="design-ov">✕</button></div>
+  <div class="panel-body">
+    <div class="drop" id="design-drop">拖入 design.md / SKILL 目录里的 md / tokens.css / 页面 HTML，或点击选择文件<br>
+      <span style="font-size:11px;color:var(--faint)">也可以直接粘贴路径（服务端目录，如 /Users/you/Design/skill）</span></div>
+    <input class="inp" id="design-path" placeholder="本地路径（文件或目录），回车导入">
+    <input type="file" id="design-file" style="display:none" multiple>
+    <div id="design-list"></div>
   </div>
 </div></div>
 
@@ -644,6 +673,72 @@ function renderRoad(){
 }
 $('road-btn').onclick=()=>{renderRoad();openOverlay('road-ov');};
 
+/* ───────── 设计规范面板 ───────── */
+let designs=[],activeDesign='';
+function swatchColor(v){const t=v.trim();return /oklch|rgb|hsl|#|color-mix/.test(t)?t:'var(--hover)'}
+async function openDesign(){await loadDesigns();openOverlay('design-ov');}
+async function loadDesigns(){
+  const r=await api('/design');designs=r.profiles;activeDesign=r.active||'';
+  $('design-active-badge').textContent=activeDesign?('激活 · '+activeDesign):'内置契约';
+  const box=$('design-list');
+  if(!designs.length){box.innerHTML='<div style="color:var(--faint);font-size:13px">还没有规范。导入 design.md / tokens.css / 页面 HTML，渲染与生成都会遵循它。</div>';return;}
+  box.innerHTML='';
+  designs.forEach(p=>{
+    const el=document.createElement('div');el.className='dv-profile'+(p.name===activeDesign?' on':'');
+    const swatches=Object.entries(p.tokens||{}).slice(0,28).map(([k,v])=>
+      `<i class="sw" style="background:${swatchColor(v)}" title="${k}: ${v}"><span>${k.replace(/^--/,'')}</span></i>`).join('');
+    el.innerHTML=`<div class="dv-head">
+        <span class="badge ${p.name===activeDesign?'ok':'plan'}">${p.kind}</span>
+        <span class="n">${p.name}</span>
+        <button class="icon-btn" data-act="${p.name}">${p.name===activeDesign?'●':'○'}</button>
+      </div>
+      <div class="dv-meta">${p.source||''} · token ${Object.keys(p.tokens||{}).length} · 组件 ${(p.archetypes||[]).length} · 规则 ${(p.rules||[]).length}</div>
+      ${swatches?`<div class="dv-sec"><h4>色板</h4><div class="swrap">${swatches}</div></div>`:''}
+      ${(p.fonts||[]).length?`<div class="dv-sec"><h4>字体</h4><div class="dv-meta">${p.fonts.join(' · ')}</div></div>`:''}
+      ${(p.rules||[]).length?`<div class="dv-sec"><h4>规则</h4><ul class="dv-rules">${p.rules.slice(0,10).map(x=>`<li>${x}</li>`).join('')}</ul></div>`:''}
+      ${(p.archetypes||[]).length?`<div class="dv-sec"><h4>组件</h4><div class="dv-arch">${p.archetypes.slice(0,30).map(a=>`<code title="${a.usage}">${a.name}</code>`).join('')}</div></div>`:''}`;
+    el.querySelector('[data-act]').onclick=async()=>{
+      const on=p.name===activeDesign;
+      await api('/design/active',{method:'POST',json:{name:on?'':p.name}});
+      toast(on?'已恢复内置契约':'已激活 '+p.name,'ok');
+      await loadDesigns(); if(current)await openDoc(current);
+    };
+    box.appendChild(el);
+  });
+}
+async function importDesignContent(name,content){
+  try{const r=await api('/design/import',{method:'POST',json:{name,content}});
+    toast(`导入「${r.name}」：token ${Object.keys(r.tokens||{}).length} · 字体 ${(r.fonts||[]).length} · 规则 ${(r.rules||[]).length}`,'ok');
+    await loadDesigns();
+  }catch(e){toast('导入失败：'+e.message,'err');}
+}
+async function importDesignPath(path){
+  try{const r=await api('/design/import',{method:'POST',json:{name:(path.split('/').pop()||'design'),path}});
+    toast(`导入「${r.name}」：token ${r.tokens} · 组件 ${r.archetypes}`,'ok');
+    await loadDesigns();
+  }catch(e){toast('导入失败：'+e.message,'err');}
+}
+$('design-btn').onclick=openDesign;
+$('design-path').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.value.trim()){importDesignPath(e.target.value.trim());e.target.value='';}});
+$('design-drop').onclick=()=>$('design-file').click();
+$('design-file').addEventListener('change',async e=>{
+  for(const f of [...e.target.files]){
+    await importDesignContent(f.name.replace(/\.[^.]+$/,''), await f.text());
+  }
+  e.target.value='';
+});
+const dz=$('design-drop');
+['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+dz.addEventListener('drop',async e=>{
+  const files=[...(e.dataTransfer?.files||[])];
+  for(const f of files){
+    const text=await f.text().catch(()=>null);
+    if(text!==null) await importDesignContent(f.name.replace(/\.[^.]+$/,''), text);
+    else toast('目录请用路径导入（拖文件夹浏览器不给内容）','err');
+  }
+});
+
 /* ───────── ⌘K ───────── */
 function openOverlay(id){document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open'));$(id).classList.add('open');}
 function closeAll(){document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open'));$('drawer').classList.remove('open');}
@@ -656,6 +751,7 @@ const CMDS=[
   ['切换明暗','d',()=>{closeAll();$('theme').click();}],
   ['打开发布面板','p',async()=>{await loadPublishList();openOverlay('pub-ov');}],
   ['查看路线图','r',()=>{renderRoad();openOverlay('road-ov');}],
+  ['导入设计规范','g',async()=>{await openDesign();}],
 ];
 function renderPalette(q){
   const box=$('palette-list');box.innerHTML='';
