@@ -72,9 +72,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// 内嵌的 Web 客户端（单文件，无构建步骤）。
+/// 内嵌的 Web 客户端（单文件，无构建步骤）。开发期禁止缓存，避免看到旧版。
 async fn app() -> impl IntoResponse {
-    axum::response::Html(include_str!("../web/index.html"))
+    (
+        [(header::CACHE_CONTROL, "no-store, must-revalidate")],
+        axum::response::Html(include_str!("../web/index.html")),
+    )
 }
 
 async fn tokens_css() -> impl IntoResponse {
