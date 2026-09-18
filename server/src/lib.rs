@@ -64,6 +64,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/design", get(design_list))
         .route("/design/import", post(design_import))
         .route("/design/active", post(design_active))
+        .route("/design/scope", post(design_scope))
+        .route("/design/import-url", post(design_import_url))
         .route("/design/{name}", get(design_get))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
@@ -893,7 +895,8 @@ async fn design_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl Into
             })
         })
         .collect();
-    Json(json!({ "profiles": arr, "active": active })).into_response()
+    let scopes = k.design_scopes();
+    Json(json!({ "profiles": arr, "active": active, "scopes": scopes })).into_response()
 }
 
 async fn design_import(
@@ -983,5 +986,148 @@ async fn design_get(
         }))
         .into_response(),
         None => err(StatusCode::NOT_FOUND, "design not found").into_response(),
+    }
+}
+
+/// 从 URL 消化一个页面的排版（ego-lite → headless Chromium → 直接抓取）。
+async fn design_import_url(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+    if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("file://") {
+        return err(StatusCode::BAD_REQUEST, "url must be http(s):// or file://").into_response();
+    }
+    let name = req
+        .get("name")
+        .and_then(|n| n.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            url.trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("page")
+                .to_string()
+        });
+    let via = req.get("via").and_then(|v| v.as_str()).unwrap_or("auto").to_string();
+    let (cfg_ego, cfg_chrome) = {
+        let k = st.kernel.lock().unwrap();
+        (
+            k.vault.config.browser.ego.clone(),
+            k.vault.config.browser.chrome.clone(),
+        )
+    };
+
+    let mut tried: Vec<String> = Vec::new();
+    // 依次尝试：ego → render → http
+    let ego_try = via == "auto" || via.eq_ignore_ascii_case("ego");
+    if ego_try {
+        let u = url.clone();
+        let e = cfg_ego.clone();
+        let r = tokio::task::spawn_blocking(move || {
+            kernel_core::ego_digest(&u, e.as_deref(), std::time::Duration::from_secs(60))
+        })
+        .await
+        .unwrap_or_else(|j| Err(kernel_core::BrowserError::Failed(format!("join: {j}"))));
+        match r {
+            Ok(digest) => return finish_import(&st, &name, &url, "ego", &digest),
+            Err(e) => tried.push(format!("ego: {e}")),
+        }
+        if via != "auto" {
+            return err(StatusCode::BAD_REQUEST, format!("ego 后端失败：{}", tried.join("; "))).into_response();
+        }
+    }
+    let render_try = via == "auto" || via.eq_ignore_ascii_case("render") || via.eq_ignore_ascii_case("headless");
+    if render_try {
+        let u = url.clone();
+        let c = cfg_chrome.clone();
+        let r = tokio::task::spawn_blocking(move || {
+            kernel_core::dump_dom(&u, c.as_deref(), std::time::Duration::from_secs(45))
+        })
+        .await
+        .unwrap_or_else(|j| Err(kernel_core::BrowserError::Failed(format!("join: {j}"))));
+        match r {
+            Ok(html) => return finish_import_html(&st, &name, &url, "render", &html),
+            Err(e) => tried.push(format!("render: {e}")),
+        }
+        if via != "auto" && via != "http" {
+            return err(StatusCode::BAD_REQUEST, format!("headless 后端失败：{}", tried.join("; "))).into_response();
+        }
+    }
+    let u = url.clone();
+    let r = tokio::task::spawn_blocking(move || {
+        kernel_core::fetch_html(&u, std::time::Duration::from_secs(30))
+    })
+    .await
+    .unwrap_or_else(|j| Err(kernel_core::BrowserError::Failed(format!("join: {j}"))));
+    match r {
+        Ok(html) => finish_import_html(&st, &name, &url, "http", &html),
+        Err(e) => {
+            tried.push(format!("http: {e}"));
+            err(StatusCode::BAD_REQUEST, format!("全部后端失败：{}", tried.join("; "))).into_response()
+        }
+    }
+}
+
+fn finish_import(
+    st: &Arc<AppState>,
+    name: &str,
+    url: &str,
+    backend: &str,
+    digest: &Value,
+) -> axum::response::Response {
+    let k = st.kernel.lock().unwrap();
+    match k.import_design_digest(name, url, digest) {
+        Ok(p) => Json(json!({
+            "name": p.name, "kind": p.kind, "backend": backend, "source": p.source,
+            "tokens": p.tokens.len(), "fonts": p.fonts, "rules": p.rules,
+            "archetypes": p.archetypes.len(),
+        }))
+        .into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+fn finish_import_html(
+    st: &Arc<AppState>,
+    name: &str,
+    url: &str,
+    backend: &str,
+    html: &str,
+) -> axum::response::Response {
+    let k = st.kernel.lock().unwrap();
+    match k.import_design_html(name, url, html) {
+        Ok(p) => Json(json!({
+            "name": p.name, "kind": p.kind, "backend": backend, "source": p.source,
+            "tokens": p.tokens.len(), "fonts": p.fonts, "rules": p.rules,
+            "archetypes": p.archetypes.len(),
+        }))
+        .into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn design_scope(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let scope = req.get("scope").and_then(|s| s.as_str()).unwrap_or("vault");
+    let name = req.get("name").and_then(|s| s.as_str()).unwrap_or("");
+    let k = st.kernel.lock().unwrap();
+    match k.set_design_scope(scope, name) {
+        Ok(()) => Json(json!({ "scope": scope, "name": name, "scopes": k.design_scopes() })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
     }
 }

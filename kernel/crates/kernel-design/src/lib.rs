@@ -373,6 +373,110 @@ pub fn parse_design_md(name: &str, source: &str, text: &str) -> DesignProfile {
     }
 }
 
+/// 消化**渲染后页面**的结构化摘要（computed style 级，来自 ego-lite / headless）。
+/// 输入形如 `{ fonts:[[family,count]], colors:[[c,count]], widths, classes, headings, vars }`。
+pub fn digest_page(name: &str, source: &str, d: &serde_json::Value) -> DesignProfile {
+    fn pairs(v: &serde_json::Value, limit: usize) -> Vec<(String, u64)> {
+        v.as_array()
+            .map(|arr| {
+                arr.iter()
+                    .take(limit)
+                    .filter_map(|e| {
+                        let a = e.as_array()?;
+                        let k = a.first()?.as_str()?.to_string();
+                        let n = a.get(1).and_then(|x| x.as_u64()).unwrap_or(0);
+                        Some((k, n))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // token：页面 CSS 变量
+    let mut tokens = BTreeMap::new();
+    if let Some(obj) = d.get("vars").and_then(|v| v.as_object()) {
+        for (k, v) in obj {
+            if let Some(val) = v.as_str() {
+                if !val.is_empty() {
+                    tokens.insert(k.clone(), val.to_string());
+                }
+            }
+        }
+    }
+
+    // 字体：取每个 font-family 串的第一族名
+    let mut fonts: Vec<String> = Vec::new();
+    for (family, _) in pairs(d.get("fonts").unwrap_or(&serde_json::Value::Null), 8) {
+        let first = family.split(',').next().unwrap_or(&family).trim().trim_matches('"').trim_matches('\'').to_string();
+        if !first.is_empty() && !fonts.iter().any(|x: &String| x.eq_ignore_ascii_case(&first)) {
+            fonts.push(first);
+        }
+    }
+
+    let widths = pairs(d.get("widths").unwrap_or(&serde_json::Value::Null), 5);
+    let colors = pairs(d.get("colors").unwrap_or(&serde_json::Value::Null), 16);
+    let classes = pairs(d.get("classes").unwrap_or(&serde_json::Value::Null), 16);
+    let elements = d.get("elementCount").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let mut rules = Vec::new();
+    if let Some(f) = fonts.first() {
+        rules.push(format!("主字体：{f}"));
+    }
+    if !widths.is_empty() {
+        rules.push(format!(
+            "容器宽度：{}",
+            widths.iter().map(|(w, _)| w.clone()).collect::<Vec<_>>().join(" / ")
+        ));
+    }
+    if let Some(h) = d.get("headings").and_then(|v| v.as_object()) {
+        let mut hs: Vec<String> = h
+            .iter()
+            .filter_map(|(k, v)| v.as_u64().map(|n| format!("{k}×{n}")))
+            .collect();
+        hs.sort();
+        if !hs.is_empty() {
+            rules.push(format!("标题层级：{}", hs.join(" ")));
+        }
+    }
+    if !colors.is_empty() {
+        rules.push(format!(
+            "主色板（按出现频次）：{}",
+            colors.iter().take(6).map(|(c, _)| c.clone()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !classes.is_empty() {
+        rules.push(format!(
+            "高频组件类：{}",
+            classes.iter().take(10).map(|(c, _)| c.clone()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if elements > 0 {
+        rules.push(format!("页面元素 {elements} 个（computed style 统计）"));
+    }
+
+    let archetypes = cap_archetypes(
+        classes
+            .iter()
+            .map(|(c, n)| Archetype {
+                name: format!(".{c}"),
+                usage: format!("页面出现 {n} 次"),
+                css: String::new(),
+            })
+            .collect(),
+    );
+
+    DesignProfile {
+        name: name.to_string(),
+        kind: "page-digest".into(),
+        tokens,
+        tokens_dark: BTreeMap::new(),
+        fonts,
+        rules,
+        archetypes,
+        source: source.to_string(),
+    }
+}
+
 /// 解析纯 CSS（tokens.css 等）。
 pub fn parse_css(name: &str, source: &str, text: &str) -> DesignProfile {
     let mut archetypes = Vec::new();
@@ -665,34 +769,67 @@ impl DesignStore {
         Ok(serde_json::from_str(&text)?)
     }
 
-    pub fn set_active(&self, name: &str) -> Result<(), DesignError> {
-        self.get(name)?; // 必须存在
-        std::fs::write(self.dir.join("active"), Self::slug(name))?;
+    /// 作用域：`vault`（库级默认）/ `doc:<相对路径>`（文档级）/ `publish`（发布目标级）。
+    pub fn set_scope(&self, scope: &str, name: &str) -> Result<(), DesignError> {
+        let mut map = self.scopes();
+        if name.is_empty() {
+            map.remove(scope);
+        } else {
+            let p = self.get(name)?; // 必须存在
+            map.insert(scope.to_string(), p.name);
+        }
+        let path = self.dir.join("scopes.json");
+        std::fs::write(path, serde_json::to_string_pretty(&map)?)?;
         Ok(())
     }
 
+    pub fn scopes(&self) -> BTreeMap<String, String> {
+        let path = self.dir.join("scopes.json");
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn clear_scope(&self, scope: &str) -> Result<(), DesignError> {
+        self.set_scope(scope, "")
+    }
+
+    /// 解析某文档的有效规范：doc → publish → vault。
+    pub fn resolve(&self, doc: Option<&str>) -> Result<Option<DesignProfile>, DesignError> {
+        let map = self.scopes();
+        let mut keys: Vec<String> = Vec::new();
+        if let Some(d) = doc {
+            keys.push(format!("doc:{d}"));
+        }
+        keys.push("publish".to_string());
+        keys.push("vault".to_string());
+        for k in keys {
+            if let Some(name) = map.get(&k) {
+                if let Ok(p) = self.get(name) {
+                    return Ok(Some(p));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    // ---- 兼容旧接口：active = vault 作用域 ----
+
+    pub fn set_active(&self, name: &str) -> Result<(), DesignError> {
+        self.set_scope("vault", name)
+    }
+
     pub fn active(&self) -> Result<Option<DesignProfile>, DesignError> {
-        let p = self.dir.join("active");
-        if !p.is_file() {
-            return Ok(None);
-        }
-        let slug = std::fs::read_to_string(p)?;
-        let slug = slug.trim();
-        if slug.is_empty() {
-            return Ok(None);
-        }
-        match self.get(slug) {
-            Ok(x) => Ok(Some(x)),
-            Err(_) => Ok(None),
+        let map = self.scopes();
+        match map.get("vault") {
+            Some(name) => Ok(self.get(name).ok()),
+            None => Ok(None),
         }
     }
 
     pub fn clear_active(&self) -> Result<(), DesignError> {
-        let p = self.dir.join("active");
-        if p.is_file() {
-            std::fs::remove_file(p)?;
-        }
-        Ok(())
+        self.clear_scope("vault")
     }
 }
 
@@ -811,6 +948,32 @@ mod tests {
         assert!(out.contains(":root{"));
         assert!(out.contains("[data-theme=\"dark\"]{"));
         assert!(out.contains("oklch(19% .014 70)"));
+    }
+
+    #[test]
+    fn scope_precedence_doc_over_publish_over_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = DesignStore::open(dir.path()).unwrap();
+        let a = parse_css("vault-design", "a.css", ":root{--x:1}");
+        let b = parse_css("publish-design", "b.css", ":root{--x:2}");
+        let c = parse_css("doc-design", "c.css", ":root{--x:3}");
+        for p in [&a, &b, &c] {
+            store.save(p).unwrap();
+        }
+        store.set_scope("vault", "vault-design").unwrap();
+        assert_eq!(store.resolve(Some("Notes/x.md")).unwrap().unwrap().name, "vault-design");
+        store.set_scope("publish", "publish-design").unwrap();
+        assert_eq!(store.resolve(Some("Notes/x.md")).unwrap().unwrap().name, "publish-design");
+        assert_eq!(store.resolve(None).unwrap().unwrap().name, "publish-design");
+        store.set_scope("doc:Notes/x.md", "doc-design").unwrap();
+        assert_eq!(store.resolve(Some("Notes/x.md")).unwrap().unwrap().name, "doc-design");
+        // 其它文档仍走 publish
+        assert_eq!(store.resolve(Some("Notes/y.md")).unwrap().unwrap().name, "publish-design");
+        // 清空作用域
+        store.clear_scope("doc:Notes/x.md").unwrap();
+        store.clear_scope("publish").unwrap();
+        store.clear_scope("vault").unwrap();
+        assert!(store.resolve(Some("Notes/x.md")).unwrap().is_none());
     }
 
     #[test]

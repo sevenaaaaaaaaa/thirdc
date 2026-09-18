@@ -85,7 +85,27 @@ enum DesignCmd {
         activate: bool,
     },
     /// 激活某个规范（空名恢复内置契约）
-    Use { path: PathBuf, name: String },
+    Use {
+        path: PathBuf,
+        name: String,
+        /// 作用域：vault（默认）/ publish / 文档路径 Notes/x.md
+        #[arg(long, default_value = "vault")]
+        scope: String,
+    },
+    /// 查看作用域绑定
+    Scopes { path: PathBuf },
+    /// 消化一个真实页面（ego-lite → headless Chromium → 直接抓取）
+    Url {
+        path: PathBuf,
+        url: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// auto | ego | render | http
+        #[arg(long, default_value = "auto")]
+        via: String,
+        #[arg(long)]
+        activate: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -242,15 +262,89 @@ fn main() -> Result<()> {
                     println!("已激活 {}", p.name);
                 }
             }
-            DesignCmd::Use { path, name } => {
+            DesignCmd::Use { path, name, scope } => {
                 let vault = Vault::open(&path)?;
                 let k = kernel_core::Kernel::open(vault).context("open kernel")?;
-                if name.is_empty() {
-                    k.clear_active_design()?;
-                    println!("已恢复内置契约");
+                let sc = if scope == "vault" {
+                    "vault".to_string()
+                } else if scope == "publish" {
+                    "publish".to_string()
+                } else if scope.starts_with("Notes/") {
+                    format!("doc:{scope}")
                 } else {
-                    k.set_active_design(&name)?;
-                    println!("已激活 {name}");
+                    scope.clone()
+                };
+                k.set_design_scope(&sc, &name)?;
+                println!(
+                    "{} -> {}",
+                    sc,
+                    if name.is_empty() { "（清除，回退下级作用域）" } else { &name }
+                );
+            }
+            DesignCmd::Scopes { path } => {
+                let vault = Vault::open(&path)?;
+                let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+                let sc = k.design_scopes();
+                if sc.is_empty() {
+                    println!("（无作用域绑定，全部使用内置契约）");
+                }
+                for (k2, v) in sc {
+                    println!("{k2:28} -> {v}");
+                }
+            }
+            DesignCmd::Url { path, url, name, via, activate } => {
+                let vault = Vault::open(&path)?;
+                let k = kernel_core::Kernel::open(vault).context("open kernel")?;
+                let name = name.unwrap_or_else(|| {
+                    url.trim_end_matches('/').rsplit('/').next().unwrap_or("page").to_string()
+                });
+                let ego = k.vault.config.browser.ego.clone();
+                let chrome = k.vault.config.browser.chrome.clone();
+                let to = std::time::Duration::from_secs(60);
+                let mut tried: Vec<String> = Vec::new();
+
+                let make_ego = || kernel_core::ego_digest(&url, ego.as_deref(), to);
+                let make_render = || kernel_core::dump_dom(&url, chrome.as_deref(), to);
+                let make_http = || kernel_core::fetch_html(&url, to);
+
+                let profile = if via == "ego" || via == "auto" {
+                    match make_ego() {
+                        Ok(d) => k.import_design_digest(&name, &url, &d).map(|p| (p, "ego")),
+                        Err(e) => {
+                            tried.push(format!("ego: {e}"));
+                            if via == "ego" { Err(kernel_core::SyncError::Md(tried.join("; "))) }
+                            else { make_render().map_err(|e2| { tried.push(format!("render: {e2}")); kernel_core::SyncError::Md(tried.join("; ")) }).and_then(|h| k.import_design_html(&name, &url, &h).map(|p| (p, "render"))) }
+                        }
+                    }
+                } else if via == "render" || via == "headless" {
+                    make_render().map_err(|e| kernel_core::SyncError::Md(e.to_string())).and_then(|h| {
+                        k.import_design_html(&name, &url, &h).map(|p| (p, "render"))
+                    })
+                } else {
+                    make_http().map_err(|e| kernel_core::SyncError::Md(e.to_string())).and_then(|h| {
+                        k.import_design_html(&name, &url, &h).map(|p| (p, "http"))
+                    })
+                };
+                match profile {
+                    Ok((p, backend)) => {
+                        println!(
+                            "消化「{}」（{} · {}）：token {} · 字体 {:?} · 规则 {} · 组件 {}",
+                            p.name, p.kind, backend, p.tokens.len(), p.fonts, p.rules.len(), p.archetypes.len()
+                        );
+                        for r in p.rules.iter().take(8) {
+                            println!("  · {r}");
+                        }
+                        if activate {
+                            k.set_design_scope("vault", &p.name)?;
+                            println!("已激活（vault 作用域）");
+                        }
+                    }
+                    Err(e) => {
+                        println!("失败：{e}");
+                        if !tried.is_empty() {
+                            println!("尝试记录：{}", tried.join("; "));
+                        }
+                    }
                 }
             }
         },

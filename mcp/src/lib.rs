@@ -130,6 +130,7 @@ impl McpServer {
             "import_design" => self.t_import_design(args),
             "list_designs" => self.t_list_designs(args),
             "set_design" => self.t_set_design(args),
+            "import_page_design" => self.t_import_page_design(args),
             _ => Err((-32602, format!("unknown tool: {name}"))),
         }
     }
@@ -358,6 +359,65 @@ impl McpServer {
         })
     }
 
+    /// 消化一个真实页面的排版（ego-lite → headless Chromium → 直接抓取）。
+    fn t_import_page_design(&self, args: Value) -> Result<Value, (i32, String)> {
+        let url = args
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or((-32602, "missing 'url'".to_string()))?
+            .to_string();
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| url.trim_end_matches('/').rsplit('/').next().unwrap_or("page").to_string());
+        let via = args.get("via").and_then(|v| v.as_str()).unwrap_or("auto").to_string();
+        self.with_kernel(|k| {
+            let ego = k.vault.config.browser.ego.clone();
+            let chrome = k.vault.config.browser.chrome.clone();
+            let to = std::time::Duration::from_secs(60);
+            let mut tried: Vec<String> = Vec::new();
+
+            if via == "auto" || via == "ego" {
+                match kernel_core::ego_digest(&url, ego.as_deref(), to) {
+                    Ok(d) => {
+                        let p = k.import_design_digest(&name, &url, &d)?;
+                        return Ok(tool_result(
+                            format!("已用 ego-lite 消化 {url}\n{}", p.summary()),
+                            json!({ "name": p.name, "backend": "ego", "fonts": p.fonts, "rules": p.rules, "tokens": p.tokens.len() }),
+                        ));
+                    }
+                    Err(e) => tried.push(format!("ego: {e}")),
+                }
+            }
+            if via == "auto" || via == "render" || via == "headless" {
+                match kernel_core::dump_dom(&url, chrome.as_deref(), to) {
+                    Ok(html) => {
+                        let p = k.import_design_html(&name, &url, &html)?;
+                        return Ok(tool_result(
+                            format!("已用 headless Chromium 消化 {url}\n{}", p.summary()),
+                            json!({ "name": p.name, "backend": "render", "rules": p.rules }),
+                        ));
+                    }
+                    Err(e) => tried.push(format!("render: {e}")),
+                }
+            }
+            match kernel_core::fetch_html(&url, to) {
+                Ok(html) => {
+                    let p = k.import_design_html(&name, &url, &html)?;
+                    Ok(tool_result(
+                        format!("已直接抓取 {url}\n{}", p.summary()),
+                        json!({ "name": p.name, "backend": "http", "rules": p.rules }),
+                    ))
+                }
+                Err(e) => {
+                    tried.push(format!("http: {e}"));
+                    Err(anyhow::anyhow!("全部后端失败：{}", tried.join("; ")))
+                }
+            }
+        })
+    }
+
     // ---------- resources ----------
 
     fn resources_list(&self) -> Result<Value, (i32, String)> {
@@ -531,6 +591,19 @@ fn tool_definitions() -> Value {
                     "path": { "type": "string", "description": "或从本地路径导入（文件或目录）" }
                 },
                 "required": ["name"]
+            }
+        },
+        {
+            "name": "import_page_design",
+            "description": "消化一个真实网页的排版并导入为设计规范。优先用 ego-lite（复用已登录会话，拿到 computed style 级的字体/配色/容器宽/字阶），失败则退回 headless Chromium 或直接抓取。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" },
+                    "name": { "type": "string", "description": "规范名，缺省取 URL 末段" },
+                    "via": { "type": "string", "description": "auto | ego | render | http" }
+                },
+                "required": ["url"]
             }
         },
         {

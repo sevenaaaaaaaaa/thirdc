@@ -33,7 +33,9 @@ MCP 设计类 server                                              →  画布节
 | `SKILL.md` 目录 | 递归收集目录内 `.md/.css/.html`（每文件上限 512KB），合并解析为 kind=skill-dir |
 | `tokens.css` | 全量 `--name: value` + `@font-face` |
 | 任意 HTML 页面 | **排版摘要**：`<style>` 内 token、font-family、`max-width` 容器宽、标题层级计数、class 词频 → kind=html-digest |
-| 未来：CDP / ego-lite 抓真实页面 | 同 HTML 摘要，输入换成渲染后的 DOM |
+| **ego-lite（已落地）** | `ego-browser nodejs` 打开页面并 `page.evaluate` 抽取 **computed style** 级摘要：真实字体/配色/容器宽/字阶/高频组件，**可复用已登录会话** |
+| **headless Chromium（已落地）** | `--dump-dom` 渲染后 DOM（有 JS，无登录），自动探测 Playwright / Chrome / Chromium |
+| 直接抓取（已落地） | HTTP GET，静态站点兜底 |
 
 ## 三、消费方式（这才是目的）
 
@@ -68,8 +70,8 @@ CLI：`thirdc design list | add <path> [--name N] | use <name>`
 | DG-2 | 渲染套用（doc/publish/预览）+ MCP 工具与 resource | 已落地 |
 | DG-3 | HTML 排版摘要（页面消化，含 PHP/内容嗅探） | 已落地 |
 | DG-4 | 设计规范面板（色板/字体/规则/组件）+ 拖拽/路径导入 | 已落地 |
-| DG-5 | CDP/ego-lite 抓真实页面 + 组件级 archetype 抽取 | 规划 |
-| DG-6 | 多规范并存作用域（库级 / 文档级 / 发布目标级） | 规划 |
+| DG-5 | ego-lite / headless 页面消化（computed style 级） | 已落地 |
+| DG-6 | 多规范并存作用域（doc → publish → vault 优先级） | 已落地 |
 
 ## 七、已实现要点（含踩过的坑）
 
@@ -81,3 +83,17 @@ CLI：`thirdc design list | add <path> [--name N] | use <name>`
   需要从名含 font 的 token 值里回收字体。
 - **组件上限**：整目录 CSS 会把每条选择器都当组件（实测 1032 条），限 200 且优先 md 表格来源。
 - **路径导入**是目录（SKILL 包）的唯一可靠方式：浏览器拖文件夹不给内容，面板里明确提示。
+
+## 八、DG-5 / DG-6 实现记录
+
+**页面消化**：`thirdc design url <vault> <url> [--via auto|ego|render|http] [--activate]`、
+`POST /design/import-url`、MCP 工具 `import_page_design`（agent 可自己"学页面"）。
+
+踩坑：
+- ego CLI 的 `console.log` **走 stderr**，只读 stdout 会得到空输出；
+- homebrew 的 `/opt/homebrew/bin/chromium` 可能是指向已删除 app 的壳脚本，必须**跑 `--version` 验证**；
+- `ego lite.app` 的二进制在 `--dump-dom` 下会挂起，headless 要用 Playwright 的 `chrome-headless-shell`；
+- headless 启动要带独立 `--user-data-dir`（避免 profile 锁）与 `--no-sandbox`。
+
+**作用域优先级**：`doc:<路径>` → `publish` → `vault`，存于 `.thirdc/design/scopes.json`。
+实测：manifesto.md 走文档级规范，其它文档回退库级规范，互不干扰。

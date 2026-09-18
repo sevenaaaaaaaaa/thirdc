@@ -43,6 +43,23 @@ pub struct VaultConfig {
     /// 对话/agent 使用的模型端点（OpenAI 兼容）。缺省则对话走本地命令模式。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<AiConfig>,
+    /// 浏览器后端（页面消化：ego-lite / headless Chromium / CDP）
+    #[serde(default)]
+    pub browser: BrowserConfig,
+}
+
+/// 页面消化后端配置。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BrowserConfig {
+    /// ego-browser CLI 路径（缺省自动探测 ~/.local/bin/ego-browser）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ego: Option<String>,
+    /// Chromium/Chrome 可执行文件（缺省自动探测）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chrome: Option<String>,
+    /// 预留：已运行浏览器的 CDP 端点，如 http://127.0.0.1:9222
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp: Option<String>,
 }
 
 /// OpenAI 兼容的模型端点配置（OpenAI / DeepSeek / Ollama / vLLM / 任意兼容服务）。

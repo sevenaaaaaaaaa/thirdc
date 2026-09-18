@@ -2,9 +2,13 @@
 
 pub mod watch;
 
+pub use kernel_browser::{
+    Backend as BrowserBackend, BrowserError, DIGEST_JS, dump_dom, ego_digest, fetch_html,
+    find_chrome, find_ego,
+};
 pub use kernel_design::{
-    Archetype, DesignError, DesignProfile, DesignStore, apply_to_html, digest_html, import_path,
-    parse_css, parse_design_md,
+    Archetype, DesignError, DesignProfile, DesignStore, apply_to_html, digest_html, digest_page,
+    import_path, parse_css, parse_design_md,
 };
 pub use kernel_md::{Block, DocModel, from_markdown, to_html, to_markdown};
 pub use kernel_store::{AiConfig, Cas, ConnectionConfig, StoreError, Vault, VaultConfig, list_docs, new_doc_id, refs};
@@ -94,14 +98,64 @@ impl Kernel {
             .map_err(|e| SyncError::Md(e.to_string()))
     }
 
-    /// 渲染文档为 HTML，套用当前激活的设计规范（无规范则用内置契约）。
+    /// 渲染文档为 HTML，按作用域解析有效规范（doc → publish → vault）。
     pub fn render_doc_html(&mut self, rel: &str) -> Result<String, SyncError> {
         let model = self.get_doc(rel)?;
         let html = to_html(&model);
-        Ok(match self.active_design() {
+        let profile = self
+            .designs
+            .resolve(Some(rel))
+            .map_err(|e| SyncError::Md(e.to_string()))?;
+        Ok(match profile {
             Some(p) => apply_to_html(&html, &p),
             None => html,
         })
+    }
+
+    // ---------- 设计规范作用域（库级 / 文档级 / 发布级） ----------
+
+    pub fn set_design_scope(&self, scope: &str, name: &str) -> Result<(), SyncError> {
+        self.designs
+            .set_scope(scope, name)
+            .map_err(|e| SyncError::Md(e.to_string()))
+    }
+
+    pub fn design_scopes(&self) -> std::collections::BTreeMap<String, String> {
+        self.designs.scopes()
+    }
+
+    pub fn design_for_doc(&self, rel: &str) -> Option<DesignProfile> {
+        self.designs.resolve(Some(rel)).ok().flatten()
+    }
+
+    /// 从结构化页面摘要（computed style 级）导入规范。
+    pub fn import_design_digest(
+        &self,
+        name: &str,
+        source: &str,
+        digest: &serde_json::Value,
+    ) -> Result<DesignProfile, SyncError> {
+        let p = digest_page(name, source, digest);
+        if p.is_empty() {
+            return Err(SyncError::Md(format!("页面摘要未提取到任何排版信息：{source}")));
+        }
+        self.designs.save(&p).map_err(|e| SyncError::Md(e.to_string()))?;
+        Ok(p)
+    }
+
+    /// 从渲染/抓取到的 HTML 导入规范。
+    pub fn import_design_html(
+        &self,
+        name: &str,
+        source: &str,
+        html: &str,
+    ) -> Result<DesignProfile, SyncError> {
+        let p = digest_html(name, source, html);
+        if p.is_empty() {
+            return Err(SyncError::Md(format!("HTML 未提取到排版信息：{source}")));
+        }
+        self.designs.save(&p).map_err(|e| SyncError::Md(e.to_string()))?;
+        Ok(p)
     }
 
     /// 扫描 Notes/，把所有外部改动导入 op-log 并同步全文索引。

@@ -6,6 +6,7 @@ members = [
     "kernel/crates/kernel-store",
     "kernel/crates/kernel-sync",
     "kernel/crates/kernel-design",
+    "kernel/crates/kernel-browser",
     "server",
     "mcp",
     "cli",
@@ -35,8 +36,10 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tower = { version = "0.5", features = ["util"] }
 base64 = "0.22"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 futures-util = "=0.3.31"
+futures-channel = "=0.3.31"
+futures-sink = "=0.3.31"
 
 [profile.release]
 lto = "thin"
