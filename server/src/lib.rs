@@ -60,7 +60,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/graph", get(graph))
         .route("/board", get(get_board).put(put_board))
         .route("/asset-file", get(asset_file))
+        .route("/connections", get(connections))
         .route("/chat", post(chat))
+        .route("/chat/stream", post(chat_stream))
+        .route("/publish", get(publish_list).post(publish))
+        .route("/publish/{name}", get(publish_file))
         .route("/search", get(search))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
@@ -648,4 +652,213 @@ fn board_save(k: &Kernel, name: &str, v: &Value) -> anyhow::Result<()> {
     }
     std::fs::write(&p, serde_json::to_string_pretty(v)?)?;
     Ok(())
+}
+
+// ---------- 流式对话（SSE） ----------
+
+type SseEvent = Result<axum::response::sse::Event, std::convert::Infallible>;
+
+fn ev(name: &str, data: Value) -> SseEvent {
+    Ok(axum::response::sse::Event::default().event(name).data(data.to_string()))
+}
+
+/// 对话流：agent 每步工具调用即时上屏，最后给回复。
+async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    use axum::response::sse::Sse;
+    use futures_util::stream;
+
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let message = req.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
+    let ai = st.kernel.lock().unwrap().vault.config.ai.clone();
+    let server = st.mcp.clone();
+
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SseEvent>();
+
+    tokio::spawn(async move {
+        let result = match ai {
+            Some(cfg) if !cfg.base_url.is_empty() => {
+                let mut tx_step = tx.clone();
+                thirdc_mcp::agent::run_ai_with(&server, &cfg, &message, move |s| {
+                    let _ = tx_step.send(ev(
+                        "step",
+                        json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary }),
+                    ));
+                })
+                .await
+            }
+            _ => {
+                let out = thirdc_mcp::agent::command_mode(&server, &message);
+                for s in &out.steps {
+                    let _ = tx.send(ev("step", json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary })));
+                }
+                Ok(out)
+            }
+        };
+        match result {
+            Ok(out) => {
+                let _ = tx.send(ev(
+                    "reply",
+                    json!({ "mode": out.mode, "reply": out.reply }),
+                ));
+                let _ = tx.send(ev("done", json!({ "ok": true })));
+            }
+            Err(e) => {
+                let _ = tx.send(ev("error", json!({ "message": e.to_string() })));
+                let _ = tx.send(ev("done", json!({ "ok": false })));
+            }
+        }
+    });
+
+    let out = stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+    Sse::new(out).into_response()
+}
+
+// ---------- 发布（本地预览产物） ----------
+
+fn publish_dir(k: &Kernel) -> std::path::PathBuf {
+    k.vault.sidecar().join("publish")
+}
+
+async fn publish(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let path = req.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+    if !kernel_core::is_safe_doc_path(&path) {
+        return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+    }
+    let mut k = st.kernel.lock().unwrap();
+    if let Err(e) = k.sync_all() {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let model = match k.get_doc(&path) {
+        Ok(m) => m,
+        Err(e) => return err(StatusCode::NOT_FOUND, e).into_response(),
+    };
+    let title = model.title.clone().unwrap_or_else(|| path.clone());
+    let html = kernel_core::to_html(&model);
+    let slug = {
+        let s = kernel_core::slugify(&title);
+        if s.is_empty() {
+            format!("doc-{}", &kernel_core::Cas::hash_hex(path.as_bytes())[..8])
+        } else {
+            s
+        }
+    };
+    let dir = publish_dir(&k);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let file = dir.join(format!("{slug}.html"));
+    // 站点级 llms.txt：让 agent 能发现已发布内容
+    let mut manifest_path = dir.join("llms.txt");
+    if let Err(e) = std::fs::write(&file, html.as_bytes()) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let mut lines = vec![format!("# {} 发布内容", k.vault.config.name), String::new()];
+    if let Ok(read) = std::fs::read_dir(&dir) {
+        let mut names: Vec<String> = read
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .filter(|n| n.ends_with(".html"))
+            .collect();
+        names.sort();
+        for n in names {
+            lines.push(format!("- /publish/{n}"));
+        }
+    }
+    let _ = std::fs::write(&mut manifest_path, lines.join("\n"));
+    Json(json!({
+        "path": path, "title": title, "url": format!("/publish/{slug}.html"),
+        "bytes": html.len(), "note": "本地预览产物；对象存储 / GitHub Pages 目标规划中"
+    }))
+    .into_response()
+}
+
+async fn publish_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let dir = publish_dir(&k);
+    let mut items = Vec::new();
+    if let Ok(read) = std::fs::read_dir(&dir) {
+        for e in read.filter_map(|e| e.ok()) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".html") {
+                continue;
+            }
+            let meta = e.metadata().ok();
+            items.push(json!({
+                "name": name,
+                "url": format!("/publish/{name}"),
+                "bytes": meta.as_ref().map(|m| m.len()).unwrap_or(0),
+            }));
+        }
+    }
+    Json(json!({ "items": items, "llms_txt": "/publish/llms.txt" })).into_response()
+}
+
+/// 服务发布产物（sidecar/publish，仅 .html/.txt，防穿越）。
+async fn publish_file(
+    State(st): State<Arc<AppState>>,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        return (StatusCode::BAD_REQUEST, "bad name").into_response();
+    }
+    if !(name.ends_with(".html") || name.ends_with(".txt")) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    let dir = {
+        let k = st.kernel.lock().unwrap();
+        publish_dir(&k)
+    };
+    let abs = dir.join(&name);
+    match std::fs::read(&abs) {
+        Ok(bytes) => {
+            let mime = if name.ends_with(".html") {
+                "text/html; charset=utf-8"
+            } else {
+                "text/plain; charset=utf-8"
+            };
+            ([(header::CONTENT_TYPE, mime)], bytes).into_response()
+        }
+        Err(_) => (StatusCode::NOT_FOUND, "not found").into_response(),
+    }
+}
+
+/// 已配置的外部数据源连接（供 ⌘K / 采集面板展示）。
+async fn connections(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let list: Vec<Value> = k
+        .vault
+        .config
+        .connections
+        .iter()
+        .map(|c| json!({ "name": c.name, "command": c.command, "args": c.args }))
+        .collect();
+    let ai = k
+        .vault
+        .config
+        .ai
+        .as_ref()
+        .map(|a| json!({ "model": a.model, "base_url": a.base_url, "configured": !a.base_url.is_empty() }))
+        .unwrap_or(Value::Null);
+    Json(json!({ "connections": list, "ai": ai })).into_response()
 }

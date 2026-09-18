@@ -38,8 +38,7 @@ impl McpServer {
     }
 
     /// 工具定义转换为 OpenAI function calling 格式。
-    pub fn tools_for_llm(&self) -> Value {
-        let defs = tool_definitions();
+    pub fn tools_for_llm(&self) -> Value {        let defs = tool_definitions();
         let arr: Vec<Value> = defs
             .as_array()
             .cloned()
@@ -814,22 +813,106 @@ pub mod agent {
         pub steps: Vec<Step>,
     }
 
-    /// 命令模式：无需模型即可驱动（"搜索 X" / "新建 X" / "同步" / "采集 <连接>" / "列出"）。
+    /// 命令模式：无需模型即可驱动（"搜索 X" / "列出" / "新建 X" / "采集 <连接>" / "同步"）。
+    /// 动词按前缀匹配，不要求空格（"列出文档" 也能识别）。
     pub fn command_mode(server: &McpServer, message: &str) -> Outcome {
         let msg = message.trim();
-        let (verb, rest) = match msg.split_once(char::is_whitespace) {
-            Some((v, r)) => (v.trim_start_matches('/'), r.trim()),
-            None => (msg.trim_start_matches('/'), ""),
-        };
-        let (tool, args, label): (&str, Value, String) = match verb {
-            "搜索" | "找" | "search" => ("search_vault", json!({ "query": rest }), format!("检索「{rest}」")),
-            "列出" | "列表" | "ls" | "list" => ("list_docs", json!({}), "列出全部文档".into()),
-            "同步" | "sync" => ("vault_status", json!({}), "同步并查看状态".into()),
-            "状态" | "status" => ("vault_status", json!({}), "查看库状态".into()),
-            _ => {
-                // 未识别：整句当作检索
-                ("search_vault", json!({ "query": msg }), format!("检索「{msg}」"))
+        let raw = msg.trim_start_matches('/');
+        let verbs: &[(&str, &str)] = &[
+            ("搜索", "search"), ("查找", "search"), ("找", "search"), ("search", "search"),
+            ("列出", "list"), ("列表", "list"), ("ls", "list"), ("list", "list"),
+            ("新建", "new"), ("创建", "new"), ("new", "new"),
+            ("采集", "pull"), ("拉取", "pull"), ("pull", "pull"),
+            ("同步", "sync"), ("sync", "sync"), ("状态", "status"), ("status", "status"),
+        ];
+        let (kind, rest) = verbs
+            .iter()
+            .find(|(v, _)| raw.to_lowercase().starts_with(v))
+            .map(|(v, k)| (*k, raw[v.len()..].trim()))
+            .unwrap_or(("search", raw));
+
+        // 不需要模型的本地动作
+        match kind {
+            "new" if !rest.is_empty() => {
+                let slug = kernel_core::slugify(rest);
+                let path = if slug.is_empty() {
+                    format!("Notes/note-{}.md", &kernel_core::Cas::hash_hex(rest.as_bytes())[..8])
+                } else {
+                    format!("Notes/{slug}.md")
+                };
+                let body = format!("# {rest}\n\n");
+                let args = json!({ "path": path, "markdown": body });
+                return match server.call_tool_public("write_doc", args.clone()) {
+                    Ok(v) => Outcome {
+                        mode: "command",
+                        reply: format!("已创建 {path}"),
+                        steps: vec![Step { tool: "write_doc".into(), args, ok: true, summary: crate::extract_tool_text(&v) }],
+                    },
+                    Err(e) => Outcome {
+                        mode: "command",
+                        reply: format!("创建失败：{e}"),
+                        steps: vec![Step { tool: "write_doc".into(), args, ok: false, summary: e }],
+                    },
+                };
             }
+            "pull" => {
+                let (cfg, _) = {
+                    let k = match server.kernel.lock() {
+                        Ok(k) => k,
+                        Err(_) => return Outcome { mode: "command", reply: "内核锁异常".into(), steps: vec![] },
+                    };
+                    let found = k
+                        .vault
+                        .config
+                        .connections
+                        .iter()
+                        .find(|c| rest.is_empty() || c.name == rest)
+                        .cloned();
+                    (found, ())
+                };
+                let Some(cfg) = cfg else {
+                    let names: Vec<String> = server
+                        .kernel
+                        .lock()
+                        .map(|k| k.vault.config.connections.iter().map(|c| c.name.clone()).collect())
+                        .unwrap_or_default();
+                    return Outcome {
+                        mode: "command",
+                        reply: if names.is_empty() {
+                            "未配置任何连接。在 thirdc.toml 的 [[connections]] 里添加 MCP server。".into()
+                        } else {
+                            format!("指定要采集的连接：{}", names.join(" / "))
+                        },
+                        steps: vec![],
+                    };
+                };
+                let kernel_arc = server.kernel.clone();
+                return match crate::pull::pull_resources(&cfg, &kernel_arc) {
+                    Ok(r) => Outcome {
+                        mode: "command",
+                        reply: format!("采集完成：{} 个资源入库", r.imported.len()),
+                        steps: r
+                            .imported
+                            .iter()
+                            .map(|(uri, rel)| Step {
+                                tool: "resources/read".into(),
+                                args: json!({ "uri": uri }),
+                                ok: true,
+                                summary: rel.clone(),
+                            })
+                            .collect(),
+                    },
+                    Err(e) => Outcome { mode: "command", reply: format!("采集失败：{e}"), steps: vec![] },
+                };
+            }
+            _ => {}
+        }
+
+        let (tool, args, label): (&str, Value, String) = match kind {
+            "list" => ("list_docs", json!({}), "列出全部文档".into()),
+            "sync" | "status" => ("vault_status", json!({}), "查看库状态".into()),
+            _ => ("search_vault", json!({ "query": if rest.is_empty() { raw } else { rest } }),
+                  format!("检索「{}」", if rest.is_empty() { raw } else { rest })),
         };
         let mut steps = Vec::new();
         let reply = match server.call_tool_public(tool, args.clone()) {
@@ -851,6 +934,16 @@ pub mod agent {
         server: &McpServer,
         cfg: &AiConfig,
         message: &str,
+    ) -> anyhow::Result<Outcome> {
+        run_ai_with(server, cfg, message, |_| {}).await
+    }
+
+    /// 同上，但每一步工具调用都会回调（供 SSE 实时上屏）。
+    pub async fn run_ai_with(
+        server: &McpServer,
+        cfg: &AiConfig,
+        message: &str,
+        mut on_step: impl FnMut(&Step),
     ) -> anyhow::Result<Outcome> {
         let tools = server.tools_for_llm();
         let mut messages = vec![
@@ -901,7 +994,9 @@ pub mod agent {
                     Ok(v) => (true, crate::extract_tool_text(&v)),
                     Err(e) => (false, format!("失败：{e}")),
                 };
-                steps.push(Step { tool: name.clone(), args: args.clone(), ok, summary: summary.clone() });
+                let step = Step { tool: name.clone(), args: args.clone(), ok, summary: summary.clone() };
+                on_step(&step);
+                steps.push(step);
                 messages.push(json!({
                     "role": "tool",
                     "tool_call_id": call["id"].clone(),
