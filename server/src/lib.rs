@@ -73,6 +73,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/design/scope", post(design_scope))
         .route("/design/import-url", post(design_import_url))
         .route("/design/presets", get(design_presets))
+        .route("/ingest/topic", post(ingest_topic))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -82,6 +83,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/git/checkout", post(git_checkout))
         .route("/git/sync", post(git_sync))
         .route("/presentation", get(presentation))
+        .route("/metrics", get(metrics))
         .route("/design/{name}", get(design_get))
         .route("/a2ui/render", post(a2ui_render))
         .route("/a2ui/action", post(a2ui_action))
@@ -1745,6 +1747,84 @@ async fn ws_loop(st: Arc<AppState>, socket: axum::extract::ws::WebSocket) {
 
 #[cfg(test)]
 pub mod presence_tests;
+
+/// 主题一键采集：快速建立知识库（wikipedia / hackernews / arxiv + MCP 连接器扩展）。
+async fn ingest_topic(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let topic = req.get("topic").and_then(|t| t.as_str()).unwrap_or("").trim().to_string();
+    if topic.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "需要 topic").into_response();
+    }
+    let sources: Vec<String> = req
+        .get("sources")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_else(|| vec!["wikipedia".into(), "hackernews".into(), "arxiv".into()]);
+    let limit = req.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+
+    let t2 = topic.clone();
+    let src2 = sources.clone();
+    let r = tokio::task::spawn_blocking(move || kernel_core::ingest::ingest_topic(&t2, &src2, limit))
+        .await
+        .unwrap_or_else(|j| Err(format!("join: {j}")));
+    let docs = match r {
+        Ok(d) => d,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let mut k = st.kernel.lock().unwrap();
+    let mut imported = Vec::new();
+    for d in docs {
+        let uri = format!("topic://{}?t={}&src={}", urlenc_query(&topic),
+            &kernel_core::Cas::hash_hex(d.title.as_bytes())[..12], urlenc_query(&d.source));
+        match k.import_capture("topic", &uri, Some(&d.title), &format!("# {}\n\n> 来源：{}（{}）\n\n{}", d.title, d.url, d.source, d.text), &d.mime) {
+            Ok(rel) => imported.push(json!({ "title": d.title, "rel": rel, "source": d.source })),
+            Err(e) => {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+            }
+        }
+    }
+    let _ = urlenc_query;
+    Json(json!({ "topic": topic, "imported": imported })).into_response()
+}
+
+fn urlenc_query(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(*b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+
+async fn metrics(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let docs = kernel_core::list_docs(&k.vault).map(|d| d.len()).unwrap_or(0);
+    let assets = k.assets_count().unwrap_or(0);
+    let items = k.items_count().unwrap_or(0);
+    let publishes = std::fs::read_to_string(k.vault.sidecar().join("events/publish.jsonl"))
+        .map(|t| t.lines().count())
+        .unwrap_or(0);
+    let body = format!(
+        "# HELP thirdc_docs 知识库文档数\n# TYPE thirdc_docs gauge\nthirdc_docs {docs}\n\
+# HELP thirdc_assets 附件数\n# TYPE thirdc_assets gauge\nthirdc_assets {assets}\n\
+# HELP thirdc_captured_items 采集条目数\n# TYPE thirdc_captured_items gauge\nthirdc_captured_items {items}\n\
+# HELP thirdc_publishes_total 发布次数\n# TYPE thirdc_publishes_total counter\nthirdc_publishes_total {publishes}\n"
+    );
+    ([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")], body).into_response()
+}
 
 /// 一键整理：按首标签聚类根目录文档（规则版）；AI 可用时让模型给方案。
 async fn organize_plan(State(st): State<Arc<AppState>>, h: HeaderMap, _body: Bytes) -> impl IntoResponse {

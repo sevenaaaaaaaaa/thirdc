@@ -789,9 +789,30 @@ async function loadRail(){
   if(!r.docs.length&&!empty){
     const d=document.createElement('div');d.className='empty';d.id='empty';
     d.innerHTML=`<h2>空库，三个起点</h2><p>这里什么都没有——建一篇，或让 agent 帮你采进来。</p>
-      <div class="row"><button class="act" id="e-new">＋ 新建文档</button><button class="act" id="e-road">查看路线</button><button class="act" id="e-pal">⌘K 命令</button></div>`;
+      <div class="row"><button class="act" id="e-new">＋ 新建文档</button><button class="act" id="e-topic" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">⚡ 一键采集主题</button><button class="act" id="e-pal">⌘K 命令</button></div>
+      <div id="topic-form" style="display:none;margin-top:14px">
+        <input class="inp" id="topic-input" placeholder="输入主题，如：大语言模型 / CRDT / 知识图谱">
+        <div style="display:flex;gap:8px;justify-content:center">
+          <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="wikipedia" checked> Wikipedia</label>
+          <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="hackernews" checked> Hacker News</label>
+          <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="arxiv"> arXiv</label>
+          <button class="act" id="topic-go">采集</button>
+        </div>
+      </div>`;
     document.body.appendChild(d);
     d.querySelector('#e-new').onclick=newDoc;d.querySelector('#e-road').onclick=()=>openOverlay('road-ov');d.querySelector('#e-pal').onclick=openPalette;
+    d.querySelector('#e-topic').onclick=()=>{const f=d.querySelector('#topic-form');f.style.display=f.style.display==='none'?'block':'none';d.querySelector('#topic-input').focus()};
+    d.querySelector('#topic-go').onclick=async()=>{
+      const topic=d.querySelector('#topic-input').value.trim();if(!topic)return;
+      const srcs=[...d.querySelectorAll('.src-cb:checked')].map(x=>x.value);
+      d.querySelector('#topic-go').textContent='采集中…';d.querySelector('#topic-go').disabled=true;
+      try{
+        const r=await api('/ingest/topic',{method:'POST',json:{topic,sources:srcs,limit:5}});
+        toast(`已采集 ${r.imported.length} 篇「${topic}」`,'ok');
+        d.remove();await refreshAll();fit();
+      }catch(e){toast('采集失败：'+e.message,'err')}
+      const b2=d.querySelector('#topic-go');if(b2){b2.textContent='采集';b2.disabled=false}
+    };
   }else if(r.docs.length&&empty){empty.remove();}
 }
 async function loadStatus(){
@@ -1284,6 +1305,12 @@ const CMDS=[
   ['管理画布','b',async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();}],
   ['A2UI 示例','a',()=>{closeAll();$('a2ui-demo').click();}],
   ['连接器管理','c',async()=>{closeAll();await openConnPanel();}],
+  ['采集主题（快速建库）','t',async()=>{
+    closeAll();const t=prompt('采集主题','大语言模型');if(!t)return;
+    try{const r=await api('/ingest/topic',{method:'POST',json:{topic:t,limit:5}});
+      toast(`已采集 ${r.imported.length} 篇「${t}」`,'ok');await refreshAll();fit();
+    }catch(e){toast('采集失败：'+e.message,'err')}
+  }],
 ];
 function renderPalette(q){
   const box=$('palette-list');box.innerHTML='';

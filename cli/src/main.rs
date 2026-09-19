@@ -58,6 +58,16 @@ enum Cmd {
     },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
+    /// 主题一键采集（快速建立知识库）
+    Ingest {
+        path: PathBuf,
+        topic: String,
+        /// 源列表，缺省 wikipedia+hackernews+arxiv
+        #[arg(long, value_delimiter = ',')]
+        sources: Vec<String>,
+        #[arg(long, default_value = "5")]
+        limit: usize,
+    },
     /// 发布：构建站点并推送到目标
     Publish {
         path: PathBuf,
@@ -240,6 +250,25 @@ fn main() -> Result<()> {
                     out.flush()?;
                 }
             }
+        }
+        Cmd::Ingest { path, topic, sources, limit } => {
+            let vault = Vault::open(&path)?;
+            let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
+            let src = if sources.is_empty() {
+                vec!["wikipedia".into(), "hackernews".into(), "arxiv".into()]
+            } else {
+                sources
+            };
+            println!("采集「{topic}」（{}）…", src.join("/"));
+            let docs = kernel_core::ingest::ingest_topic(&topic, &src, limit).map_err(anyhow::Error::msg)?;
+            for d in &docs {
+                let uri = format!("topic://{}?t={}&src={}", kernel_core::ingest::urlenc_pub(&topic),
+                    &kernel_core::Cas::hash_hex(d.title.as_bytes())[..12], kernel_core::ingest::urlenc_pub(&d.source));
+                let rel = k.import_capture("topic", &uri, Some(&d.title),
+                    &format!("# {}\n\n> 来源：{}（{}）\n\n{}", d.title, d.url, d.source, d.text), &d.mime)?;
+                println!("  ✓ {} → {}", d.title, rel);
+            }
+            println!("共导入 {} 篇", docs.len());
         }
         Cmd::Publish { path, target, build_only } => {
             let vault = Vault::open(&path)?;
