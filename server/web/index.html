@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1505,6 +1505,23 @@ const CMDS=[
   ['管理画布','b',async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();}],
   ['A2UI 示例','a',()=>{closeAll();$('a2ui-demo').click();}],
   ['连接器管理','c',async()=>{closeAll();await openConnPanel();}],
+  ['全量备份（加密）','bk',async()=>{
+    closeAll();const p2=prompt('备份密码（至少 8 位，丢失密码=丢失备份）','');
+    if(!p2||p2.length<8)return;
+    toast('备份中…');
+    try{const r=await api('/backup',{method:'POST',json:{password:p2,webdav_url:localStorage.getItem('thirdc_webdav')||''}});
+      toast(r.message,'ok');
+      // 下载到本地
+      const b=new Blob([atob(r.file)],{type:'application/octet-stream'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=r.file;a.click();
+    }catch(e){toast('备份失败：'+e.message,'err')}
+  }],
+  ['设置 WebDAV 备份地址','wd',()=>{
+    const cur=localStorage.getItem('thirdc_webdav')||'';
+    const nv=prompt('WebDAV 地址（如 https://dav.jianguoyun.com/dav/kb/）',cur);
+    if(nv!==null)localStorage.setItem('thirdc_webdav',nv);
+    toast(nv?'WebDAV 已设置':'WebDAV 已清除','ok');
+  }],
   ['网页本地化','w',async()=>{
     closeAll();const url=prompt('网页 URL','https://example.com/article');if(!url)return;
     try{

@@ -1794,6 +1794,7 @@ dependencies = [
  "kernel-core",
  "kernel-deploy",
  "notify",
+ "reqwest",
  "serde_json",
  "tempfile",
  "thirdc-mcp",

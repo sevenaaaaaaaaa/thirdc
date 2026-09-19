@@ -106,6 +106,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/sync", post(sync))
         .route("/auth/login", post(auth_login))
         .route("/refresh", post(force_refresh))
+        .route("/backup", post(backup_vault))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -2355,4 +2356,54 @@ async fn force_refresh(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl In
         "indexed": indexed,
         "message": format!("已刷新：{changed} 篇变更，{docs} 篇文档，{indexed} 篇已索引")
     })).into_response()
+}
+
+/// 全量备份：打包整个 vault（加密可选），返回文件或推送到 WebDAV。
+async fn backup_vault(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    use kernel_deploy::encrypted_backup;
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let password = req.get("password").and_then(|p| p.as_str()).unwrap_or("");
+    if password.len() < 8 {
+        return err(StatusCode::BAD_REQUEST, "备份密码至少 8 位（丢失密码=丢失备份）").into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let encrypted = match encrypted_backup::encrypt_vault(&k.vault.root, password) {
+        Ok(e) => e,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let hash = kernel_core::Cas::hash_hex(&encrypted);
+    let fname = format!("thirdc-backup-{}-{}.tcenc", chrono_today(), &hash[..8]);
+    let dir = k.vault.sidecar().join("backups");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(&fname);
+    std::fs::write(&path, &encrypted).unwrap_or(());
+    // 可选推 WebDAV
+    if let Some(dav_url) = req.get("webdav_url").and_then(|u| u.as_str()) {
+        let user = std::env::var("WEBDAV_USER").unwrap_or_default();
+        let pass = std::env::var("WEBDAV_PASS").unwrap_or_default();
+        if !user.is_empty() {
+            let client = reqwest::blocking::Client::new();
+            let url = format!("{}/{}", dav_url.trim_end_matches('/'), fname);
+            match client.put(&url).basic_auth(&user, Some(&pass)).body(encrypted.clone()).send() {
+                Ok(r) if r.status().is_success() => { /* 上传成功 */ }
+                Ok(r) => eprintln!("WebDAV backup failed: {}", r.status()),
+                Err(e) => eprintln!("WebDAV error: {e}"),
+            }
+        }
+    }
+    let size = encrypted.len();
+    audit_log(&k.vault.sidecar(), "backup", &json!({ "file": fname, "bytes": size, "encrypted": true }));
+    Json(json!({
+        "file": fname, "bytes": size, "encrypted": true,
+        "message": "备份已加密存储（丢失密码=丢失备份）；可用 WebDAV 推送到网盘"
+    })).into_response()
+}
+
+fn chrono_today() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let (y, m, d, _, _, _) = kernel_deploy::s3::civil_from_unix(secs as i64);
+    format!("{y:04}{m:02}{d:02}")
 }
