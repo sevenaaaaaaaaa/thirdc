@@ -65,6 +65,26 @@ pub struct PublishConfig {
     /// 公开站点根地址（用于 sitemap / 复制链接）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// 外部变更后自动发布（PUB-5）
+    #[serde(default)]
+    pub auto: bool,
+    /// 发布前检查（PUB-4 国内合规钩子）
+    #[serde(default)]
+    pub checks: ChecksConfig,
+}
+
+/// 发布前检查配置。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChecksConfig {
+    /// 敏感词表：命中即阻断发布
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sensitive_words: Vec<String>,
+    /// 外部机审 API：POST {files:[{path,sha256}]}，期望 {ok:bool, reasons?:[..]}
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_api: Option<String>,
+    /// 机审不可达时是否阻断（默认仅告警）
+    #[serde(default)]
+    pub fail_on_audit_error: bool,
 }
 
 fn default_site_dir() -> String {
@@ -109,6 +129,16 @@ pub struct PublishTarget {
     pub token_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_base_url: Option<String>,
+    /// API 基址（缺省 https://api.cloudflare.com；测试/国内网络可改）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base: Option<String>,
+    // ---- 国内合规（PUB-4）----
+    /// 国内目标：同步与发布隔离策略、页脚备案、机审必过
+    #[serde(default)]
+    pub domestic: bool,
+    /// ICP 备案号（domestic 时必填，注入页脚）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icp: Option<String>,
 }
 
 /// 页面消化后端配置。

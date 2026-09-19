@@ -12,8 +12,8 @@ sha2.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 hmac.workspace = true
+reqwest.workspace = true
 walkdir.workspace = true
-reqwest = { workspace = true, features = ["json", "rustls-tls", "blocking"] }
 
 [dev-dependencies]
 tempfile.workspace = true

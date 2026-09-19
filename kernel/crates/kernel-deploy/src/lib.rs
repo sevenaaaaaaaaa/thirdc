@@ -8,6 +8,7 @@
 //!
 //! 增量：state 文件记录已上传内容哈希；git 由 git 自己算差异。
 
+pub mod cf_pages;
 pub mod s3;
 
 use kernel_store::PublishTarget;
@@ -143,9 +144,14 @@ pub fn deploy(
             }
             r
         }
-        "cf-pages" => Err(DeployError::Unsupported(
-            "cf-pages 直传：下一步（配置字段已就绪；也可用 git 目标接 Cloudflare Pages 的 Git 集成）".into(),
-        )),
+        "cf-pages" => {
+            let mut st = load_state(&state_path(sidecar, &target.name));
+            let r = cf_pages::deploy_cf_pages(site_dir, target, &mut st);
+            if r.is_ok() {
+                let _ = save_state(&state_path(sidecar, &target.name), &st);
+            }
+            r
+        }
         other => Err(DeployError::Unsupported(other.to_string())),
     }
     .map(|r| {
@@ -355,13 +361,6 @@ mod tests {
         std::env::remove_var("AWS_ACCESS_KEY_ID");
         let e = deploy(dir.path(), dir.path(), &target("s3", "s3")).unwrap_err();
         assert!(e.to_string().contains("endpoint"), "配置缺失要说清楚：{e}");
-    }
-
-    #[test]
-    fn cf_pages_direct_upload_reports_next_step() {
-        let dir = tempfile::tempdir().unwrap();
-        let e = deploy(dir.path(), dir.path(), &target("cf", "cf-pages")).unwrap_err();
-        assert!(e.to_string().contains("下一步"), "未实现的目标要明确说明：{e}");
     }
 
     #[test]

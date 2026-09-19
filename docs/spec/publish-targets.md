@@ -19,7 +19,7 @@
 | `local` | ✅ 已落地 | 站点落在 sidecar，daemon 直接托管；用于本地预览/离线分发 |
 | `git` | ✅ 已落地 | 站点目录变成 git 仓库并 push 到分支 —— **GitHub Pages 与 Cloudflare Pages 的 Git 集成都走这条** |
 | `s3` | ✅ 已落地 | S3 / R2 / OSS / COS / MinIO：SigV4 直传，path-style + prefix，按内容哈希增量 |
-| `cf-pages` | 下一步 | Cloudflare Pages 直传 API（多部分上传 + manifest）；当前可用 git 目标接 Git 集成 |
+| `cf-pages` | ✅ 已落地 | 直传 API：multipart（manifest 按哈希映射、同内容文件去重上传）；整站指纹未变则跳过 |
 
 ### 配置（thirdc.toml）
 
@@ -103,6 +103,27 @@ public_base_url = "https://kb.example.com"   # 复制链接/Sitemap 用
 |---|---|
 | PUB-1 | 站点构建器 + local/git 目标 + CLI/HTTP/客户端 | ✅ 已落地 |
 | PUB-2 | S3 兼容 SigV4 直传（增量去重） | ✅ 已落地 |
-| PUB-3 | Cloudflare Pages 直传（多部分上传 + manifest 哈希） |
-| PUB-4 | 发布前检查钩子：国内合规（机审/备案）、链接检查、图片图床解析 |
-| PUB-5 | 定时/变更触发自动发布（event log 驱动） |
+| PUB-3 | Cloudflare Pages 直传（多部分上传 + manifest 哈希） | ✅ 已落地 |
+| PUB-4 | 发布前检查：ICP 必填+页脚注入、敏感词、内链/图片完整性、外部机审 API、审计留痕 | ✅ 已落地 |
+| PUB-5 | 变更触发自动发布（watcher 驱动，审计留痕） | ✅ 已落地 |
+
+## 六、PUB-3/4/5 实现记录
+
+**PUB-3 Cloudflare Pages 直传**：`POST /client/v4/accounts/{aid}/pages/projects/{p}/deployments`，
+multipart 里 `manifest` = `{路径: sha256}`，文件 part 以内容哈希命名（**同内容文件只传一次**）。
+整站指纹未变不建部署。`api_base` 可改（测试与国内网络）。
+实测：本地 mock 校验了 manifest 存在、bearer 令牌、同内容去重、指纹跳过、变更重建。
+
+**PUB-4 发布前检查**（server 与 CLI 都接入，阻断级问题不推送）：
+- 国内目标 `domestic = true` → `icp` 必填，构建时自动注入页脚
+- 敏感词表（`checks.sensitive_words`）扫站点 HTML，命中即阻断
+- 内链/图片完整性：HTML 里 href/src 引用的本地文件必须存在
+- 外部机审 API（`checks.audit_api`）：POST 文件清单哈希 → `{ok, reasons}`；不可达可配 warn/block
+- **审计留痕**：每次发布（含检查结果）追加 `events/publish.jsonl`
+
+**PUB-5 自动发布**：`[publish] auto = true` → daemon 的 watcher 合入外部变更后
+自动构建并推送到默认目标（审计记 `auto-publish`）。
+实测：daemon 运行中外部追加一段文字 → gh-pages 裸仓库出现新提交，内容含新段落。
+
+**踩坑**：单页预览产物目录（`publish/`）与站点目录（`site/`、`deploy/`）是两套产物；
+合规检查扫的是部署目录——旧版本构建的残留页也会被查到，清掉即可。

@@ -261,7 +261,7 @@ fn main() -> Result<()> {
                     ..Default::default()
                 });
             let dir = k.vault.root.join(kernel_deploy::target_dir(&t, &cfg.site_dir));
-            let m = k.build_site(&dir, cfg.base_url.as_deref())?;
+            let m = k.build_site(&dir, cfg.base_url.as_deref(), t.icp.as_deref())?;
             println!(
                 "站点已构建：{}（{} 个文件，{:.1} KB）",
                 dir.display(),
@@ -271,10 +271,31 @@ fn main() -> Result<()> {
             for f in m.files.iter().take(12) {
                 println!("  {}", f.path);
             }
+            let issues = k.compliance_check(&dir, &t)?;
+            let blocking: Vec<_> = issues.iter().filter(|i| i.level == "block").collect();
+            for i in &issues {
+                println!("  [{}] {}: {}", i.level, i.file, i.detail);
+            }
+            if !blocking.is_empty() {
+                anyhow::bail!("发布前检查未通过（{} 项阻断）", blocking.len());
+            }
             if build_only {
                 return Ok(());
             }
             let report = kernel_deploy::deploy(&dir, &k.vault.sidecar(), &t)?;
+            {
+                let dir_ev = k.vault.sidecar().join("events");
+                let _ = std::fs::create_dir_all(&dir_ev);
+                let line = serde_json::json!({
+                    "ts": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                    "kind": "publish",
+                    "data": { "target": report.target, "kind": report.kind, "uploaded": report.uploaded, "skipped": report.skipped, "checks": issues.len(), "detail": report.detail }
+                });
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir_ev.join("publish.jsonl")) {
+                    let _ = writeln!(f, "{line}");
+                }
+            }
             println!(
                 "部署 [{} / {}]：上传 {} · 跳过 {} · {}",
                 report.target, report.kind, report.uploaded, report.skipped, report.detail

@@ -492,6 +492,7 @@ impl Kernel {
         &mut self,
         out: &std::path::Path,
         base_url: Option<&str>,
+        icp: Option<&str>,
     ) -> Result<SiteManifest, SyncError> {
         self.sync_all()?;
         std::fs::create_dir_all(out)?;
@@ -606,6 +607,8 @@ a{{text-decoration:none;font-weight:600}}p{{margin:4px 0 0;opacity:.72;font-size
 
         // 清理上一版残留（保留 .git 等非站点文件）
         let manifest = collect_manifest(out, &self.vault.config.name, base_url)?;
+        let manifest_before_icp = manifest.clone();
+        let _ = manifest_before_icp;
         if let Some(prev) = previous {
             let now: std::collections::HashSet<&str> =
                 manifest.files.iter().map(|f| f.path.as_str()).collect();
@@ -615,6 +618,11 @@ a{{text-decoration:none;font-weight:600}}p{{margin:4px 0 0;opacity:.72;font-size
                 }
             }
         }
+        // 国内合规：页脚注入 ICP
+        if let Some(icp) = icp {
+            self.inject_icp_footer(out, icp)?;
+        }
+        let manifest = collect_manifest(out, &self.vault.config.name, base_url)?;
         std::fs::write(
             out.join("manifest.json"),
             serde_json::to_string_pretty(&manifest).unwrap_or_default(),
@@ -676,4 +684,175 @@ pub fn collect_manifest(
         files,
         base_url: base_url.map(|s| s.to_string()),
     })
+}
+
+/// 发布前检查结果（PUB-4）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ComplianceIssue {
+    /// block（阻断）| warn（仅告警）
+    pub level: String,
+    pub file: String,
+    pub detail: String,
+}
+
+impl Kernel {
+    /// 发布前检查：国内合规（ICP 必填 + 页脚注入由 build_site 负责）、敏感词、
+    /// 内链/图片完整性、外部机审 API。返回 issues；空 = 通过。
+    pub fn compliance_check(
+        &mut self,
+        site_dir: &std::path::Path,
+        target: &PublishTarget,
+    ) -> Result<Vec<ComplianceIssue>, SyncError> {
+        let mut issues = Vec::new();
+        let cfg = self.vault.config.publish.checks.clone();
+
+        // 1) 国内目标：ICP 备案号必填
+        if target.domestic
+            && target.icp.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
+        {
+            issues.push(ComplianceIssue {
+                level: "block".into(),
+                file: target.name.clone(),
+                detail: "国内发布目标必须填写 ICP 备案号（target.icp），并确认已备案".into(),
+            });
+        }
+
+        // 2) 敏感词 + 内链完整性（扫描站点 HTML）
+        for f in site_files(site_dir)? {
+            if !f.ends_with(".html") {
+                continue;
+            }
+            let content = std::fs::read_to_string(site_dir.join(&f)).unwrap_or_default();
+            for w in &cfg.sensitive_words {
+                if !w.is_empty() && content.contains(w.as_str()) {
+                    issues.push(ComplianceIssue {
+                        level: "block".into(),
+                        file: f.clone(),
+                        detail: format!("命中敏感词「{w}」"),
+                    });
+                }
+            }
+            // 内链与图片：引用的本地文件必须存在
+            for (attr, val) in extract_refs(&content) {
+                let path = val.split(['?', '#']).next().unwrap_or("").to_string();
+                if path.starts_with("http://") || path.starts_with("https://") || path.starts_with('#') {
+                    continue;
+                }
+                let clean = path.trim_start_matches('/');
+                if clean.is_empty() {
+                    continue;
+                }
+                if !site_dir.join(clean).is_file() {
+                    issues.push(ComplianceIssue {
+                        level: "block".into(),
+                        file: f.clone(),
+                        detail: format!("{attr} 引用缺失：{path}"),
+                    });
+                }
+            }
+        }
+
+        // 3) 外部机审 API（契约：POST {files:[{path,sha256}]} → {ok, reasons?}）
+        if let Some(api) = &cfg.audit_api {
+            let mut files = Vec::new();
+            for f in site_files(site_dir)? {
+                let bytes = std::fs::read(site_dir.join(&f)).unwrap_or_default();
+                files.push(serde_json::json!({
+                    "path": f, "sha256": Cas::hash_hex(&bytes), "bytes": bytes.len()
+                }));
+            }
+            match reqwest::blocking::Client::new()
+                .post(api)
+                .json(&serde_json::json!({ "target": target.name, "files": files }))
+                .timeout(std::time::Duration::from_secs(20))
+                .send()
+            {
+                Ok(resp) => match resp.json::<serde_json::Value>() {
+                    Ok(v) if v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) => {}
+                    Ok(v) => issues.push(ComplianceIssue {
+                        level: "block".into(),
+                        file: "audit".into(),
+                        detail: format!("机审未通过：{}", v),
+                    }),
+                    Err(e) => issues.push(issue_for_audit_error(&cfg, e.to_string())),
+                },
+                Err(e) => issues.push(issue_for_audit_error(&cfg, e.to_string())),
+            }
+        }
+        Ok(issues)
+    }
+
+    /// 把机审结果合并进站点页面：ICP 页脚注入到每个 html。
+    pub fn inject_icp_footer(&self, site_dir: &std::path::Path, icp: &str) -> Result<(), SyncError> {
+        for f in site_files(site_dir)? {
+            if !f.ends_with(".html") {
+                continue;
+            }
+            let path = site_dir.join(&f);
+            let html = std::fs::read_to_string(&path).unwrap_or_default();
+            if html.contains("icp-footer") {
+                continue;
+            }
+            let footer = format!(
+                "<footer class=\"icp-footer\" style=\"text-align:center;padding:24px 0;color:#8888;font-size:12px\">{}</footer>",
+                esc_html(icp)
+            );
+            let patched = match html.rfind("</body>") {
+                Some(i) => format!("{}{}{}", &html[..i], footer, &html[i..]),
+                None => html,
+            };
+            std::fs::write(&path, patched)?;
+        }
+        Ok(())
+    }
+}
+
+fn issue_for_audit_error(cfg: &kernel_store::ChecksConfig, msg: String) -> ComplianceIssue {
+    ComplianceIssue {
+        level: if cfg.fail_on_audit_error { "block".into() } else { "warn".into() },
+        file: "audit".into(),
+        detail: format!("机审不可达：{msg}"),
+    }
+}
+
+/// 站点内 HTML 文件清单（相对路径）。
+pub fn site_files(dir: &std::path::Path) -> Result<Vec<String>, SyncError> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let rd = std::fs::read_dir(&d).map_err(SyncError::Io)?;
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name == ".git" {
+                continue;
+            }
+            if p.is_dir() {
+                stack.push(p);
+            } else if name.ends_with(".html") {
+                out.push(p.strip_prefix(dir).unwrap_or(&p).to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// 抽取 href/src 引用（值为相对路径的）。
+fn extract_refs(html: &str) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    for attr in ["href", "src"] {
+        let pat = format!("{attr}=\"");
+        let mut rest = html;
+        while let Some(i) = rest.find(&pat) {
+            let after = &rest[i + pat.len()..];
+            if let Some(end) = after.find('"') {
+                out.push((if attr == "href" { "链接" } else { "图片" }, after[..end].to_string()));
+                rest = &after[end + 1..];
+            } else {
+                break;
+            }
+        }
+    }
+    out
 }

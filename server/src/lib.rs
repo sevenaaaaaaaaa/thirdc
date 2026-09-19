@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 pub struct AppState {
     pub kernel: Arc<Mutex<Kernel>>,
     pub mcp: Arc<thirdc_mcp::McpServer>,
+    pub hub: Arc<PresenceHub>,
     pub token: String,
 }
 
@@ -64,6 +65,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/doc/move", post(move_doc))
         .route("/asset-file", get(asset_file))
         .route("/connections", get(connections))
+        .route("/conn/probe", post(conn_probe))
+        .route("/conn/pull", post(conn_pull))
         .route("/design", get(design_list))
         .route("/design/import", post(design_import))
         .route("/design/active", post(design_active))
@@ -83,6 +86,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
         .route("/sync", post(sync))
+        .route("/ws", get(ws_handler))
         .with_state(state)
 }
 
@@ -567,6 +571,7 @@ fn is_safe_doc_path(p: &str) -> bool {
 
 /// 启动后台 watcher：外部改动实时进入内核（共享同一 Kernel 锁）。
 pub fn spawn_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
+    let sidecar = state.kernel.lock().unwrap().vault.sidecar();
     let notes_dir = state.kernel.lock().unwrap().vault.notes_dir();
     let (tx, rx) = std::sync::mpsc::channel::<Result<notify::Event, notify::Error>>();
     let mut watcher = notify::recommended_watcher(tx)?;
@@ -581,7 +586,11 @@ pub fn spawn_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
             while rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).is_ok() {}
             let mut k = state.kernel.lock().unwrap();
             match k.sync_all() {
-                Ok(n) if n > 0 => println!("[thirdc] watcher merged {n} external change(s)"),
+                Ok(n) if n > 0 => {
+                    println!("[thirdc] watcher merged {n} external change(s)");
+                    drop(k);
+                    maybe_auto_publish(&state, &sidecar);
+                }
                 Ok(_) => {}
                 Err(e) => eprintln!("[thirdc] watcher sync error: {e}"),
             }
@@ -598,6 +607,7 @@ pub fn build_state(vault: Vault) -> anyhow::Result<Arc<AppState>> {
     Ok(Arc::new(AppState {
         kernel,
         mcp,
+        hub: Arc::new(PresenceHub::new()),
         token: machine.token,
     }))
 }
@@ -1379,7 +1389,8 @@ async fn publish_site(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
     };
     let out = k.vault.root.join(&dir);
     let base = cfg.base_url.clone();
-    match k.build_site(&out, base.as_deref()) {
+    let icp = cfg.targets.iter().find(|t| t.name == target_name).and_then(|t| t.icp.clone());
+    match k.build_site(&out, base.as_deref(), icp.as_deref()) {
         Ok(m) => Json(json!({
             "site_dir": dir.display().to_string(),
             "files": m.files.len(),
@@ -1430,14 +1441,33 @@ async fn publish_deploy(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
         let dir = k.vault.root.join(kernel_deploy::target_dir(&target, &cfg.site_dir));
         let sidecar = k.vault.sidecar();
         let base = cfg.base_url.clone();
-        if let Err(e) = k.build_site(&dir, base.as_deref()) {
+        let icp = target.icp.clone();
+        if let Err(e) = k.build_site(&dir, base.as_deref(), icp.as_deref()) {
             return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
         }
         (dir, target, sidecar, base)
     };
 
+    // PUB-4：发布前检查（阻断级问题不推送）
+    let issues = match {
+        let mut k = st.kernel.lock().unwrap();
+        k.compliance_check(&dir, &target)
+    } {
+        Ok(i) => i,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let blocking: Vec<_> = issues.iter().filter(|i| i.level == "block").collect();
+    audit_log(&sidecar, "publish", &json!({
+        "target": target.name, "kind": target.kind,
+        "checks": issues, "passed": blocking.is_empty(),
+    }));
+    if !blocking.is_empty() {
+        return err(StatusCode::BAD_REQUEST, format!("发布前检查未通过：{}", serde_json::to_string(&blocking).unwrap_or_default())).into_response();
+    }
+
     let t2 = target.clone();
-    let r = tokio::task::spawn_blocking(move || kernel_deploy::deploy(&dir, &sidecar, &t2))
+    let sidecar2 = sidecar.clone();
+    let r = tokio::task::spawn_blocking(move || kernel_deploy::deploy(&dir, &sidecar2, &t2))
         .await
         .unwrap_or_else(|j| Err(kernel_deploy::DeployError::Io(std::io::Error::other(format!("join: {j}")))));
     match r {
@@ -1445,8 +1475,226 @@ async fn publish_deploy(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
             if report.url.is_none() {
                 report.url = base.clone();
             }
+            audit_log(&sidecar, "publish", &json!({ "target": report.target, "uploaded": report.uploaded, "skipped": report.skipped, "detail": report.detail }));
             Json(serde_json::to_value(report).unwrap_or(json!({}))).into_response()
         }
         Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
     }
 }
+
+/// 审计日志：append-only events（PUB-4 留痕要求）。
+fn audit_log(sidecar: &std::path::Path, kind: &str, v: &Value) {
+    let dir = sidecar.join("events");
+    let _ = std::fs::create_dir_all(&dir);
+    let line = json!({ "ts": now_secs(), "kind": kind, "data": v });
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("publish.jsonl")) {
+        use std::io::Write;
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+// ── PUB-5：变更自动发布 ──
+/// watcher 同步到外部改动后调用；有变更且配置 auto → 构建并推到默认目标（节流 60s）。
+pub fn maybe_auto_publish(state: &Arc<AppState>, sidecar: &std::path::Path) {
+    let (auto, default, target) = {
+        let k = state.kernel.lock().unwrap();
+        let cfg = k.vault.config.publish.clone();
+        let t = cfg
+            .targets
+            .iter()
+            .find(|t| Some(&t.name) == cfg.default_target.as_ref())
+            .cloned();
+        (cfg.auto, cfg.default_target.clone(), t)
+    };
+    if !auto {
+        return;
+    }
+    let Some(target) = target.or_else(|| default.map(|n| kernel_core::PublishTarget {
+        name: n, kind: "local".into(), dir: None, ..Default::default()
+    })) else { return; };
+
+    let dir = state.kernel.lock().unwrap().vault.root.join(kernel_deploy::target_dir(&target, "site"));
+    let base = {
+        let k = state.kernel.lock().unwrap();
+        k.vault.config.publish.base_url.clone()
+    };
+    let icp = target.icp.clone();
+    if let Err(e) = {
+        let mut k = state.kernel.lock().unwrap();
+        k.build_site(&dir, base.as_deref(), icp.as_deref())
+    } {
+        audit_log(sidecar, "auto-publish", &json!({ "error": e.to_string() }));
+        return;
+    }
+    let st2 = state.clone();
+    let t2 = target.clone();
+    let sc = sidecar.to_path_buf();
+    std::thread::spawn(move || {
+        let r = kernel_deploy::deploy(&dir, &sc, &t2);
+        audit_log(&sc, "auto-publish", &match r {
+            Ok(rep) => json!({ "target": rep.target, "uploaded": rep.uploaded, "skipped": rep.skipped, "detail": rep.detail }),
+            Err(e) => json!({ "error": e.to_string() }),
+        });
+        let _ = st2;
+    });
+}
+
+// ── 连接器管理端点（采集入口可视化） ──
+async fn conn_probe(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let cfg = {
+        let k = st.kernel.lock().unwrap();
+        k.vault.config.connections.iter().find(|c| c.name == name).cloned()
+    };
+    let Some(cfg) = cfg else {
+        return err(StatusCode::NOT_FOUND, format!("连接 {name} 不存在")).into_response();
+    };
+    let r = tokio::task::spawn_blocking(move || thirdc_mcp::pull::probe(&cfg)).await;
+    match r {
+        Ok(Ok((server, tools, resources))) => Json(json!({ "server": server, "tools": tools, "resources": resources })).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, e).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+async fn conn_pull(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let cfg = {
+        let k = st.kernel.lock().unwrap();
+        k.vault.config.connections.iter().find(|c| c.name == name).cloned()
+    };
+    let Some(cfg) = cfg else {
+        return err(StatusCode::NOT_FOUND, format!("连接 {name} 不存在")).into_response();
+    };
+    let kernel = st.kernel.clone();
+    let r = tokio::task::spawn_blocking(move || thirdc_mcp::pull::pull_resources(&cfg, &kernel)).await;
+    match r {
+        Ok(Ok(report)) => Json(json!({
+            "server": report.server,
+            "tools": report.tools,
+            "imported": report.imported.iter().map(|(u, rel)| json!({"uri": u, "rel": rel})).collect::<Vec<_>>(),
+            "skipped": report.skipped,
+        }))
+        .into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, e).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+// ── UX-4：协作光标（WebSocket presence） ──
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// 在线协作者注册表：进房/广播/退房。
+pub struct PresenceHub {
+    clients: Mutex<std::collections::HashMap<u64, tokio::sync::mpsc::UnboundedSender<Value>>>,
+    next: AtomicU64,
+}
+
+impl Default for PresenceHub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PresenceHub {
+    pub fn new() -> Self {
+        PresenceHub {
+            clients: Mutex::new(std::collections::HashMap::new()),
+            next: AtomicU64::new(1),
+        }
+    }
+
+    /// 订阅：返回 (本端 id, 收件队列)。本端会立刻收到 hello（拿到自己的 id）。
+    pub fn subscribe(&self) -> (u64, tokio::sync::mpsc::UnboundedReceiver<Value>) {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut guard = self.clients.lock().unwrap();
+        let peers = guard.len() + 1;
+        guard.insert(id, tx.clone());
+        let _ = tx.send(json!({ "type": "hello", "id": id, "peers": peers }));
+        (id, rx)
+    }
+
+    pub fn unsubscribe(&self, id: u64) {
+        self.clients.lock().unwrap().remove(&id);
+    }
+
+    /// 广播给所有人（含发送者；客户端自行过滤光标去重）。
+    pub fn broadcast(&self, msg: &Value) {
+        for tx in self.clients.lock().unwrap().values() {
+            let _ = tx.send(msg.clone());
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.clients.lock().unwrap().len()
+    }
+}
+
+use axum::extract::ws::WebSocketUpgrade;
+
+async fn ws_handler(
+    State(st): State<Arc<AppState>>,
+    Query(q): Query<HashMap<String, String>>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let token = q.get("token").cloned().unwrap_or_default();
+    if token != st.token {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+    ws.on_upgrade(move |socket| ws_loop(st, socket))
+}
+
+async fn ws_loop(st: Arc<AppState>, socket: axum::extract::ws::WebSocket) {
+    use axum::extract::ws::Message;
+    use futures_util::{SinkExt, StreamExt};
+
+    let hub = st.hub.clone();
+    let (id, mut rx) = hub.subscribe();
+    hub.broadcast(&json!({ "type": "join", "from": id, "peers": hub.count() }));
+
+    let (mut sink, mut stream) = socket.split();
+    let hub2 = hub.clone();
+    let out = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sink.send(Message::text(msg.to_string())).await.is_err() {
+                break;
+            }
+        }
+        let _ = hub2;
+    });
+
+    while let Some(Ok(msg)) = stream.next().await {
+        match msg {
+            Message::Text(t) => {
+                let Ok(v) = serde_json::from_str::<Value>(&t) else { continue };
+                let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+                // 只广播白名单类型，防止乱灌
+                if matches!(ty, "cursor" | "select" | "note") {
+                    hub.broadcast(&json!({ "type": ty, "from": id, "data": v }));
+                }
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+    hub.unsubscribe(id);
+    hub.broadcast(&json!({ "type": "leave", "from": id, "peers": hub.count() }));
+    out.abort();
+}
+
+#[cfg(test)]
+pub mod presence_tests;

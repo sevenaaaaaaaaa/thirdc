@@ -231,6 +231,14 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 .a2ui-host{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--bg-soft)}
 .a2ui-frame{width:100%;height:260px;border:none;display:block;background:var(--bg)}
 .a2ui-loading{padding:14px;color:var(--faint);font-size:12.5px;font-family:var(--font-mono)}
+.peer{position:absolute;pointer-events:none;transition:left .12s linear,top .12s linear;z-index:40}
+.peer .arrow{width:0;height:0;border:7px solid transparent;border-bottom-color:var(--accent);border-left-color:var(--accent)}
+.peer .label{margin-left:6px;margin-top:10px;padding:2px 8px;border-radius:999px;background:var(--accent);color:var(--on-accent);font:600 10.5px var(--font-body);white-space:nowrap;box-shadow:var(--shadow-sm)}
+.peer .tagline{padding:7px 0 0;font-family:var(--font-mono);font-size:10px;color:var(--faint)}
+.conn-item{display:flex;align-items:center;gap:9px;padding:10px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);margin-bottom:8px}
+.conn-item .t{flex:1;font-size:13px;font-weight:600}
+.conn-item .h{font-family:var(--font-mono);font-size:10px;color:var(--faint);word-break:break-all}
+.conn-result{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding:8px 10px;border-radius:10px;background:var(--hover);margin-top:6px;white-space:pre-wrap}
 #toast{position:fixed;right:16px;bottom:44px;z-index:120;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
@@ -252,7 +260,7 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 <body>
 <div id="grid"></div>
 <div id="aura"></div>
-<div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div></div></div>
+<div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div><div id="peers"></div></div></div>
 
 <header id="chrome">
   <div class="lights"><i class="light r"></i><i class="light y"></i><i class="light g"></i></div>
@@ -370,6 +378,11 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
   </div>
 </div></div>
 
+<div class="overlay" id="conn-ov"><div class="panel">
+  <div class="panel-head"><h3>连接器</h3><span class="badge plan" id="conn-ai">—</span><button class="icon-btn" data-close="conn-ov">✕</button></div>
+  <div class="panel-body" id="conn-list"></div>
+</div></div>
+
 <div class="overlay" id="boards-ov"><div class="panel">
   <div class="panel-head"><h3>画布</h3><span class="badge plan" id="board-count">—</span><button class="icon-btn" data-close="boards-ov">✕</button></div>
   <div class="panel-body" id="boards-list"></div>
@@ -384,6 +397,7 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
   <span><span class="dot" id="sb-dot"></span><span id="sb-conn">connecting</span></span>
   <span id="sb-stats">—</span>
   <span id="sb-mode">—</span>
+  <span id="sb-peers">在线 1</span>
   <span style="margin-left:auto">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
 </div>
 <div id="toast"></div>
@@ -1036,6 +1050,7 @@ const CMDS=[
   ['切换到画布','3',()=>{closeAll();document.querySelector('[data-view=canvas]').click();}],
   ['管理画布','b',async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();}],
   ['A2UI 示例','a',()=>{closeAll();$('a2ui-demo').click();}],
+  ['连接器管理','c',async()=>{closeAll();await openConnPanel();}],
 ];
 function renderPalette(q){
   const box=$('palette-list');box.innerHTML='';
@@ -1071,10 +1086,77 @@ $('theme').onclick=()=>{
 };
 $('sync').onclick=async()=>{const r=await api('/sync',{method:'POST'});toast('同步完成，合入 '+r.changed+' 篇');await refreshAll();};
 
+/* ───────── 协作光标（WS presence） ───────── */
+let myId=null;const peers=new Map();let cursorTimer=null;let presenceWs=null;
+function peerEl(id,color,name){
+  let el=peers.get(id);
+  if(!el){el=document.createElement('div');el.className='peer';el.innerHTML=`<div class="arrow"></div><div class="label">${name||'协作者 '+id}</div>`;$('peers').appendChild(el);peers.set(id,{el,color})}
+  return el;
+}
+function initPresence(){
+  try{
+    const proto=location.protocol==='https:'?'wss':'ws';
+    presenceWs=new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+    const ws=presenceWs;
+    ws.onmessage=ev=>{
+      let d;try{d=JSON.parse(ev.data)}catch{return}
+      const inner=d.data||d;
+      if(inner.type==='hello'){myId=inner.id;$('sb-peers').textContent=`在线 ${inner.peers||1}`;return}
+      if(d.type==='join'||inner.type==='join'){$('sb-peers').textContent=`在线 ${inner.peers||'?'}`;toast('协作者加入');return}
+      if(d.type==='leave'||inner.type==='leave'){
+        const pid=d.from??inner.from;const p=peers.get(pid);if(p){p.el.remove();peers.delete(pid)}
+        $('sb-peers').textContent=`在线 ${inner.peers||1}`;return}
+      if(inner.type==='cursor'&&d.from!==myId){
+        const el=peerEl(d.from,null,inner.user||'协作者 '+d.from);
+        el.style.left=(inner.x??0)+'px';el.style.top=(inner.y??0)+'px';
+      }
+    };
+    window.addEventListener('beforeunload',()=>ws.close());
+  }catch(e){/* ws 不可用不影响主功能 */}
+}
+canvas.addEventListener('pointermove',e=>{
+  if(!cursorTimer){
+    cursorTimer=setTimeout(()=>{cursorTimer=null},90);
+    const w=s2w(e.clientX,e.clientY);
+    try{presenceWs?.send?.(JSON.stringify({type:'cursor',x:w.x,y:w.y}))}catch{}
+  }
+});
+
+/* ───────── 连接器面板 ───────── */
+async function openConnPanel(){
+  openOverlay('conn-ov');
+  const d=await api('/connections');
+  const box=$('conn-list');box.innerHTML='';
+  $('conn-ai').textContent=d.ai&&d.ai.configured?`AI：${d.ai.model}（${d.ai.base_url}）`:'AI：未配置（命令模式）';
+  if(!(d.connections||[]).length){box.innerHTML='<div class="dv-meta">没有连接。在 thirdc.toml 的 [[connections]] 里加 MCP server。</div>';}
+  (d.connections||[]).forEach(c=>{
+    const el=document.createElement('div');el.className='conn-item';
+    el.innerHTML=`<span class="badge plan">MCP</span><div class="t">${c.name}<div class="h">${c.command} ${c.args.join(' ')}</div><div class="conn-result" style="display:none"></div></div>
+      <button class="act" data-probe style="height:28px">探测</button><button class="act" data-pull style="height:28px">采集</button>`;
+    const res=el.querySelector('.conn-result');
+    el.querySelector('[data-probe]').onclick=async ev=>{
+      ev.target.disabled=true;res.style.display='block';res.textContent='探测中…';
+      try{const r=await api('/conn/probe',{method:'POST',json:{name:c.name}});
+        res.textContent=`server: ${r.server}\ntools: ${r.tools.join(', ')||'—'}\nresources(${r.resources.length}):\n${r.resources.map(x=>'  '+x).join('\n')}`;
+      }catch(e){res.textContent='探测失败：'+e.message}
+      ev.target.disabled=false;
+    };
+    el.querySelector('[data-pull]').onclick=async ev=>{
+      ev.target.disabled=true;res.style.display='block';res.textContent='采集中…';
+      try{const r=await api('/conn/pull',{method:'POST',json:{name:c.name}});
+        res.textContent=`采集 ${r.imported.length} · 跳过 ${r.skipped.length||0}\n`+r.imported.map(x=>`${x.uri} → ${x.rel}`).join('\n');
+        await refreshAll();
+      }catch(e){res.textContent='采集失败：'+e.message}
+      ev.target.disabled=false;
+    };
+    box.appendChild(el);
+  });
+}
+
 /* ───────── 启动 ───────── */
 (async function init(){
   try{await loadBoards();board=await api('/board?name='+encodeURIComponent(boardName));}catch{}
-  await refreshAll();applyVP();fit();
+  await refreshAll();applyVP();fit();initPresence();
   addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索 融合内核」，或点 ⌘K 找文档/执行命令。');
 })();
 </script>

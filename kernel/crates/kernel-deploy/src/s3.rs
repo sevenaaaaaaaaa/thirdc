@@ -329,7 +329,7 @@ pub fn deploy_s3(
 }
 
 /// 站点文件遍历（跳过 .git）。
-fn walk_files(root: &Path) -> Result<Vec<(String, std::path::PathBuf)>, DeployError> {
+pub fn walk_files(root: &Path) -> Result<Vec<(String, std::path::PathBuf)>, DeployError> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(d) = stack.pop() {
