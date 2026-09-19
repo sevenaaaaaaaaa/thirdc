@@ -337,6 +337,8 @@ fn materialize(doc: &automerge::Automerge) -> DocModel {
     DocModel {
         title,
         blocks: entries.into_iter().map(|(_, b)| b).collect(),
+        meta: Default::default(),
+        anchors: Vec::new(),
     }
 }
 

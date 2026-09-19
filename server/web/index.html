@@ -494,6 +494,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <div class="row"><input id="git-newbranch" placeholder="新分支名…"><button class="act" id="git-do-branch" style="height:30px;padding:0 10px">新建</button></div>
   <div class="log" id="git-log"></div>
 </div>
+<div id="slash-menu" style="display:none;position:fixed;z-index:150;background:var(--surface-strong);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px;flex-direction:column;min-width:180px"></div>
 <div id="toast"></div>
 <script>
 const $=(id)=>document.getElementById(id);
@@ -923,6 +924,43 @@ $('d-save').onclick=saveDoc;$('d-close').onclick=()=>$('drawer').classList.remov
 $('d-mode').onclick=()=>$('d-body').classList.toggle('view');
 $('d-pub').onclick=()=>current?doPublish(current):toast('先打开一篇文档','err');
 $('editor').addEventListener('input',()=>dirty=true);
+/* 光标离开即渲染：不覆盖底层源码，只刷新预览 */
+$('editor').addEventListener('blur',async()=>{
+  if(!current||!dirty)return;
+  try{const d=await api('/doc?path='+encodeURIComponent(current),{method:'PUT',body:$('editor').value,headers:{'content-type':'text/markdown'}});
+    $('preview').srcdoc=d.html;dirty=false;
+    $('preview').srcdoc=d.html;dirty=false;toast('已即时渲染（源码保留）','ok');
+    setTimeout(()=>refreshAll(),200);
+  }catch(e){}
+});
+/* Notion 式 / 插入菜单 */
+const SLASH=[['表格','| a | b |\n| --- | --- |\n| 1 | 2 |'],['列表','- 甲\n- 乙'],['引用','> 引用'],['代码','```rust\n\n```'],['分隔线','---'],['看板视图','> 视图：看板（本目录）'],['时间线视图','> 视图：时间线'],['锚点',' ^anchor-1'],['标签','#新标签 ']];
+let slashFrom=0;
+$('editor').addEventListener('keydown',e=>{
+  if(e.key!=='/'&&e.key!=='Enter'||!$('slash-menu').classList.contains('open'))return;
+  if(e.key==='/'){slashFrom=$('editor').selectionStart;setTimeout(()=>{$('slash-menu').style.display=$('editor').value.slice(slashFrom,$('editor').selectionStart)==='/'?'flex':'none'},10);return}
+  e.preventDefault();
+  const pick=e.target.dataset.pick??$('slash-menu').firstChild?.textContent;
+  $('slash-menu').style.display='none';
+});
+$('editor').addEventListener('input',e=>{
+  const t=e.target;const before=t.value.slice(Math.max(0,t.selectionStart-12),t.selectionStart);
+  const m=/\/#([a-zA-Z\u4e00-\u9fa5]*)$/.exec(before);
+  const sm=$('slash-menu');
+  if(before.endsWith('/')||m){sm.style.display='flex'}
+  else sm.style.display='none';
+});
+(function buildSlash(){
+  const menu=$('slash-menu');
+  const items=[['插入表格','| a | b |\n| --- | --- |\n| 1 | 2 |'],['插入列表','- 甲\n- 乙'],['插入引用','> 引用内容'],['插入代码块','```rust\n\n```'],['插入分隔线','---'],['插入锚点',' ^anchor-1'],['插入标签','#新标签 ']];
+  for(const [label,snip] of items){
+    const b=document.createElement('button');b.className='prow';b.innerHTML=`<span class="t">${label}</span>`;
+    b.onclick=()=>insertSnippet(snip);menu.appendChild(b);
+  }
+})();
+function insertSnippet(text){const t=$('editor');const s0=t.selectionStart;
+  t.value=t.value.slice(0,s0)+text+t.value.slice(s0);t.selectionStart=t.selectionEnd=s0+text.length;t.focus();dirty=true;
+  $('slash-menu').style.display='none';}
 $('editor').addEventListener('paste',async e=>{
   const img=[...(e.clipboardData?.files||[])].find(f=>f.type.startsWith('image/'));if(!img)return;e.preventDefault();
   const buf=new Uint8Array(await img.arrayBuffer());

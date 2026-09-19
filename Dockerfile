@@ -4,7 +4,7 @@ WORKDIR /src
 COPY . .
 RUN cargo build --release -p thirdc
 # ── runtime ──
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/thirdc /usr/local/bin/thirdc
 VOLUME /data

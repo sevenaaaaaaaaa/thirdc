@@ -110,11 +110,24 @@ pub fn assign_stable_ids(doc: &mut DocModel) {
 pub struct DocModel {
     pub title: Option<String>,
     pub blocks: Vec<Block>,
+    /// YAML frontmatter（OKF：机器可读的元数据层）
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub meta: std::collections::BTreeMap<String, String>,
+    /// `^锚点` 槽位（与 blocks 一一对应；None=该块无锚点）。OKF 块引用的根。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchors: Vec<Option<String>>,
 }
 
 /// 确定性序列化为 MD。输出只依赖输入，与插入顺序历史无关。
 pub fn to_markdown(doc: &DocModel) -> String {
     let mut out = String::new();
+    if !doc.meta.is_empty() {
+        out.push_str("---\n");
+        for (k, v) in &doc.meta {
+            out.push_str(&format!("{k}: {v}\n"));
+        }
+        out.push_str("---\n\n");
+    }
     if let Some(t) = &doc.title {
         out.push_str("# ");
         out.push_str(t);
@@ -125,6 +138,10 @@ pub fn to_markdown(doc: &DocModel) -> String {
             out.push('\n');
         }
         push_block(&mut out, b);
+        // 锚点回填：块级末尾 ^id（Obsidian 兼容写法）
+        if let Some(Some(a)) = doc.anchors.get(i) {
+            out.push_str(&format!(" ^{a}"));
+        }
         out.push('\n');
     }
     out
@@ -222,6 +239,25 @@ pub fn from_markdown(src: &str) -> Result<DocModel, MdError> {
     let mut doc = DocModel::default();
     let lines: Vec<&str> = src.lines().collect();
     let mut i = 0usize;
+
+    // ── YAML frontmatter ──
+    if lines.first().map_or(false, |l| l.trim() == "---") {
+        i = 1;
+        while i < lines.len() && lines[i].trim() != "---" {
+            if let Some((k, v)) = lines[i].split_once(':') {
+                let key = k.trim().to_string();
+                let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                if !key.is_empty() {
+                    doc.meta.insert(key, val);
+                }
+            }
+            i += 1;
+        }
+        i += 1; // 收尾 ---
+        if lines.get(i).map_or(false, |l| l.trim().is_empty()) {
+            i += 1;
+        }
+    }
 
     // 首个 H1 提升为 title（若存在）
     if let Some(first) = lines.first() {
@@ -398,8 +434,33 @@ pub fn from_markdown(src: &str) -> Result<DocModel, MdError> {
         });
     }
 
+    // ── ^锚点：槽位对齐抽取（每个块一个槽）──
+    let slots: Vec<Option<String>> = doc.blocks.iter_mut().map(|b| extract_anchor(b)).collect();
+    doc.anchors = slots;
     assign_stable_ids(&mut doc);
     Ok(doc)
+}
+
+/// 抽取块末尾的 `^锚点`（写在文本里时），返回锚点名并把文本剥离。
+fn extract_anchor(b: &mut Block) -> Option<String> {
+    let text_mut = match b {
+        Block::Paragraph { text, .. } | Block::Heading { text, .. } => text,
+        Block::Code { text, .. } | Block::Raw { text, .. } => text,
+        _ => return None,
+    };
+    let t = text_mut.trim_end();
+    if let Some(sp) = t.rfind(" ^") {
+        let name = &t[sp + 2..];
+        let ok = !name.is_empty()
+            && name.len() <= 40
+            && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+        if ok {
+            let a = name.to_string();
+            *text_mut = t[..sp].trim_end().to_string();
+            return Some(a);
+        }
+    }
+    None
 }
 
 fn is_table_sep(line: &str) -> bool {
@@ -617,6 +678,25 @@ tc:block raw -->
     }
 
     #[test]
+    fn okf_frontmatter_and_anchors_roundtrip() {
+        let src = "---\ntitle: 知识包\nsource: example.com\n---\n\n# 标题\n\n正文段落。 ^core-1\n\n第二段\n";
+        let doc = from_markdown(src).unwrap();
+        assert_eq!(doc.meta.get("title").map(|s| s.as_str()), Some("知识包"));
+        assert_eq!(doc.meta.get("source").map(|s| s.as_str()), Some("example.com"));
+        assert_eq!(doc.anchors.iter().flatten().count(), 1);
+        assert_eq!(doc.anchors[1].as_deref(), Some("core-1"), "锚点必须跟着段落走");
+        // 往返：frontmatter 与锚点都保留
+        let md = to_markdown(&doc);
+        assert!(md.starts_with("---\n") && md.contains("title: 知识包") && md.contains("source: example.com"), "frontmatter 往返：{md}");
+        assert!(md.contains("正文段落。 ^core-1"));
+        let back = from_markdown(&md).unwrap();
+        assert_eq!(back.meta.get("title").map(|s| s.as_str()), Some("知识包"));
+        assert_eq!(back.anchors, vec!["core-1"]);
+        // frontmatter 不再被当成 Divider
+        assert!(!doc.blocks.iter().any(|b| matches!(b, Block::Divider { .. })));
+    }
+
+    #[test]
     fn html_roundtrip_is_stable() {
         let src = "# 标题\n\n正文\n\n- 甲\n- 乙\n\n> 引用\n\n```rust\nfn main() {}\n```\n";
         let model = from_markdown(src).unwrap();
@@ -679,9 +759,14 @@ pub fn from_html(html: &str) -> Result<DocModel, MdError> {
         blocks.push(Block::Raw { id: String::new(), text: html.trim().to_string() });
     }
     doc.blocks = blocks;
+    // ── ^锚点：槽位对齐抽取（每个块一个槽）──
+    let slots: Vec<Option<String>> = doc.blocks.iter_mut().map(|b| extract_anchor(b)).collect();
+    doc.anchors = slots;
     assign_stable_ids(&mut doc);
     Ok(doc)
 }
+
+/// 抽取块末尾的 `^锚点`（写在文本里时），返回锚点名并把文本剥离。
 
 /// 去掉注释与 script/style 内容（否则会把代码当正文）。
 fn strip_html_noise(html: &str) -> String {
