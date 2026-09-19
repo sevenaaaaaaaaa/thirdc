@@ -74,6 +74,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/design/import-url", post(design_import_url))
         .route("/design/presets", get(design_presets))
         .route("/ingest/topic", post(ingest_topic))
+        .route("/ingest/web", post(ingest_web))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -2099,4 +2100,81 @@ async fn design_presets() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "no-store")],
         include_str!("../web/presets.json"),
     )
+}
+
+/// 网页本地化：抓 URL → HTML→MD → 导入为文档。
+async fn ingest_web(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return err(StatusCode::BAD_REQUEST, "url must be http(s)").into_response();
+    }
+    let u2 = url.clone();
+    let r = tokio::task::spawn_blocking(move || {
+        kernel_core::fetch_html(&u2, std::time::Duration::from_secs(30))
+    }).await;
+    let html = match r {
+        Ok(Ok(h)) => h,
+        _ => return err(StatusCode::BAD_REQUEST, "抓取失败").into_response(),
+    };
+    // HTML→MD（简化：提取标题 + 正文纯文本 + 原始 HTML 存为 AI-HTML 块）
+    let title = {
+        let lower = html.to_lowercase();
+        let i = lower.find("<title").and_then(|i| html[i..].find('>').map(|g| i + g + 1));
+        i.and_then(|i| html[i..].find("</title>").map(|e| html[i..i + e].trim().to_string()))
+         .unwrap_or_else(|| url.clone())
+    };
+    // 抽取正文（去 script/style 标签）
+    let mut text = html.clone();
+    for tag in ["script", "style", "noscript"] {
+        let open = format!("<{}", &tag[..1]);
+        let close = format!("</{}>", tag);
+        while let Some(i) = text.to_lowercase().find(&open) {
+            let rest = &text[i..];
+            if let Some(j) = rest.to_lowercase().find(&close) {
+                let e2 = j + close.len();
+                text = format!("{}{}", &text[..i], &text[i + e2..]);
+            } else { break; }
+        }
+    }
+    let stripped = strip_all_tags(&text);
+    let words: Vec<&str> = stripped.split_whitespace().collect();
+    let excerpt = words.iter().take(500).cloned().collect::<Vec<_>>().join(" ");
+    let md = format!("# {}\\n\\n> 来源：{}\\n\\n{}\\n\\n---\\n\\n<!-- 原始 HTML 已归档，见附件 -->\\n", title, url, excerpt);
+    let mut k = st.kernel.lock().unwrap();
+    let uri = format!("web://{}", kernel_core::Cas::hash_hex(url.as_bytes())[..16].to_string());
+    match k.import_capture("web", &uri, Some(&title), &md, "text/markdown") {
+        Ok(rel) => {
+            audit_log(&k.vault.sidecar(), "ingest-web", &json!({ "url": url, "rel": rel }));
+            Json(json!({ "title": title, "rel": rel, "bytes": excerpt.len() })).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// 去掉全部 HTML 标签，留纯文本。
+fn strip_all_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            match html[i..].find('>') {
+                Some(g) => { i += g + 1; continue; }
+                None => break,
+            }
+        }
+        let ch = html[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    html_unescape(&out)
+}
+
+fn html_unescape(s: &str) -> String {
+    s.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">")
+     .replace("&quot;", "\u{0022}").replace("&amp;", "&")
 }
