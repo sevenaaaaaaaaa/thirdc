@@ -560,7 +560,7 @@ pub mod encrypted_backup {
         use sha2::{Digest, Sha256};
         let key_bytes = Sha256::digest(password.as_bytes());
         let iv = &data[..12];
-        let (payload, tag) = data[12..].split_at(data.len() - 12 - 12);
+        let (payload, tag) = data[12..].split_at(data[12..].len() - 32);
         // 验 HMAC
         let mut mac = Sha256::new();
         mac.update(&key_bytes);
