@@ -100,6 +100,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/publish/deploy", post(publish_deploy))
         .route("/publish/{name}", get(publish_file))
         .route("/search", get(search))
+        .route("/search/hybrid", get(search_hybrid))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
         .route("/sync", post(sync))
@@ -435,6 +436,38 @@ async fn status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespo
         "assets": assets,
     }))
     .into_response()
+}
+
+async fn search_hybrid(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let query = q.get("q").cloned().unwrap_or_default();
+    let mut k = st.kernel.lock().unwrap();
+    if let Err(e) = k.sync_all() {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let fts = k.search(&query).unwrap_or_default();
+    // 构建 TF-IDF 索引（每次搜索重建；缓存可后续优化）
+    let docs = kernel_core::list_docs(&k.vault).unwrap_or_default();
+    let corpus: Vec<(String, String)> = docs.iter()
+        .filter_map(|p| {
+            let rel = p.to_str()?;
+            let text = std::fs::read_to_string(k.vault.root.join(p)).ok()?;
+            Some((rel.to_string(), text))
+        })
+        .collect();
+    let idx = kernel_core::rag::TfidfIndex::build(&corpus);
+    let vec_hits = idx.search(&query, 20);
+    let merged = kernel_core::rag::rrf_merge(&fts, &vec_hits, 20);
+    let hits: Vec<Value> = merged.iter()
+        .map(|(path, score)| json!({ "path": path, "score": score, "source": "rrf" }))
+        .collect();
+    Json(json!({ "query": query, "hits": hits, "fts_count": fts.len(), "vec_count": vec_hits.len() })).into_response()
 }
 
 async fn search(

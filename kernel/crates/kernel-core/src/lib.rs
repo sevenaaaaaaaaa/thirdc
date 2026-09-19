@@ -865,3 +865,152 @@ fn extract_refs(html: &str) -> Vec<(&'static str, String)> {
     }
     out
 }
+
+/// RAG 语义检索：TF-IDF 向量（离线零依赖）+ AI embeddings 升级路径。
+pub mod rag {
+    use std::collections::HashMap;
+
+    /// 分词：英文按词，中日韩按字符二元组（捕捉子词语义）。
+    pub fn tokenize(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in text.lines() {
+            if line.trim_start().starts_with('#') { continue; }
+            let chars: Vec<char> = line.chars().collect();
+            let mut word = String::new();
+            for &c in &chars {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    if c.is_ascii() {
+                        word.push(c.to_ascii_lowercase());
+                    } else {
+                        // CJK：先冲掉 word，再二元组
+                        if !word.is_empty() { out.push(word.clone()); word.clear(); }
+                        // 单字本身
+                        out.push(c.to_string());
+                    }
+                } else {
+                    if !word.is_empty() { out.push(word.clone()); word.clear(); }
+                }
+            }
+            if !word.is_empty() { out.push(word); }
+            // CJK 二元组
+            for w in chars.windows(2) {
+                if w[0] != ' ' && w[1] != ' ' && !w[0].is_ascii() && !w[1].is_ascii()
+                    && w[0].is_alphanumeric() && w[1].is_alphanumeric()
+                {
+                    out.push(w.iter().collect());
+                }
+            }
+        }
+        out
+    }
+
+    /// 稀疏 TF-IDF 向量。
+    pub struct TfidfIndex {
+        /// doc_path → (term → tfidf_weight)
+        pub vectors: HashMap<String, HashMap<String, f64>>,
+        pub df: HashMap<String, usize>,
+        pub n_docs: usize,
+    }
+
+    impl TfidfIndex {
+        pub fn build(docs: &[(String, String)]) -> Self {
+            let n = docs.len();
+            let mut df: HashMap<String, usize> = HashMap::new();
+            let mut vectors = HashMap::new();
+            for (path, text) in docs {
+                let tokens = tokenize(text);
+                let mut tf: HashMap<String, usize> = HashMap::new();
+                for t in &tokens { *tf.entry(t.clone()).or_insert(0) += 1; }
+                let total = tokens.len().max(1) as f64;
+                let mut vec = HashMap::new();
+                for (term, count) in &tf {
+                    let weight = (*count as f64 / total) * (1.0 + (n as f64 / (1.0 + *df.get(term).unwrap_or(&0) as f64)).ln());
+                    vec.insert(term.clone(), weight);
+                    *df.entry(term.clone()).or_insert(0) += 1;
+                }
+                vectors.insert(path.clone(), vec);
+            }
+            TfidfIndex { vectors, df, n_docs: n }
+        }
+
+        pub fn embed_query(&self, text: &str) -> HashMap<String, f64> {
+            let tokens = tokenize(text);
+            let mut tf: HashMap<String, usize> = HashMap::new();
+            for t in &tokens { *tf.entry(t.clone()).or_insert(0) += 1; }
+            let total = tokens.len().max(1) as f64;
+            let mut vec = HashMap::new();
+            for (term, count) in &tf {
+                let idf = (1.0 + (self.n_docs as f64 / (1.0 + *self.df.get(term).unwrap_or(&0) as f64)).ln()).max(0.1);
+                vec.insert(term.clone(), (*count as f64 / total) * idf);
+            }
+            vec
+        }
+
+        /// 余弦相似度，返回 top-k (path, score)。
+        pub fn search(&self, query: &str, k: usize) -> Vec<(String, f64)> {
+            let qv = self.embed_query(query);
+            let qn: f64 = qv.values().map(|v| v * v).sum::<f64>().sqrt();
+            if qn < 1e-9 { return vec![]; }
+            let mut scores: Vec<(String, f64)> = self.vectors.iter()
+                .map(|(path, vec)| {
+                    let dot: f64 = qv.iter()
+                        .filter_map(|(t, w)| vec.get(t).map(|v| w * v))
+                        .sum();
+                    let vn: f64 = vec.values().map(|v| v * v).sum::<f64>().sqrt();
+                    (path.clone(), if vn < 1e-9 { 0.0 } else { dot / (qn * vn) })
+                })
+                .collect();
+            scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            scores.into_iter().take(k).filter(|(_, s)| *s > 0.01).collect()
+        }
+    }
+
+    /// RRF（Reciprocal Rank Fusion）：把 FTS5 和向量检索的结果合并。
+    pub fn rrf_merge(fts_hits: &[(String, f64)], vec_hits: &[(String, f64)], k: usize) -> Vec<(String, f64)> {
+        let mut scores: HashMap<String, f64> = HashMap::new();
+        for (rank, (path, _)) in fts_hits.iter().enumerate() {
+            *scores.entry(path.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
+        }
+        for (rank, (path, _)) in vec_hits.iter().enumerate() {
+            *scores.entry(path.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
+        }
+        let mut out: Vec<(String, f64)> = scores.into_iter().collect();
+        out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        out.into_iter().take(k).collect()
+    }
+}
+
+#[cfg(test)]
+mod rag_tests {
+    use super::rag::*;
+
+    #[test]
+    fn tfidf_finds_relevant_docs() {
+        let docs = vec![
+            ("a.md".to_string(), "知识库 CRDT 块级合并 融合内核 同步协议".to_string()),
+            ("b.md".to_string(), "发布 S3 Git 目标 对象存储".to_string()),
+            ("c.md".to_string(), "CRDT 融合内核 Automerge 增量".to_string()),
+        ];
+        let idx = TfidfIndex::build(&docs);
+        let hits = idx.search("CRDT 合并", 2);
+        assert!(hits.len() >= 2);
+        assert!(hits[0].0 == "a.md" || hits[0].0 == "c.md", "hits: {:?}", hits);
+        assert!(hits[0].1 > 0.05);
+    }
+
+    #[test]
+    fn cjk_tokenizes() {
+        let tokens = tokenize("知识库的块级合并");
+        assert!(!tokens.is_empty(), "CJK 分词不应为空");
+        assert!(tokens.iter().any(|t| t.contains("知识")));
+    }
+
+    #[test]
+    fn rrf_merges_rankings() {
+        let fts = vec![("a.md".into(), 1.0), ("b.md".into(), 0.5)];
+        let vec = vec![("b.md".into(), 1.0), ("c.md".into(), 0.5)];
+        let merged = rrf_merge(&fts, &vec, 3);
+        assert_eq!(merged[0].0, "b.md", "两路都命中的排最前");
+        assert_eq!(merged.len(), 3);
+    }
+}

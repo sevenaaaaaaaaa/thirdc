@@ -121,6 +121,7 @@ impl McpServer {
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
         match name {
             "search_vault" => self.t_search_vault(args),
+            "search_semantic" => self.t_search_semantic(args),
             "list_docs" => self.t_list_docs(args),
             "read_doc" => self.t_read_doc(args),
             "write_doc" => self.t_write_doc(args),
@@ -164,6 +165,32 @@ impl McpServer {
             Ok(tool_result(
                 format!("{} hit(s) for {:?}", arr.len(), query),
                 json!({ "query": query, "hits": arr }),
+            ))
+        })
+    }
+
+    fn t_search_semantic(&self, args: Value) -> Result<Value, (i32, String)> {
+        let query = args.get("query").and_then(|v| v.as_str())
+            .ok_or((-32602, "missing 'query'".to_string()))?.to_string();
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        self.with_kernel(|k| {
+            k.sync_all()?;
+            let docs = kernel_core::list_docs(&k.vault)?;
+            let corpus: Vec<(String, String)> = docs.iter()
+                .filter_map(|p| {
+                    let rel = p.to_str()?;
+                    let text = std::fs::read_to_string(k.vault.root.join(p)).ok()?;
+                    Some((rel.to_string(), text))
+                }).collect();
+            let idx = kernel_core::rag::TfidfIndex::build(&corpus);
+            let hits = idx.search(&query, limit);
+            let fts = k.search(&query).unwrap_or_default();
+            let merged = kernel_core::rag::rrf_merge(&fts, &hits, limit);
+            let arr: Vec<Value> = merged.iter()
+                .map(|(p, s)| json!({"path": p, "score": s})).collect();
+            Ok(tool_result(
+                format!("混合检索 {} hit(s)", merged.len()),
+                json!({"query": query, "hits": arr}),
             ))
         })
     }
@@ -539,6 +566,18 @@ fn tool_definitions() -> Value {
                 "properties": {
                     "query": { "type": "string", "description": "检索词" },
                     "limit": { "type": "integer", "description": "返回条数，默认 10" }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "search_semantic",
+            "description": "混合语义检索（TF-IDF + FTS5 RRF 合并），比纯关键词更智能。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "limit": { "type": "integer", "description": "默认 10" }
                 },
                 "required": ["query"]
             }
