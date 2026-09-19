@@ -427,6 +427,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <button class="icon-btn" id="design-btn" title="设计规范"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="14.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="15.5" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20"/></svg></button>
   <button class="icon-btn" id="road-btn" title="路线图"><svg viewBox="0 0 24 24"><path d="M4 20V8l6-4 4 3 6-3v12l-6 3-4-3-6 3Z"/></svg></button>
   <button class="icon-btn" id="theme" title="明暗切换"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button>
+  <button class="icon-btn" id="force-refresh" title="强制刷新（清缓存+全量同步）"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/><path d="M3 12a9 9 0 0 0 2.6 6.4M3 20v-5h5" opacity=".5"/></svg></button>
   <button class="icon-btn" id="sync" title="同步外部改动"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg></button>
 </header>
 
@@ -556,6 +557,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <span id="sb-stats">—</span>
   <span id="sb-mode">—</span>
   <span id="sb-peers">在线 1</span>
+  <span id="sb-user"></span>
   <span style="margin-left:auto">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
 </div>
 <div id="gitpanel">
@@ -939,6 +941,7 @@ async function loadStatus(){
   vaultName=s.vault;$('v-name').textContent=s.vault;$('v-docs').textContent=s.docs;$('v-idx').textContent=s.indexed;$('v-assets').textContent=s.assets;
   $('sb-stats').textContent=`${s.docs} docs · ${s.indexed} indexed · ${s.assets} assets`;
   $('sb-conn').textContent='connected';
+  if(currentUser)$('sb-user').textContent='👤 '+currentUser;
 }
 async function loadMeta(){
   try{const m=await api('/connections');
@@ -1229,10 +1232,7 @@ async function renderA2ui(msgEl,jsonl,title){
     const r=await api('/a2ui/render',{method:'POST',json:{jsonl,title:title||'A2UI'}});
     const frame=document.createElement('iframe');
     frame.className='a2ui-frame';frame.setAttribute('sandbox','allow-scripts');
-    frame.srcdoc=r.html.replace('<script>
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}
-</script>
-</body>',A2UI_BRIDGE+'</body>');
+    frame.srcdoc=r.html.replace('</body>',A2UI_BRIDGE+'</body>');
     host.innerHTML='';host.appendChild(frame);
   }catch(e){host.innerHTML='<div class="a2ui-loading">A2UI 渲染失败：'+e.message+'</div>';}
 }
@@ -1555,6 +1555,17 @@ $('theme').onclick=()=>{applyThemePreset();
   themePref=themePref==='auto'?'light':(themePref==='light'?'dark':'auto');
   localStorage.setItem('thirdc_theme',themePref); applyTheme();
   toast('主题：'+(themePref==='auto'?'跟随系统':(themePref==='light'?'浅色':'深色')),'ok');
+};
+$('force-refresh').onclick=async()=>{
+  const b=$('force-refresh');b.style.color='var(--accent)';b.style.animation='spin 1s linear infinite';
+  try{
+    const r=await api('/refresh',{method:'POST'});
+    toast(r.message,'ok');
+    // 强刷前端缓存
+    if(caches){const keys=await caches.keys();for(const k of keys)await caches.delete(k)}
+    await refreshAll();renderGraph();fit();
+  }catch(e){toast('刷新失败：'+e.message,'err')}
+  b.style.animation='';b.style.color='';
 };
 $('sync').onclick=async()=>{const r=await api('/sync',{method:'POST'});toast('同步完成，合入 '+r.changed+' 篇');await refreshAll();};
 
@@ -1991,17 +2002,35 @@ $('p-exit').parentNode.insertBefore(pAllBtn,$('p-exit'));
 function showLogin(){
   document.body.innerHTML='<div style="position:fixed;inset:0;z-index:999;display:grid;place-items:center;background:var(--bg)">'
     +'<div style="text-align:center;padding:40px;border-radius:26px;border:1px solid var(--border);background:var(--surface);backdrop-filter:blur(18px);box-shadow:var(--shadow)">'
-    +'<div style="font-family:var(--font-display);font-size:22px;font-weight:700;margin-bottom:6px">ThirdC Studio</div>'
-    +'<div style="color:var(--faint);font-size:13px;margin-bottom:18px">输入访问令牌以继续</div>'
-    +'<input id="login-token" placeholder="API Token" style="width:280px;padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);outline:none;font:14px var(--font-mono)">'
-    +'<br><br><button onclick="doLogin()" style="padding:10px 28px;border-radius:12px;border:none;background:var(--accent);color:var(--on-accent);font:600 14px var(--font-body);cursor:pointer">进入</button>'
+    +'<div class="mark" style="width:48px;height:48px;border-radius:16px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-size:18px;font-weight:800;margin:0 auto 14px">3C</div>'
+    +'<div style="font-family:var(--font-display);font-size:20px;font-weight:700;margin-bottom:4px">ThirdC Studio</div>'
+    +'<div style="color:var(--faint);font-size:12px;margin-bottom:20px">登录以访问你的知识库</div>'
+    +'<input id="login-user" placeholder="用户名" value="admin" style="width:260px;padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg-soft);color:var(--fg);outline:none;font:14px var(--font-body);box-sizing:border-box;text-align:center">'
+    +'<br><input id="login-pass" type="password" placeholder="密码" style="width:260px;padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg-soft);color:var(--fg);outline:none;font:14px var(--font-body);box-sizing:border-box;text-align:center;margin-top:8px"'
+    +' onkeydown="if(event.key===\'Enter\')doLogin()">'
+    +'<br><button onclick="doLogin()" style="width:260px;padding:11px;border-radius:12px;border:none;background:var(--accent);color:var(--on-accent);font:700 14px var(--font-body);cursor:pointer;margin-top:14px;transition:background .2s">登 录</button>'
+    +'<div id="login-err" style="color:var(--danger);font-size:12px;margin-top:8px;min-height:18px"></div>'
     +'</div></div>';
+  document.getElementById('login-pass').focus();
 }
-function doLogin(){
-  const t=document.getElementById('login-token').value.trim();
-  if(!t)return;
-  localStorage.setItem('thirdc_token',t);
-  location.reload();
+async function doLogin(){
+  const u=document.getElementById('login-user').value.trim();
+  const p=document.getElementById('login-pass').value;
+  if(!u||!p){document.getElementById('login-err').textContent='请填写用户名和密码';return}
+  const btn=document.querySelector('button');btn.textContent='登录中…';btn.disabled=true;
+  try{
+    // 先用 username/password 换 token
+    const base=location.pathname.replace(/\/+$/,'');
+    const res=await fetch(base+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:u,password:p})});
+    const d=await res.json();
+    if(!res.ok||!d.token)throw new Error(d.error||'登录失败');
+    localStorage.setItem('thirdc_token',d.token);
+    localStorage.setItem('thirdc_user',u);
+    location.reload();
+  }catch(e){
+    document.getElementById('login-err').textContent=e.message;
+    btn.textContent='登 录';btn.disabled=false;
+  }
 }
 // 无 token → 登录页
 if(!token){
@@ -2043,5 +2072,6 @@ if(window.__login_gate){throw new Error('login gate')}
   <div class="cal-head"><button class="icon-btn" id="cal-prev">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next">›</button><button class="icon-btn" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
   <div class="cal-grid" id="cal-grid"></div>
 </div>
+<script>if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(()=>{})}</script>
 </body>
 </html>

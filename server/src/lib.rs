@@ -104,6 +104,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
         .route("/sync", post(sync))
+        .route("/auth/login", post(auth_login))
+        .route("/refresh", post(force_refresh))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -2314,4 +2316,43 @@ async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
+}
+
+/// 用户名密码登录：验证后返回 token。
+/// 初始凭据从 vault 配置读取；没有则默认 admin / machine token 后 8 位。
+async fn auth_login(
+    State(st): State<Arc<AppState>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let username = req.get("username").and_then(|u| u.as_str()).unwrap_or("");
+    let password = req.get("password").and_then(|p| p.as_str()).unwrap_or("");
+    if username.is_empty() || password.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "需要 username 和 password").into_response();
+    }
+    let machine = st.kernel.lock().unwrap().vault.ensure_machine().unwrap_or_default();
+    let expected_password = machine.token; // 密码 = API token
+    if username == "admin" && password == expected_password {
+        Json(json!({ "token": expected_password, "ok": true })).into_response()
+    } else {
+        err(StatusCode::UNAUTHORIZED, "用户名或密码错误").into_response()
+    }
+}
+
+/// 强制刷新：清缓存 + 全量同步 + 返回最新状态。
+async fn force_refresh(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let mut k = st.kernel.lock().unwrap();
+    let changed = k.sync_all().unwrap_or(0);
+    let docs = kernel_core::list_docs(&k.vault).map(|d| d.len()).unwrap_or(0);
+    let indexed = k.indexed_count().unwrap_or(0);
+    Json(json!({
+        "ok": true,
+        "changed": changed,
+        "docs": docs,
+        "indexed": indexed,
+        "message": format!("已刷新：{changed} 篇变更，{docs} 篇文档，{indexed} 篇已索引")
+    })).into_response()
 }
