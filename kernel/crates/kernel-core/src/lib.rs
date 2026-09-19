@@ -169,12 +169,20 @@ impl Kernel {
         let mut changed = 0;
         for rel in &docs {
             let rel_str = rel.to_str().unwrap_or("");
-            let text = fs::read_to_string(self.vault.root.join(rel)).unwrap_or_default();
-            let before = self.log.current_model(&self.vault, rel_str)?;
+            let text = match fs::read_to_string(self.vault.root.join(rel)) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let before = match self.log.current_model(&self.vault, rel_str) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
             let before_md = kernel_md::to_markdown(&before);
             if before_md != text {
-                self.log.import_file(&self.vault, rel_str, &text)?;
-                changed += 1;
+                match self.log.import_file(&self.vault, rel_str, &text) {
+                    Ok(()) => changed += 1,
+                    Err(_) => continue,
+                }
             }
             // 索引 upsert（内部按 hash 跳过未变文档）
             let hash = kernel_store::Cas::hash_hex(text.as_bytes());

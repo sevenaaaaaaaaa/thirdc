@@ -298,10 +298,8 @@ pub fn from_markdown(src: &str) -> Result<DocModel, MdError> {
                 i += 1;
             }
             if i >= lines.len() {
-                return Err(MdError::Parse {
-                    line: i,
-                    msg: "unterminated code fence".into(),
-                });
+                // 容错：未闭合的 fence 把剩余内容全吃进来（Obsidian 常见）
+                i = lines.len();
             }
             i += 1; // consume closing fence
             let mut text = body.join("\n");

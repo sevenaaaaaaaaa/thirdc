@@ -58,6 +58,13 @@ enum Cmd {
     },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
+    /// 从 Obsidian 库导入（保留目录结构，附件内容寻址）
+    ImportObsidian {
+        vault_path: PathBuf,
+        obsidian: PathBuf,
+        #[arg(long, default_value = "attachments")]
+        attachments_dir: String,
+    },
     /// 主题一键采集（快速建立知识库）
     Ingest {
         path: PathBuf,
@@ -251,6 +258,58 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Cmd::ImportObsidian { vault_path, obsidian, attachments_dir } => {
+    use std::path::Path;
+    let vault = Vault::open(&vault_path)?;
+    let src = Path::new(&obsidian);
+    if !src.is_dir() { anyhow::bail!("目录不存在：{}", src.display()); }
+    let att_dir = attachments_dir.clone();
+
+    let mut copied = 0usize; let mut assets = 0usize; let mut skipped = 0usize;
+    let mut stack = vec![src.to_path_buf()];
+    let notes = vault.root.join("Notes");
+    let assets_root = vault.root.join("Assets");
+
+    while let Some(dir) = stack.pop() {
+        let rd = match std::fs::read_dir(&dir) { Ok(r) => r, Err(_) => continue };
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == ".obsidian" || name == ".git" || name == ".trash" { continue; }
+            if p.is_dir() { stack.push(p); continue; }
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            let rel_dir = p.parent().unwrap().strip_prefix(src).unwrap_or(Path::new(""));
+            if ext == "md" || ext == "html" {
+                let dest_dir = notes.join(rel_dir);
+                let _ = std::fs::create_dir_all(&dest_dir);
+                let dest = dest_dir.join(&name);
+                if dest.exists() { skipped += 1; continue; }
+                if std::fs::copy(&p, &dest).is_ok() { copied += 1; }
+            } else if ["png","jpg","jpeg","gif","webp","svg","pdf","mp4","mp3"].contains(&ext.as_str()) {
+                // 附件 → 内容寻址
+                let bytes = match std::fs::read(&p) { Ok(b) => b, Err(_) => continue };
+                let h = kernel_core::Cas::hash_hex(&bytes);
+                let cas_rel = format!("Assets/{}/{}", &h[..2], &h[2..4]);
+                let cas_dir = assets_root.join(&cas_rel[7..]);
+                let _ = std::fs::create_dir_all(&cas_dir);
+                let dest = cas_dir.join(format!("{h}.{ext}"));
+                if !dest.exists() { let _ = std::fs::write(&dest, &bytes); }
+                assets += 1;
+                // 顺手记录原始文件名 → CAS 路径的映射，后面改写引用
+                let map_file = vault.sidecar().join("obsidian-alias.json");
+                let mut alias: std::collections::BTreeMap<String,String> = std::fs::read_to_string(&map_file)
+                    .ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+                alias.insert(name, format!("{cas_rel}/{h}.{ext}"));
+                let _ = std::fs::write(&map_file, serde_json::to_string_pretty(&alias).unwrap_or_default());
+            }
+        }
+    }
+    println!("Obsidian 导入完成：{} 篇文档（跳过已有 {}），{} 个附件已内容寻址入库", copied, skipped, assets);
+    println!("正在建立索引（第一次可能要几秒）…");
+    let mut k = kernel_core::Kernel::open(vault)?;
+    let changed = k.sync_all()?;
+    println!("索引完成：{} 篇新入索引", changed);
+}
         Cmd::Ingest { path, topic, sources, limit } => {
             let vault = Vault::open(&path)?;
             let mut k = kernel_core::Kernel::open(vault).context("open kernel")?;
@@ -538,3 +597,4 @@ fn now_hms() -> String {
         .as_secs();
     format!("{:02}:{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60, secs % 60)
 }
+
