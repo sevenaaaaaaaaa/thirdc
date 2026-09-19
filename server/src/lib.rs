@@ -75,6 +75,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/design/presets", get(design_presets))
         .route("/ingest/topic", post(ingest_topic))
         .route("/ingest/web", post(ingest_web))
+        .route("/ingest/file", post(ingest_file))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -2122,12 +2123,13 @@ async fn ingest_web(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) 
         _ => return err(StatusCode::BAD_REQUEST, "抓取失败").into_response(),
     };
     // HTML→MD（简化：提取标题 + 正文纯文本 + 原始 HTML 存为 AI-HTML 块）
-    let title = {
+    let title = req.get("title").and_then(|t| t.as_str()).map(|s| s.to_string())
+        .unwrap_or_else(|| {
         let lower = html.to_lowercase();
         let i = lower.find("<title").and_then(|i| html[i..].find('>').map(|g| i + g + 1));
         i.and_then(|i| html[i..].find("</title>").map(|e| html[i..i + e].trim().to_string()))
          .unwrap_or_else(|| url.clone())
-    };
+    });
     // 抽取正文（去 script/style 标签）
     let mut text = html.clone();
     for tag in ["script", "style", "noscript"] {
@@ -2210,4 +2212,70 @@ async fn share_get(AxumPath(id): AxumPath<String>) -> impl IntoResponse {
     };
     let _ = dir;
     err(StatusCode::NOT_FOUND, "share not found (需要完整路径)").into_response()
+}
+
+/// PDF / DOCX 内容解析：上传文件 → shell python3 extract_doc.py → 导入为文档。
+async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("file.pdf").to_string();
+    let content_b64 = req.get("content_base64").and_then(|c| c.as_str()).unwrap_or("").to_string();
+    if content_b64.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "需要 content_base64").into_response();
+    }
+    use base64::Engine;
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(&content_b64) {
+        Ok(b) => b,
+        Err(e) => return err(StatusCode::BAD_REQUEST, format!("base64: {e}")).into_response(),
+    };
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    if !["pdf", "docx", "doc"].contains(&ext.as_str()) {
+        return err(StatusCode::BAD_REQUEST, "仅支持 pdf/docx").into_response();
+    }
+
+    // 写临时文件 → python3 提取
+    let tmp = std::env::temp_dir().join(format!("thirdc-{}.{ext}", std::process::id()));
+    std::fs::write(&tmp, &bytes).unwrap_or(());
+    let script = std::env::var("THIRDC_EXTRACT_SCRIPT")
+        .unwrap_or_else(|_| "scripts/extract_doc.py".into());
+    let out = tokio::process::Command::new("python3")
+        .arg(&script).arg(&tmp)
+        .output().await;
+    let _ = std::fs::remove_file(&tmp);
+    let out = match out {
+        Ok(o) if o.status.success() => o,
+        Ok(o) => return err(StatusCode::BAD_REQUEST, format!("解析失败：{}", String::from_utf8_lossy(&o.stderr).chars().take(200).collect::<String>())).into_response(),
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let parsed: Value = match serde_json::from_slice(&out.stdout) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    if !parsed["ok"].as_bool().unwrap_or(false) {
+        return err(StatusCode::BAD_REQUEST, parsed["error"].as_str().unwrap_or("解析失败")).into_response();
+    }
+    let text = parsed["text"].as_str().unwrap_or("").to_string();
+    if text.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "提取出的内容为空").into_response();
+    }
+    // 标题：第一行非空行
+    let title = text.lines().find(|l| !l.trim().is_empty()).unwrap_or(&name).trim().to_string();
+    let title = if title.chars().count() > 80 { title.chars().take(80).collect() } else { title };
+
+    let mut k = st.kernel.lock().unwrap();
+    let uri = format!("upload://{}-{}", kernel_core::Cas::hash_hex(name.as_bytes())[..12].to_string(), kernel_core::Cas::hash_hex(&bytes)[..8].to_string());
+    match k.import_capture("upload", &uri, Some(&title), &text, "text/markdown") {
+        Ok(rel) => {
+            // 附件本体也入库（原文可下载）
+            let _ = k.put_asset(&name, &bytes);
+            audit_log(&k.vault.sidecar(), "ingest-file", &json!({"name": name, "rel": rel, "bytes": bytes.len()}));
+            Json(json!({ "title": title, "rel": rel, "text_len": text.len(), "file_size": bytes.len() })).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }

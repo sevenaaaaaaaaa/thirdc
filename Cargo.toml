@@ -35,7 +35,7 @@ rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
 axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "process"] }
 tower = { version = "0.5", features = ["util"] }
 base64 = "0.22"
 hmac = "0.12"

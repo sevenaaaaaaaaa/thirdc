@@ -9,6 +9,7 @@
 //! 增量：state 文件记录已上传内容哈希；git 由 git 自己算差异。
 
 pub mod cf_pages;
+pub mod webdav;
 pub mod s3;
 
 use kernel_store::PublishTarget;
@@ -139,6 +140,14 @@ pub fn deploy(
         "s3" => {
             let mut st = load_state(&state_path(sidecar, &target.name));
             let r = s3::deploy_s3(site_dir, target, &mut st);
+            if r.is_ok() {
+                let _ = save_state(&state_path(sidecar, &target.name), &st);
+            }
+            r
+        }
+        "webdav" => {
+            let mut st = load_state(&state_path(sidecar, &target.name));
+            let r = webdav::backup_webdav(site_dir, target, &mut st);
             if r.is_ok() {
                 let _ = save_state(&state_path(sidecar, &target.name), &st);
             }
