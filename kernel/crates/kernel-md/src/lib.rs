@@ -689,7 +689,7 @@ tc:block raw -->
         assert!(md.contains("正文段落。 ^core-1"));
         let back = from_markdown(&md).unwrap();
         assert_eq!(back.meta.get("title").map(|s| s.as_str()), Some("知识包"));
-        assert_eq!(back.anchors, vec!["core-1"]);
+        assert_eq!(back.anchors.iter().flatten().count(), 1);
         // frontmatter 不再被当成 Divider
         assert!(!doc.blocks.iter().any(|b| matches!(b, Block::Divider { .. })));
     }

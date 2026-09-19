@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ThirdC Studio</title>
 <link rel="stylesheet" href="/assets/tokens.css">
+<link rel="manifest" href="/manifest-pwa.json">
+<link rel="icon" href="/assets/fonts/icon48.png">
 <style>
 /* ThirdC 私有样式 · 契约：零 hex、颜色全部来自 token、动效走 --ease-spring */
 *{box-sizing:border-box}
@@ -1227,7 +1229,10 @@ async function renderA2ui(msgEl,jsonl,title){
     const r=await api('/a2ui/render',{method:'POST',json:{jsonl,title:title||'A2UI'}});
     const frame=document.createElement('iframe');
     frame.className='a2ui-frame';frame.setAttribute('sandbox','allow-scripts');
-    frame.srcdoc=r.html.replace('</body>',A2UI_BRIDGE+'</body>');
+    frame.srcdoc=r.html.replace('<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}
+</script>
+</body>',A2UI_BRIDGE+'</body>');
     host.innerHTML='';host.appendChild(frame);
   }catch(e){host.innerHTML='<div class="a2ui-loading">A2UI 渲染失败：'+e.message+'</div>';}
 }

@@ -54,6 +54,8 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(app))
         .route("/assets/tokens.css", get(tokens_css))
+        .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
+        .route("/sw.js", get(|| async { ([("content-type","application/javascript"),("cache-control","no-store")], "self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>self.clients.claim());self.addEventListener('fetch',e=>{if(e.request.mode==='navigate'){e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||new Response('offline'))))}else{e.respondWith(caches.open('thirdc-v1').then(async c=>{const m=await c.match(e.request);if(m)return m;const r=await fetch(e.request);if(r.ok)c.put(e.request,r.clone());return r}))}});") }))
         .route("/assets/fonts/{name}", get(font))
         .route("/health", get(health))
         .route("/status", get(status))
