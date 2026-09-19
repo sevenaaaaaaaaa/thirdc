@@ -1,0 +1,11 @@
+{
+  "productName": "ThirdC Studio",
+  "identifier": "com.nownexts.thirdc",
+  "build": {
+    "frontendDist": "../server/web"
+  },
+  "app": {
+    "windows": [{ "title": "ThirdC Studio", "width": 1440, "height": 900, "minWidth": 900 }],
+    "security": { "csp": null }
+  }
+}
