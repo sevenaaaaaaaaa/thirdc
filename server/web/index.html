@@ -294,6 +294,15 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .present-bar{height:46px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--border);background:var(--surface)}
 .present-bar .t{font-family:var(--font-display);font-weight:700;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 
+@keyframes sparkle{0%{transform:scale(0);opacity:1}70%{opacity:.9}100%{transform:scale(1.6) translateY(-24px);opacity:0}}
+.sparkle{position:fixed;pointer-events:none;z-index:300;width:8px;height:8px;border-radius:50%;background:var(--accent);animation:sparkle .9s var(--ease-out) both}
+@keyframes treeIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+.tree-leaf,.tree-folder{animation:treeIn .35s var(--ease-spring) both}
+#gitpanel{position:fixed;left:10px;bottom:34px;width:250px;z-index:36;background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);display:none;padding:10px}
+#gitpanel.open{display:block}
+#gitpanel .row{display:flex;gap:6px;margin-bottom:7px}
+#gitpanel input{flex:1;min-width:0;height:30px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12px var(--font-body);outline:none}
+#gitpanel .log{max-height:150px;overflow:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted);line-height:1.8}
 #toast{position:fixed;right:16px;bottom:44px;z-index:120;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
@@ -361,6 +370,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button class="act" id="b-clear">取消</button>
   </div>
   <button class="rail-new" id="rail-new">＋ 新建文档 <kbd style="font-family:var(--font-mono);font-size:10px;color:var(--faint)">N</kbd></button>
+  <button class="rail-new" id="organize-btn" style="border-style:solid">✨ 一键整理 <kbd style="font-family:var(--font-mono);font-size:10px;color:var(--faint)">M</kbd></button>
   <div class="rail-list" id="rail-list"></div>
   <div class="rail-foot">
     <div>库 <b id="v-name">—</b></div>
@@ -447,6 +457,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
       </select>
     </div>
     <input type="file" id="design-file" style="display:none" multiple>
+    <div class="dv-sec"><h4>主题预设（来自 OpenFlow）</h4><div id="preset-list" class="swrap" style="gap:8px"></div></div>
     <div id="design-list"></div>
   </div>
 </div></div>
@@ -472,6 +483,16 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <span id="sb-mode">—</span>
   <span id="sb-peers">在线 1</span>
   <span style="margin-left:auto">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
+</div>
+<div id="gitpanel">
+  <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
+    <span class="badge ok" id="git-branch">—</span><span class="dv-meta" id="git-changes" style="margin:0;flex:1"></span>
+    <button class="icon-btn" id="git-close" title="关闭">✕</button>
+  </div>
+  <div class="row"><input id="git-msg" placeholder="提交说明…"><button class="act" id="git-do-commit" style="height:30px;padding:0 10px">存档</button></div>
+  <div class="row"><input id="git-remote" placeholder="remote（可选，同步用）"><button class="act" id="git-do-sync" style="height:30px;padding:0 10px">同步</button></div>
+  <div class="row"><input id="git-newbranch" placeholder="新分支名…"><button class="act" id="git-do-branch" style="height:30px;padding:0 10px">新建</button></div>
+  <div class="log" id="git-log"></div>
 </div>
 <div id="toast"></div>
 <script>
@@ -750,6 +771,7 @@ document.addEventListener('keydown',e=>{
   const tag=(e.target.tagName||'').toLowerCase();
   if(tag==='input'||tag==='textarea')return;
   if(e.key==='f'){fit();}if(e.key==='t'){tidy();}if(e.key==='n'){newDoc();}
+  if(e.key==='m'){sparkle(20);$('organize-btn').click();}
   if(e.key==='1'){document.querySelector('[data-view=timeline]').click();}
   if(e.key==='2'){document.querySelector('[data-view=kanban]').click();}
   if(e.key==='3'){document.querySelector('[data-view=canvas]').click();}
@@ -790,6 +812,7 @@ function tagColor(t){let h=0;for(const c of t)h=(h*31+c.codePointAt(0))%360;cons
 let treeState=JSON.parse(localStorage.getItem('thirdc_tree')||'{}');
 function renderTree(docs){
   const q=($('rail-search').value||'').trim().toLowerCase();
+  window.__treeAnim=true;
   const box=$('rail-list');box.innerHTML='';
   const root={dirs:new Map(),docs:[]};
   for(const d of docs){
@@ -846,6 +869,7 @@ function renderTree(docs){
     }
   }
   const wrap=document.createElement('div');wrap.className='tree';renderFolder(root,wrap,0);box.appendChild(wrap);
+  box.querySelectorAll('.tree-leaf,.tree-folder').forEach((el,i)=>el.style.animationDelay=Math.min(i*24,500)+'ms');
   updateDepth();
 }
 $('rail-search').addEventListener('input',()=>loadRail());
@@ -1122,7 +1146,48 @@ function renderBoards(){
 /* ───────── 设计规范面板 ───────── */
 let designs=[],activeDesign='',designScopes={};
 function swatchColor(v){const t=v.trim();return /oklch|rgb|hsl|#|color-mix/.test(t)?t:'var(--hover)'}
-async function openDesign(){await loadDesigns();openOverlay('design-ov');}
+async function openDesign(){await loadDesigns();await loadPresets();openOverlay('design-ov');}
+let themePreset=JSON.parse(localStorage.getItem('thirdc_preset')||'null');
+function applyThemePreset(){
+  const el=document.getElementById('theme-override')||document.createElement('style');
+  el.id='theme-override';
+  if(!themePreset){el.textContent='';if(el.parentNode)el.remove();return}
+  const t=document.documentElement.dataset.theme==='dark'?themePreset.dark:themePreset.light;
+  const L=themePreset.layout||{};
+  const map={'bg':'--bg','bg-soft':'--bg-soft','surface':'--surface','surface-strong':'--surface-strong','fg':'--fg','muted':'--muted','faint':'--faint','border':'--border','border-strong':'--border-strong','hover':'--hover','hover-strong':'--hover-strong','accent':'--accent','accent-strong':'--accent-strong','accent-soft':'--accent-soft','on-accent':'--on-accent','glass':'--glass','glass-bright':'--glass-bright','glass-border':'--glass-border','blob-a':'--blob-a','blob-b':'--blob-b','blob-c':'--blob-c','shadow':'--shadow','shadow-sm':'--shadow-sm'};
+  let css=':root,\n[data-theme="dark"]{';
+  for(const [k,v] of Object.entries(t)){const our=map[k];if(our)css+=`${our}:${v};`}
+  if(L['r-lg'])css+=`--r-lg:${L['r-lg']};--r-md:${L['r-md']||L['r-lg']};--r-sm:${L['r-sm']||L['r-md']||'12px'};`;
+  css+='}';
+  if(L['font-display'])css+=`\nbody,#chrome,.brand{font-family:${L['font-display']}}`;
+  if(L['font-mono'])css+=`\n.n-path,.tagchip,.insp-path,#statusbar{font-family:${L['font-mono']}}`;
+  el.textContent=css;
+  document.head.appendChild(el);
+  const b=$('preset-btn');if(b)b.textContent=themePreset?themePreset.name:'主题';
+}
+async function loadPresets(){
+  const box=$('preset-list');if(!box)return;
+  try{
+    const d=await api('/design/presets');
+    box.innerHTML='';
+    for(const [k,v] of Object.entries(d.presets)){
+      const b=document.createElement('button');
+      b.className='act';b.style.cssText='height:auto;padding:7px 10px;flex-direction:column;align-items:flex-start;gap:3px';
+      const a=v.light['accent']||'#';
+      b.innerHTML=`<span style="font-weight:700">${v.name}</span><span style="display:flex;gap:4px"><i style="width:26px;height:12px;border-radius:4px;background:${v.light['bg']}"></i><i style="width:26px;height:12px;border-radius:4px;background:${a}"></i><i style="width:26px;height:12px;border-radius:4px;background:${v.dark['bg']}"></i></span>`;
+      b.title=v.desc;
+      const active=themePreset&&themePreset.name===v.name;
+      if(active)b.style.borderColor='var(--accent)';
+      b.onclick=async()=>{
+        themePreset=active?null:v;
+        localStorage.setItem('thirdc_preset',JSON.stringify(themePreset));
+        applyThemePreset();loadPresets();
+        toast(active?'已恢复内置主题':'已应用预设：'+v.name,'ok');
+      };
+      box.appendChild(b);
+    }
+  }catch(e){}
+}
 async function loadDesigns(){
   const r=await api('/design');designs=r.profiles;activeDesign=r.active||'';designScopes=r.scopes||{};
   const scDesc=Object.entries(designScopes).map(([k,v])=>k+'→'+v).join(' · ');
@@ -1247,7 +1312,9 @@ document.querySelectorAll('.tab-pill').forEach(b=>b.onclick=()=>{
   lens=b.dataset.lens;renderGraph();fit();
 });
 $('fit').onclick=fit;$('tidy').onclick=tidy;
-$('theme').onclick=()=>{
+applyThemePreset();
+const _oldSetTheme=$('theme').onclick;
+$('theme').onclick=()=>{applyThemePreset();
   themePref=themePref==='auto'?'light':(themePref==='light'?'dark':'auto');
   localStorage.setItem('thirdc_theme',themePref); applyTheme();
   toast('主题：'+(themePref==='auto'?'跟随系统':(themePref==='light'?'浅色':'深色')),'ok');
@@ -1447,10 +1514,69 @@ $('b-tag').onclick=async()=>{
   clearSel();toast(`已为 ${ok} 篇打上 #${t}`,'ok');await refreshAll();
 };
 
+/* ───────── 一键整理（魔法特效） ───────── */
+function sparkle(n){
+  for(let i=0;i<n;i++){
+    const p=document.createElement('i');p.className='sparkle';
+    p.style.left=(30+Math.random()*(innerWidth-60))+'px';
+    p.style.top=(80+Math.random()*(innerHeight-160))+'px';
+    p.style.animationDelay=(Math.random()*0.5)+'s';
+    p.style.width=p.style.height=(5+Math.random()*7)+'px';
+    document.body.appendChild(p);setTimeout(()=>p.remove(),1600);
+  }
+}
+$('organize-btn').onclick=async()=>{
+  sparkle(26);toast('✨ 正在分析结构，生成整理方案…');
+  try{
+    const plan=await api('/organize/plan',{method:'POST',json:{}});
+    if(!plan.moves.length){toast('结构已经很整洁，无需整理','ok');return}
+    if(!confirm(`整理方案：${plan.moves.length} 项移动（按标签聚类）\n`+plan.moves.map(m=>`${m.from} → ${m.to}`).join('\n')+'\n\n执行？'))return;
+    const r=await api('/organize/apply',{method:'POST',json:{moves:plan.moves}});
+    sparkle(40);
+    toast(`✨ 已整理 ${r.applied} 篇（失败 ${r.failed.length}）`,'ok');
+    await refreshAll();
+    setTimeout(()=>fit(),300);
+  }catch(e){toast('整理失败：'+e.message,'err')}
+};
+
+/* ───────── git 工作区面板 ───────── */
+async function gitRefresh(){
+  try{
+    const st=await api('/git/status');
+    $('git-branch').textContent='⎇ '+st.branch;
+    $('git-changes').textContent=st.changes?`${st.changes} 处未存档`:'已整洁';
+    const lg=await api('/git/log');
+    $('git-log').innerHTML=(lg.log||[]).map(x=>`<div>${x.hash} · ${x.subject}</div>`).join('')||'<div>（还没有提交）</div>';
+    $('gitpanel').classList.add('open');
+  }catch(e){toast('git 状态失败：'+e.message,'err')}
+}
+$('git-do-commit').onclick=async()=>{
+  try{const r=await api('/git/commit',{method:'POST',json:{message:$('git-msg').value||'wip'}});
+    toast(`已存档 ${r.committed} 个文件`,'ok');$('git-msg').value='';gitRefresh();
+  }catch(e){toast('存档失败：'+e.message,'err')}
+};
+$('git-do-branch').onclick=async()=>{
+  const n=$('git-newbranch').value.trim();if(!n)return;
+  try{await api('/git/checkout',{method:'POST',json:{name:n,create:true}});toast(`已创建并切换到 ${n}`,'ok');$('git-newbranch').value='';gitRefresh()}
+  catch(e){toast('失败：'+e.message,'err')}
+};
+$('git-do-sync').onclick=async()=>{
+  const r=$('git-remote').value.trim();if(!r)return;
+  try{const x=await api('/git/sync',{method:'POST',json:{remote:r}});toast(x.detail,'ok');gitRefresh()}
+  catch(e){toast('同步失败：'+e.message,'err')}
+};
+$('git-close').onclick=()=>$('gitpanel').classList.remove('open');
+
+/* ───────── 展示：整库 PPT ───────── */
+$('p-all')?.remove();
+const pAllBtn=document.createElement('button');pAllBtn.className='act';pAllBtn.textContent='整库 PPT';
+pAllBtn.onclick=()=>window.open(`/presentation?token=${encodeURIComponent(token)}`,'_blank');
+$('p-exit').parentNode.insertBefore(pAllBtn,$('p-exit'));
+
 /* ───────── 启动 ───────── */
 (async function init(){
   try{await loadBoards();board=await api('/board?name='+encodeURIComponent(boardName));}catch{}
-  await refreshAll();applyVP();fit();initPresence();
+  applyThemePreset();await refreshAll();applyVP();fit();initPresence();
   addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索 融合内核」，或点 ⌘K 找文档/执行命令。');
 })();
 </script>

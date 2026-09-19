@@ -370,3 +370,106 @@ mod tests {
         assert!(e.to_string().contains("remote"));
     }
 }
+
+
+/// git 开发模式：把知识库当仓库管理（工作区 = 分支）。
+pub mod gitops {
+    use super::{DeployError, git as _git};
+
+    pub fn ensure_repo(dir: &std::path::Path) -> Result<(), DeployError> {
+        if dir.join(".git").is_dir() {
+            return Ok(());
+        }
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["init", "-b", "main"])
+            .output()?;
+        if !out.status.success() {
+            return Err(DeployError::Git(String::from_utf8_lossy(&out.stderr).into()));
+        }
+        Ok(())
+    }
+
+    pub fn status(dir: &std::path::Path) -> Result<(String, usize), DeployError> {
+        ensure_repo(dir)?;
+        let branch = git_stdout(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).trim().to_string();
+        let n = git_stdout(dir, &["status", "--porcelain"]).lines().count();
+        Ok((branch, n))
+    }
+
+    pub fn log(dir: &std::path::Path, n: usize) -> Result<Vec<(String, String)>, DeployError> {
+        ensure_repo(dir)?;
+        let out = git_stdout(dir, &["log", "--oneline", "-n", &n.to_string()]);
+        Ok(out
+            .lines()
+            .filter_map(|l| l.split_once(' ').map(|(h, s)| (h.to_string(), s.to_string())))
+            .collect())
+    }
+
+    pub fn commit_all(dir: &std::path::Path, msg: &str) -> Result<usize, DeployError> {
+        ensure_repo(dir)?;
+        _git(dir, &["add", "-A"])?;
+        let st = git_stdout(dir, &["status", "--porcelain"]);
+        if st.trim().is_empty() {
+            return Ok(0);
+        }
+        _git(
+            dir,
+            &["-c", "user.name=thirdc", "-c", "user.email=thirdc@localhost", "commit", "-q", "-m", msg],
+        )?;
+        Ok(st.lines().count())
+    }
+
+    pub fn branches(dir: &std::path::Path) -> Result<Vec<String>, DeployError> {
+        ensure_repo(dir)?;
+        let out = git_stdout(dir, &["branch", "--format=%(refname:short)"]);
+        Ok(out.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+    }
+
+    pub fn create_branch(dir: &std::path::Path, name: &str) -> Result<(), DeployError> {
+        ensure_repo(dir)?;
+        _git(dir, &["checkout", "-b", name])
+    }
+
+    pub fn checkout(dir: &std::path::Path, name: &str) -> Result<(), DeployError> {
+        ensure_repo(dir)?;
+        // 未提交的改动先兜底提交，防丢
+        commit_all(dir, "wip: 切换工作区前自动存档")?;
+        _git(dir, &["checkout", name])
+    }
+
+    pub fn sync(dir: &std::path::Path, remote: &str) -> Result<(bool, String), DeployError> {
+        ensure_repo(dir)?;
+        let existing = git_stdout(dir, &["remote", "get-url", "origin"]);
+        if existing.trim().is_empty() {
+            _git(dir, &["remote", "add", "origin", remote])?;
+        } else if existing.trim() != remote {
+            _git(dir, &["remote", "set-url", "origin", remote])?;
+        }
+        let _ = _git(dir, &["pull", "--rebase", "-q", "origin", "HEAD"]);
+        let n = commit_all(dir, "sync: 自动存档")?;
+        _git(dir, &["push", "-q", "-u", "origin", "HEAD"])?;
+        Ok((n > 0, format!("已同步（本地新提交 {n} 个）")))
+    }
+
+    fn git_stdout(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git").current_dir(dir).args(args).output();
+        match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+            Err(_) => String::new(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn git(dir: &std::path::Path, args: &[&str]) -> Result<(), DeployError> {
+        let out = std::process::Command::new("git").current_dir(dir).args(args).output()?;
+        if !out.status.success() {
+            return Err(DeployError::Git(format!(
+                "git {} -> {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        Ok(())
+    }
+}

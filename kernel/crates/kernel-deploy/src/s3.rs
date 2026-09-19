@@ -153,7 +153,7 @@ pub fn amz_date_now() -> (String, String) {
 }
 
 /// UNIX 秒 → UTC 民用时间（Howard Hinnant 的 civil_from_days 算法）。
-fn civil_from_unix(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+pub fn civil_from_unix(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let z = days + 719_468;
