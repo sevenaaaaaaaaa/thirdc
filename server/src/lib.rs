@@ -385,7 +385,8 @@ async fn list_docs_api(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl In
         .filter_map(|p| p.to_str())
         .map(|p| {
             let title = k.get_doc(p).ok().and_then(|m| m.title).unwrap_or_default();
-            json!({ "path": p, "title": title })
+            let tags = k.get_doc(p).ok().map(|m| extract_tags(&kernel_core::to_markdown(&m))).unwrap_or_default();
+            json!({ "path": p, "title": title, "tags": tags })
         })
         .collect();
     Json(json!({ "docs": arr })).into_response()
@@ -464,16 +465,20 @@ async fn get_doc(
     let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
     let format = if kernel_core::is_html_rel(&path) { "html" } else { "markdown" };
     match k.get_doc(&path) {
-        Ok(model) => Json(json!({
+        Ok(model) => {
+            let doc_tags = extract_tags(&kernel_core::to_markdown(&model));
+            Json(json!({
             "path": path,
             "title": model.title,
             "format": format,
+            "tags": doc_tags,
             "source": source,
             "blocks": model.blocks,
             "markdown": kernel_core::to_markdown(&model),
             "html": html,
         }))
-        .into_response(),
+        .into_response()
+        }
         Err(e) => err(StatusCode::NOT_FOUND, e).into_response(),
     }
 }
@@ -720,6 +725,37 @@ mod tests {
 
 // ---------- 图谱 / 画布布局 辅助 ----------
 
+/// 行内 #标签 抽取（跳过标题行；去重保序）。
+fn extract_tags(md: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in md.lines() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0usize;
+        while i < chars.len() {
+            let prev_ok = i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '#');
+            if chars[i] == '#' && prev_ok {
+                let mut j = i + 1;
+                let mut s = String::new();
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '-' || chars[j] == '_') {
+                    s.push(chars[j]);
+                    j += 1;
+                }
+                let n = s.chars().count();
+                if n >= 2 && n <= 24 && !out.contains(&s) {
+                    out.push(s);
+                }
+                i = j;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// 看板分栏依据：Notes/ 下第一层目录；根目录文档归入「(根)」。
 fn collection_of(path: &str) -> String {
     let rest = path.strip_prefix("Notes/").unwrap_or(path);
@@ -793,9 +829,10 @@ fn build_graph(k: &mut Kernel) -> anyhow::Result<Value> {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let collection = collection_of(&path);
+        let tags = extract_tags(&md);
         nodes.push(json!({
             "id": format!("doc:{path}"), "kind": kind, "path": path, "title": title,
-            "excerpt": excerpt, "mtime": mtime, "collection": collection
+            "excerpt": excerpt, "mtime": mtime, "collection": collection, "tags": tags
         }));
         bodies.push((path, md));
     }

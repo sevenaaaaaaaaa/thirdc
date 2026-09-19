@@ -430,6 +430,8 @@ pub fn to_html(doc: &DocModel) -> String {
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('&', "\\u0026");
+    let title_esc = esc(&title);
+    let n = doc.blocks.len();
     let mut body = String::new();
     if doc.title.is_some() {
         // 自包含文档里标题也是 H1：人类可读、agent 可解析、往返一致
@@ -477,12 +479,39 @@ pub fn to_html(doc: &DocModel) -> String {
     }
     format!(
         "<!doctype html>\n<html lang=\"zh\"><head><meta charset=\"utf-8\">\n\
-<title>{title_esc}</title>\n\
-<script type=\"application/ld+json\">{ld}</script>\n\
-<style>body{{max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.7;font-family:system-ui,sans-serif}}pre{{overflow:auto;padding:.75rem;background:#f6f8fa}}table{{border-collapse:collapse}}th,td{{border:1px solid #ddd;padding:.3rem .6rem}}</style>\n\
-</head><body><article data-kb-format=\"ai-html\" data-block-count=\"{n}\">\n{body}</article></body></html>\n",
-        title_esc = esc(&title),
-        n = doc.blocks.len(),
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+<title>{}</title>\n\
+<script type=\"application/ld+json\">{}</script>\n\
+<style>\n\
+:root{{--doc-fg:oklch(24% .02 70);--doc-bg:oklch(98.5% .008 85);--doc-muted:oklch(48% .016 70);--doc-line:oklch(24% .02 70/.14);--doc-accent:oklch(54% .17 258);--doc-code-bg:oklch(96.5% .01 85);--doc-soft:oklch(24% .02 70/.05)}}\n\
+html{{background:var(--doc-bg)}}\n\
+body{{max-width:44rem;margin:0 auto;padding:56px 28px 96px;color:var(--doc-fg);font:16.5px/1.95 var(--font-body,system-ui,sans-serif);letter-spacing:.015em;-webkit-font-smoothing:antialiased}}\n\
+h1{{font-size:2em;line-height:1.35;margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--doc-line)}}\n\
+h2{{font-size:1.4em;margin:2.2em 0 .7em;position:relative;padding-left:.85em}}\n\
+h2::before{{content:\"\";position:absolute;left:0;top:.3em;bottom:.3em;width:3.5px;border-radius:3px;background:var(--doc-accent)}}\n\
+h3,h4{{font-size:1.14em;margin:1.7em 0 .55em}}\n\
+p{{margin:.9em 0}}\n\
+a{{color:var(--doc-accent);text-decoration:none;border-bottom:1px solid color-mix(in oklab,var(--doc-accent) 38%,transparent);transition:border-color .18s}}\n\
+a:hover{{border-bottom-color:var(--doc-accent)}}\n\
+strong{{font-weight:650}}\n\
+blockquote{{margin:1.3em 0;padding:.7em 1.2em;border-left:3px solid var(--doc-accent);background:var(--doc-soft);border-radius:0 12px 12px 0;color:var(--doc-muted)}}\n\
+blockquote p{{margin:.35em 0}}\n\
+code{{font-family:var(--font-mono,ui-monospace,monospace);font-size:.86em;background:var(--doc-code-bg);border:1px solid var(--doc-line);border-radius:7px;padding:.12em .42em}}\n\
+pre{{background:oklch(23% .014 75);color:oklch(93% .008 85);border-radius:14px;padding:18px 20px;overflow:auto;box-shadow:0 14px 34px -18px oklch(0% 0 0/.5)}}\n\
+pre code{{background:none;border:none;color:inherit;padding:0;font-size:.88em;line-height:1.75}}\n\
+table{{width:100%;border-collapse:collapse;margin:1.3em 0;font-size:.93em;border:1px solid var(--doc-line);border-radius:12px;overflow:hidden}}\n\
+th{{background:var(--doc-soft);text-align:left;font-weight:650}}\n\
+th,td{{padding:.55em .9em;border-bottom:1px solid var(--doc-line)}}\n\
+tr:last-child td{{border-bottom:none}}\n\
+tbody tr:nth-child(even){{background:color-mix(in oklab,var(--doc-soft) 55%,transparent)}}\n\
+img{{max-width:100%;border-radius:14px;display:block;margin:1.4em auto;box-shadow:0 18px 44px -22px oklch(0% 0 0/.42)}}\n\
+hr{{border:none;height:1px;background:var(--doc-line);margin:2.4em auto;width:62%}}\n\
+::selection{{background:color-mix(in oklab,var(--doc-accent) 26%,transparent)}}\n\
+</style>\n\
+</head><body><article data-kb-format=\"ai-html\" data-block-count=\"{n}\">\n{}\n</article></body></html>\n",
+        title_esc,
+        ld,
+        body,
     )
 }
 
