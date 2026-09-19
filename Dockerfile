@@ -1,5 +1,5 @@
 # ── build ──
-FROM rust:1.90-slim AS build
+FROM rust:1-slim AS build
 WORKDIR /src
 COPY . .
 RUN cargo build --release -p thirdc
