@@ -370,6 +370,23 @@ impl Kernel {
         Ok(self.index.search(query).map_err(SyncError::Store)?)
     }
 
+    /// 混合检索：FTS5 + TF-IDF 向量 → RRF 合并。
+    pub fn search_hybrid(&self, query: &str, limit: usize) -> Result<Vec<(String, f64)>, SyncError> {
+        let fts = self.search(query)?;
+        // 全库文本 → TF-IDF
+        let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
+        let corpus: Vec<(String, String)> = docs.iter()
+            .filter_map(|p| {
+                let rel = p.to_str()?;
+                let text = fs::read_to_string(self.vault.root.join(p)).ok()?;
+                Some((rel.to_string(), text))
+            })
+            .collect();
+        let idx = rag::TfidfIndex::build(&corpus);
+        let vec_hits = idx.search(query, limit * 2);
+        Ok(rag::rrf_merge(&fts, &vec_hits, limit))
+    }
+
     /// 已索引文档数。
     pub fn indexed_count(&self) -> Result<usize, StoreError> {
         self.index.doc_count()

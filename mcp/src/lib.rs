@@ -175,17 +175,7 @@ impl McpServer {
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
         self.with_kernel(|k| {
             k.sync_all()?;
-            let docs = kernel_core::list_docs(&k.vault)?;
-            let corpus: Vec<(String, String)> = docs.iter()
-                .filter_map(|p| {
-                    let rel = p.to_str()?;
-                    let text = std::fs::read_to_string(k.vault.root.join(p)).ok()?;
-                    Some((rel.to_string(), text))
-                }).collect();
-            let idx = kernel_core::rag::TfidfIndex::build(&corpus);
-            let hits = idx.search(&query, limit);
-            let fts = k.search(&query).unwrap_or_default();
-            let merged = kernel_core::rag::rrf_merge(&fts, &hits, limit);
+            let merged = k.search_hybrid(&query, limit)?;
             let arr: Vec<Value> = merged.iter()
                 .map(|(p, s)| json!({"path": p, "score": s})).collect();
             Ok(tool_result(
