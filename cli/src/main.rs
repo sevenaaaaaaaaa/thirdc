@@ -263,7 +263,7 @@ fn main() -> Result<()> {
     let vault = Vault::open(&vault_path)?;
     let src = Path::new(&obsidian);
     if !src.is_dir() { anyhow::bail!("目录不存在：{}", src.display()); }
-    let att_dir = attachments_dir.clone();
+    let _att_dir = attachments_dir.clone();
 
     let mut copied = 0usize; let mut assets = 0usize; let mut skipped = 0usize;
     let mut stack = vec![src.to_path_buf()];

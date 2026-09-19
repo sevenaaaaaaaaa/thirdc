@@ -2200,6 +2200,7 @@ async fn share_create(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
     Json(json!({ "id": id })).into_response()
 }
 
+#[allow(dead_code)]
 async fn share_get(AxumPath(id): AxumPath<String>) -> impl IntoResponse {
     if id.contains("..") || id.contains('/') {
         return err(StatusCode::BAD_REQUEST, "bad id").into_response();
