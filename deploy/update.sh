@@ -8,7 +8,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 echo "① 拉取最新代码"
 if [ -d "$APP/src/.git" ]; then
-  cd "$APP/src" && git fetch --depth=1 origin main && git reset --hard origin/main
+  # 浅克隆下 origin/main 可能不刷新，用 FETCH_HEAD 更稳
+  cd "$APP/src" && git fetch --depth=1 origin main && git reset --hard FETCH_HEAD
 else
   rm -rf "$APP/src" && git clone --depth=1 "$REPO" "$APP/src"
 fi
