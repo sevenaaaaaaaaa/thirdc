@@ -434,6 +434,16 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <div id="crumb"></div>
 <div id="canvas-state"></div>
 <div id="hintbar"></div>
+<div id="boot" style="position:fixed;inset:0;z-index:240;display:grid;place-items:center;background:var(--bg)">
+  <div style="text-align:center">
+    <div style="width:52px;height:52px;border-radius:17px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font:800 20px var(--font-display);margin:0 auto 16px">3C</div>
+    <div style="font-family:var(--font-display);font-size:19px;font-weight:700;margin-bottom:4px">ThirdC Studio</div>
+    <div id="boot-msg" style="color:var(--faint);font-size:12.5px;font-family:var(--font-mono);min-height:18px">正在连接内核…</div>
+    <div style="width:180px;height:3px;border-radius:2px;background:var(--hover);margin:16px auto 0;overflow:hidden">
+      <div id="boot-bar" style="height:100%;width:8%;background:var(--accent);transition:width .5s var(--ease-spring)"></div>
+    </div>
+  </div>
+</div>
 <div id="onboard"><div class="ob-card">
   <h2>欢迎来到 ThirdC Studio</h2>
   <div class="sub">你的知识是文件，是画布，也是 agent 的工具。选一个起点开始：</div>
@@ -2306,9 +2316,27 @@ function maybeOnboard(){
   });
 }
 
+function bootStep(pct,msg){
+  const b=$('boot-bar'),m=$('boot-msg');
+  if(b)b.style.width=pct+'%';
+  if(m&&msg)m.textContent=msg;
+}
+function bootDone(){
+  const el=$('boot');if(!el)return;
+  el.style.transition='opacity .45s var(--ease-out)';el.style.opacity='0';
+  setTimeout(()=>el.remove(),500);
+}
 (async function init(){
+  bootStep(10,'读取库配置…');
   try{await loadBoards();board=await api('/board?name='+encodeURIComponent(boardName));}catch{}
-  applyThemePreset();await refreshAll();applyVP();fit();initPresence();
+  applyThemePreset();
+  bootStep(30,'读取目录…');
+  await loadRail().catch(()=>{});
+  bootStep(55,'读取当前文件夹…');
+  await loadGraph().catch(()=>{});
+  bootStep(75,'读取状态…');
+  await Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]);
+  bootStep(92,'就绪');applyVP();fit();initPresence();bootDone();maybeOnboard();
   addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索 融合内核」，或点 ⌘K 找文档/执行命令。');
 })();
 </script>
