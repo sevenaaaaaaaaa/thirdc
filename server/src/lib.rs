@@ -408,9 +408,11 @@ async fn list_docs_api(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl In
         .iter()
         .filter_map(|p| p.to_str())
         .map(|p| {
-            let title = k.get_doc(p).ok().and_then(|m| m.title).unwrap_or_default();
-            let tags = k.get_doc(p).ok().map(|m| extract_tags(&kernel_core::to_markdown(&m))).unwrap_or_default();
-            json!({ "path": p, "title": title, "tags": tags })
+            // 轻量路径：直接读文件抽标题/标签，绝不为每篇文档加载 CRDT。
+            // （1.2 万篇时 get_doc 会把整库 CRDT 拉进内存 → 请求挂起 → 侧栏空白）
+            let text = std::fs::read_to_string(k.vault.root.join(p)).unwrap_or_default();
+            let (title, tags) = kernel_core::refs::extract_title_and_tags(&text);
+            json!({ "path": p, "title": title.unwrap_or_default(), "tags": tags })
         })
         .collect();
     Json(json!({ "docs": arr })).into_response()
@@ -857,15 +859,17 @@ fn build_graph(k: &mut Kernel) -> anyhow::Result<Value> {
 
     for p in &docs {
         let path = p.to_string_lossy().into_owned();
-        let model = k.get_doc(&path)?;
-        let title = model.title.clone().unwrap_or_default();
+        // 轻量：直接读文件（不加载 CRDT），大库也能秒开
+        let text = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
+        let (title_opt, tags_fast) = kernel_core::refs::extract_title_and_tags(&text);
+        let title = title_opt.unwrap_or_default();
         if !title.is_empty() {
             by_key.insert(title.to_lowercase(), path.clone());
         }
         if let Some(stem) = p.file_stem() {
             by_key.insert(stem.to_string_lossy().to_lowercase(), path.clone());
         }
-        let md = kernel_core::to_markdown(&model);
+        let md = text.clone();
         let excerpt: String = md
             .lines()
             .filter(|l| {
@@ -886,7 +890,7 @@ fn build_graph(k: &mut Kernel) -> anyhow::Result<Value> {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let collection = collection_of(&path);
-        let tags = extract_tags(&md);
+        let tags = tags_fast;
         nodes.push(json!({
             "id": format!("doc:{path}"), "kind": kind, "path": path, "title": title,
             "excerpt": excerpt, "mtime": mtime, "collection": collection, "tags": tags

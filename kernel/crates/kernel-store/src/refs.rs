@@ -33,6 +33,35 @@ pub fn find_asset_refs(text: &str) -> Vec<String> {
     out
 }
 
+/// 直接从 Markdown 文本抽标题（frontmatter title: > 首个 # 标题 > 文件名）。
+/// 轻量路径：供 /docs、/graph 使用，避免为每篇文档加载 CRDT 文档。
+pub fn extract_title(md: &str) -> Option<String> {
+    let mut lines = md.lines().peekable();
+    // frontmatter
+    if lines.peek().map_or(false, |l| l.trim() == "---") {
+        lines.next();
+        for l in lines.by_ref() {
+            if l.trim() == "---" { break; }
+            if let Some(v) = l.strip_prefix("title:") {
+                let t = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                if !t.is_empty() { return Some(t); }
+            }
+        }
+    }
+    for l in md.lines() {
+        if let Some(t) = l.strip_prefix("# ") {
+            let t = t.trim();
+            if !t.is_empty() { return Some(t.to_string()); }
+        }
+    }
+    None
+}
+
+/// 一次扫描同时取标题与标签（比分别扫快一倍）。
+pub fn extract_title_and_tags(md: &str) -> (Option<String>, Vec<String>) {
+    (extract_title(md), find_tag_refs(md))
+}
+
 /// 抽取行内 #标签（跳过标题行）。
 pub fn find_tag_refs(md: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();

@@ -299,7 +299,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 @keyframes sparkle{0%{transform:scale(0);opacity:1}70%{opacity:.9}100%{transform:scale(1.6) translateY(-24px);opacity:0}}
 .sparkle{position:fixed;pointer-events:none;z-index:300;width:8px;height:8px;border-radius:50%;background:var(--accent);animation:sparkle .9s var(--ease-out) both}
 @keyframes treeIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
-.tree-leaf,.tree-folder{animation:treeIn .35s var(--ease-spring) both}
+
 #gitpanel{position:fixed;left:10px;bottom:34px;width:250px;z-index:36;background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);display:none;padding:10px}
 #gitpanel.open{display:block}
 #gitpanel .row{display:flex;gap:6px;margin-bottom:7px}
@@ -967,9 +967,8 @@ function tagColor(t){let h=0;for(const c of t)h=(h*31+c.codePointAt(0))%360;cons
 let treeState=JSON.parse(localStorage.getItem('thirdc_tree')||'{}');
 function renderTree(docs){
   const q=($('rail-search').value||'').trim().toLowerCase();
-  window.__treeAnim=true;
   const box=$('rail-list');box.innerHTML='';
-  const root={dirs:new Map(),docs:[]};
+  const root={dirs:new Map(),docs:[],path:''};
   for(const d of docs){
     const parts=d.path.replace(/^Notes\//,'').split('/');
     let node=root;
@@ -986,48 +985,74 @@ function renderTree(docs){
     for(const c of node.dirs.values())if(hitIn(c))return true;
     return false;
   };
-  function renderFolder(node,el,depth){
+  const MAX_PER_DIR=200;
+  // 渲染"某一层"（懒加载：只在该层展开时才渲染）
+  function renderLevel(node,el){
     for(const [name,child] of node.dirs){
       if(q&&!hitIn(child))continue;
-      const open=q||treeState[child.path]!==false;
-      const f=document.createElement('div');f.className='tree-folder'+(open?' open':'');
-      const row=document.createElement('div');row.className='tree-row';row.style.marginLeft=depth*0+'px';
-      row.innerHTML=`<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nm"></span><span class="ct">${child.docs.length}</span>`;
+      const f=document.createElement('div');f.className='tree-folder';
+      const row=document.createElement('div');row.className='tree-row';
+      const childCount=countDocs(child);
+      row.innerHTML=`<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nm"></span><span class="ct">${childCount}</span>`;
       row.querySelector('.nm').textContent=name;
-      row.onclick=e=>{if(e.target.closest('.ct'))return;treeState[child.path]=!(treeState[child.path]!==false);localStorage.setItem('thirdc_tree',JSON.stringify(treeState));f.classList.toggle('open');};
+      row.onclick=()=>{
+        const willOpen=!f.classList.contains('open');
+        f.classList.toggle('open',willOpen);
+        if(willOpen&&!f.dataset.loaded){
+          const kids=document.createElement('div');kids.className='tree-kids';
+          renderLevel(child,kids);
+          renderDocs(child,kids);
+          f.appendChild(kids);f.dataset.loaded='1';
+        }
+      };
       row.ondragover=e=>{e.preventDefault();row.classList.add('drop-hot')};
       row.ondragleave=()=>row.classList.remove('drop-hot');
-      row.ondrop=async e=>{e.preventDefault();row.classList.remove('drop-hot');
+      row.ondrop=async e=>{
+        e.preventDefault();row.classList.remove('drop-hot');
         const from=e.dataTransfer.getData('text/thirdc-path');if(!from)return;
         const fname=from.split('/').pop();
         const to=`Notes/${child.path}/${fname}`;
         if(to===from)return;
         try{await api('/doc/move',{method:'POST',json:{from,to}});toast(`${from} → ${to}`,'ok');await refreshAll();if(current===from)openDoc(to);}
-        catch(err){toast('移动失败：'+err.message,'err');}};
+        catch(err){toast('移动失败：'+err.message,'err');}
+      };
       f.appendChild(row);
-      const kids=document.createElement('div');kids.className='tree-kids';
-      renderFolder(child,kids,depth+1);
-      f.appendChild(kids);
       el.appendChild(f);
+      if(q){ // 搜索时直接展开（命中路径）
+        const kids=document.createElement('div');kids.className='tree-kids';
+        renderLevel(child,kids);renderDocs(child,kids);
+        f.appendChild(kids);f.dataset.loaded='1';f.classList.add('open');
+      }
     }
-    for(const d of node.docs){
-      if(q&&!match(d))continue;
-      const leaf=document.createElement('div');leaf.className='tree-leaf'+(current===d.path?' on':'');
-      leaf.draggable=true;
-      const tags=(d.tags||[]).slice(0,3).map(t=>`<span class="tagchip" style="background:${tagColor(t)}">${t}</span>`).join('');
-      leaf.innerHTML=`<span class="nm"></span>${tags}`;
-      leaf.querySelector('.nm').textContent=d.title||d.path.split('/').pop();
-      leaf.title=d.path;
-      leaf.onclick=()=>openDoc(d.path);
-      leaf.ondragstart=e=>{e.dataTransfer.setData('text/thirdc-path',d.path);e.dataTransfer.effectAllowed='move'};
-      el.appendChild(leaf);
+    renderDocs(node,el);
+  }
+  function renderDocs(node,el){
+    const list=q?node.docs.filter(match):node.docs;
+    list.slice(0,MAX_PER_DIR).forEach(d=>el.appendChild(leafFor(d)));
+    if(list.length>MAX_PER_DIR){
+      const more=document.createElement('div');more.className='tree-row';
+      more.innerHTML=`<span class="nm" style="color:var(--faint)">还有 ${list.length-MAX_PER_DIR} 篇…（用检索更快）</span>`;
+      el.appendChild(more);
     }
   }
-  const wrap=document.createElement('div');wrap.className='tree';renderFolder(root,wrap,0);box.appendChild(wrap);
-  box.querySelectorAll('.tree-leaf,.tree-folder').forEach((el,i)=>el.style.animationDelay=Math.min(i*24,500)+'ms');
+  function leafFor(d){
+    const leaf=document.createElement('div');leaf.className='tree-leaf'+(current===d.path?' on':'');
+    leaf.draggable=true;leaf.title=d.path;
+    const tags=(d.tags||[]).slice(0,3).map(t=>`<span class="tagchip" style="background:${tagColor(t)}">${t}</span>`).join('');
+    leaf.innerHTML=`<span class="nm"></span>${tags}`;
+    leaf.querySelector('.nm').textContent=d.title||d.path.split('/').pop();
+    leaf.onclick=()=>openDoc(d.path);
+    leaf.ondragstart=e=>{e.dataTransfer.setData('text/thirdc-path',d.path);e.dataTransfer.effectAllowed='move'};
+    return leaf;
+  }
+  function countDocs(node){
+    let n=node.docs.length;
+    for(const c of node.dirs.values())n+=countDocs(c);
+    return n;
+  }
+  renderLevel(root,box);
   updateDepth();
 }
-$('rail-search').addEventListener('input',()=>loadRail());
 
 /* ───────── 抽屉 ───────── */
 async function openDoc(path){
