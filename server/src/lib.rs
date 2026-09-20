@@ -56,7 +56,53 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/assets/tokens.css", get(tokens_css))
         .route("/icon48.png", get(|| async { ([("content-type","image/png"),("cache-control","public, max-age=86400")], include_bytes!("../web/icon48.png").as_slice()) }))
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
-        .route("/sw.js", get(|| async { ([("content-type","application/javascript"),("cache-control","no-store")], "self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>self.clients.claim());self.addEventListener('fetch',e=>{if(e.request.mode==='navigate'){e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||new Response('offline'))))}else{e.respondWith(caches.open('thirdc-v1').then(async c=>{const m=await c.match(e.request);if(m)return m;const r=await fetch(e.request);if(r.ok)c.put(e.request,r.clone());return r}))}});") }))
+        .route("/sw.js", get(|| async {
+    const SW: &str = r#"
+const SHELL = 'thirdc-shell-v3';
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== location.origin) return;
+  // API 一律走网络（数据必须最新）
+  if (/^\/(status|docs|graph|browse|tree|doc|search|view|agent|connections|board|boards|refresh|backup|publish|share|ingest|chat|design|git|organize|presentation|asset)/.test(url.pathname)) return;
+
+  if (req.mode === 'navigate') {
+    // 外壳：先用缓存秒开，再后台校验；变了就通知页面刷新
+    e.respondWith((async () => {
+      const cache = await caches.open(SHELL);
+      const cached = (await cache.match(req)) || (await cache.match('/'));
+      const net = fetch(req).then(async r => {
+        if (r.ok) {
+          const fresh = await r.clone().text();
+          const old = cached ? await cached.clone().text() : '';
+          if (old && fresh !== old) {
+            const cs = await self.clients.matchAll();
+            cs.forEach(c => c.postMessage({ type: 'shell-updated' }));
+          }
+          cache.put(req, r.clone());
+        }
+        return r;
+      }).catch(() => null);
+      return cached || (await net) || new Response('offline', { status: 503 });
+    })());
+    return;
+  }
+  // 静态资源：缓存优先（字体/CSS 变更少）
+  e.respondWith(caches.open(SHELL).then(async c => {
+    const hit = await c.match(req);
+    if (hit) return hit;
+    const r = await fetch(req);
+    if (r.ok) c.put(req, r.clone());
+    return r;
+  }));
+});
+"#;
+    ([("content-type", "application/javascript; charset=utf-8"), ("cache-control", "no-cache")], SW)
+}))
         .route("/assets/fonts/{name}", get(font))
         .route("/health", get(health))
         .route("/status", get(status))

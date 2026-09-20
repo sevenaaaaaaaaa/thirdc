@@ -2539,6 +2539,11 @@ function bootDone(){
   <div class="cal-head"><button class="icon-btn" id="cal-prev">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next">›</button><button class="icon-btn" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
   <div class="cal-grid" id="cal-grid"></div>
 </div>
-<script>if("serviceWorker" in navigator){navigator.serviceWorker.register(BASE+"/sw.js").catch(()=>{})}</script>
+<script>if("serviceWorker" in navigator){navigator.serviceWorker.register(BASE+"/sw.js").catch(()=>{});
+  navigator.serviceWorker.addEventListener('message',e=>{
+    if(e.data&&e.data.type==='shell-updated'){
+      toast('发现新版本，点顶栏 🔄 刷新即可更新','ok');
+    }
+  });}</script>
 </body>
 </html>
