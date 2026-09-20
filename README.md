@@ -14,6 +14,22 @@ cargo build --release -p thirdc
 
 打开 `http://127.0.0.1:7700` → 登录（admin / token，见 `kb/.thirdc/machine.toml`）。
 
+### 桌面端（macOS / Windows / Linux）
+
+桌面壳把内核编进同一个进程：随机端口起本地 daemon，窗口直连，无需登录。
+
+```bash
+cargo install tauri-cli --version "^2"   # 一次性
+(cd desktop && cargo tauri build)        # 产物在 target/release/bundle/（.app / .dmg）
+cargo run -p thirdc-desktop              # 开发时直接跑
+```
+
+默认库在 `~/Documents/ThirdC`（不存在就自动 init），改库：`THIRDC_VAULT=/你的/库路径`。
+内核起不来时窗口会显示原因和下一步，而不是白屏。
+
+> Linux 构建需要 `libwebkit2gtk-4.1-dev libgtk-3-dev`；图标由 `python3 scripts/gen_icons.py` 生成。
+> `desktop` 不在 `default-members` 里——`cargo build` / `cargo test` 默认不会拖上 tauri 依赖。
+
 ## 核心能力
 
 | | |

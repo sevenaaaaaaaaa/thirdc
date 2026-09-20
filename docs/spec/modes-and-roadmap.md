@@ -27,7 +27,7 @@
 | 里程碑 | 内容 | 期数 | 交付日 |
 |---|---|---|---|
 | EXT-1 | 浏览器扩展 MV3：整页/选区/截图采集 + native messaging | 1 周 | **09-26** |
-| DESK-1 | Tauri 桌面壳（内嵌内核，同一 web 客户端） | 1 周 | **10-03** |
+| DESK-1 | Tauri 桌面壳（内嵌内核，同一 web 客户端） | 1 周 | ✅ 09-20（提前） |
 | A2UI-3 | 原生 A2UI DOM 渲染器（去 iframe，交互直传 agent） | 1 周 | **10-10** |
 | WEB-1 | Web WASM 内核 + OPFS 真文件库（PWA） | 2 周 | **10-24** |
 | UX-6 | 协作光标 v2（选区/文档内光标 + 评论） | 2 周 | **11-07** |
@@ -56,6 +56,15 @@
 | Chrome / ego-lite | `import_page_design` / CDP（已落地 ego 三档后端） | ✅ |
 | 飞书 / Slack / Telegram | 各自的 MCP server（社区有）经 `[[connections]]` 接入 | 配置即用 |
 | 主题采集 | wikipedia / hackernews / arxiv 内置 + MCP 扩展 | ✅ |
+
+### DESK-1 已落地的形态
+
+- 单进程：内核 + daemon + webview 同一个二进制，`127.0.0.1` 随机端口，不和 `thirdc serve` 抢 7700
+- 免登录：token 由壳直接带给首帧（`?token=`），前端落 localStorage
+- 默认库 `~/Documents/ThirdC`，`THIRDC_VAULT` 覆盖；目录不存在自动 init
+- 失败不白屏：内核起不来时窗口渲染兜底页（库路径 + 原因 + 四条下一步）
+- macOS 原生感：透明标题栏 + 内容区顶到顶（web 端 `html.desktop` 让出 78px 拖拽区）
+- 打包：`bundle.targets = app / dmg`，图标全套由 `scripts/gen_icons.py` 生成（oklch → sRGB，无 hex）
 
 ## 六、发布与监测
 
