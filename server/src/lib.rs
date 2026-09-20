@@ -612,8 +612,9 @@ async fn sync(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespons
         return e.into_response();
     }
     let mut k = st.kernel.lock().unwrap();
-    match k.sync_all() {
-        Ok(changed) => Json(json!({ "changed": changed })).into_response(),
+    // 分批：单次最多 1500 篇，避免大库首次索引时 daemon 无响应
+    match k.sync_limited(1500) {
+        Ok((changed, more)) => Json(json!({ "changed": changed, "more": more })).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }

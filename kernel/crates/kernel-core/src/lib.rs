@@ -165,9 +165,18 @@ impl Kernel {
     /// 扫描 Notes/，把所有外部改动导入 op-log 并同步全文索引。
     /// 返回发生内容变化的文档数。已删除的文档自动从索引回收。
     pub fn sync_all(&mut self) -> Result<usize, SyncError> {
+        Ok(self.sync_limited(usize::MAX)?.0)
+    }
+
+    /// 分批同步：单次最多处理 `limit` 篇变更，返回 (changed, 是否还有剩余)。
+    /// 大库（迁移后首次索引）不再阻塞 daemon——调用方循环多次即可。
+    pub fn sync_limited(&mut self, limit: usize) -> Result<(usize, bool), SyncError> {
         let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
         let mut changed = 0;
+        let mut processed = 0usize;
+        let mut more = false;
         for rel in &docs {
+            if processed >= limit { more = true; break; }
             let rel_str = rel.to_str().unwrap_or("");
             let text = match fs::read_to_string(self.vault.root.join(rel)) {
                 Ok(t) => t,
@@ -179,6 +188,7 @@ impl Kernel {
             if self.index.hash_of(rel_str).as_deref() == Some(hash.as_str()) {
                 continue;
             }
+            processed += 1;
             // 文件变了：写 op-log（失败也继续索引，索引比 op-log 更关键）
             if let Ok(before) = self.log.current_model(&self.vault, rel_str) {
                 let before_md = kernel_md::to_markdown(&before);
@@ -198,6 +208,9 @@ impl Kernel {
                     .map_err(SyncError::Store)?;
             }
         }
+        if !more {
+            // 只在最后一轮做删除回收
+        }
         // 回收已删除文档的索引
         let on_disk: std::collections::HashSet<String> = docs
             .iter()
@@ -208,7 +221,7 @@ impl Kernel {
                 self.index.remove(&rel).map_err(SyncError::Store)?;
             }
         }
-        Ok(changed)
+        Ok((changed, more))
     }
 
     /// 创建或更新一篇文档（同时写文件与 op-log，保持两侧一致）。
