@@ -5,10 +5,8 @@
  * 本版重点：**深色不再纯黑**——暗色底从 19% L 提到 26% L，层级用亮度差表达，
  * 而不是靠把背景压黑。亮色为暖纸感。默认跟随系统（data-theme=auto 由 JS 落定）。
  * ─────────────────────────────────────────────────────────────────────── */
-@font-face{font-family:"Space Grotesk";src:url("fonts/space-grotesk-400.woff2") format("woff2");font-weight:400;font-display:swap}
-@font-face{font-family:"Space Grotesk";src:url("fonts/space-grotesk-600.woff2") format("woff2");font-weight:500 700;font-display:swap}
-@font-face{font-family:"JetBrains Mono";src:url("fonts/jetbrains-mono-400.woff2") format("woff2");font-weight:400;font-display:swap}
 
+@font-face{font-family:"Space Grotesk";src:url("fonts/space-grotesk-400.woff2") format("woff2");font-weight:100 900;font-display:swap}
 /* ── 亮色 · 暖纸 ── */
 :root,[data-theme="light"]{
   --bg: oklch(97.4% .012 85);

@@ -119,9 +119,17 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 /// 内嵌的 Web 客户端（单文件，无构建步骤）。开发期禁止缓存，避免看到旧版。
 async fn app() -> impl IntoResponse {
+    // 内联 tokens.css：省掉一次跨洋往返（无 CDN 时每次往返 ~0.8s）
+    static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let html = PAGE.get_or_init(|| {
+        include_str!("../web/index.html").replace(
+            "<link rel=\"stylesheet\" href=\"assets/tokens.css\">",
+            &format!("<style>{}</style>", include_str!("../web/tokens.css")),
+        )
+    });
     (
         [(header::CACHE_CONTROL, "no-cache, must-revalidate")],
-        axum::response::Html(include_str!("../web/index.html")),
+        axum::response::Html(html.as_str()),
     )
 }
 
