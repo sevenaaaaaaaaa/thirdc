@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ThirdC Studio</title>
+<script>
+(function(){
+  try{
+    var p=localStorage.getItem('thirdc_theme')||'auto';
+    var dark=p==='dark'||(p!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme=dark?'dark':'light';
+    if(window.__TAURI_INTERNALS__||window.__TAURI__) document.documentElement.classList.add('desktop');
+  }catch(e){}
+})();
+</script>
+<link rel="preload" href="assets/fonts/space-grotesk-600.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/tokens.css">
 <link rel="manifest" href="manifest-pwa.json">
 <link rel="icon" href="icon48.png">
@@ -24,6 +36,9 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
   border-radius:var(--r-md);border:1px solid var(--border);background:color-mix(in oklab,var(--bg) 84%,transparent);
   -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);
   box-shadow:inset 0 1px 0 color-mix(in oklab,var(--surface-strong),transparent 40%),var(--shadow-sm)}
+html.desktop #chrome{padding-left:78px;-webkit-app-region:drag}
+html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome .search-pill,html.desktop #chrome .tabs,html.desktop #chrome nav{-webkit-app-region:no-drag}
+html.desktop .lights{display:none}
 .lights{display:flex;gap:7px;margin-right:2px}
 .light{width:12px;height:12px;border-radius:50%}
 .light.r{background:oklch(70% .19 25)}.light.y{background:oklch(80% .16 85)}.light.g{background:oklch(74% .17 145)}
@@ -82,8 +97,9 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 @keyframes draw{from{stroke-dashoffset:140}to{stroke-dashoffset:0}}
 
 .node{position:absolute;width:var(--node-w);background:var(--node-bg);border:1px solid var(--border);border-radius:var(--r-md);
-  box-shadow:var(--node-shadow);backdrop-filter:blur(14px) saturate(150%);user-select:none;
+  box-shadow:var(--node-shadow);user-select:none;
   transition:box-shadow .3s,border-color .3s}
+.node:hover,.node.on{-webkit-backdrop-filter:blur(14px) saturate(150%);backdrop-filter:blur(14px) saturate(150%)}
 .node:hover{border-color:var(--border-strong)}
 .node.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft),var(--node-shadow)}
 .node.enter{animation:nodeIn .55s var(--ease-spring) both}
@@ -255,7 +271,8 @@ body[data-mode="organize"] #canvas{cursor:crosshair}
 /* ── 卡片物理：景深 + 悬浮 ── */
 #nodes{perspective:1400px}
 .node{transform:scale(var(--ds,1)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transform-style:preserve-3d;
-  transition:transform .32s var(--ease-spring),box-shadow .3s,border-color .3s,opacity .3s,filter .3s;will-change:transform,opacity}
+  transition:transform .32s var(--ease-spring),box-shadow .3s,border-color .3s,opacity .3s,filter .3s}
+.node.enter{will-change:transform,opacity}
 .node:hover{transform:scale(calc(var(--ds,1)*1.045)) translateY(-6px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));
   box-shadow:0 30px 70px -26px oklch(0% 0 0/.5),0 0 0 3px var(--accent-soft)}
 .node.multi{box-shadow:0 0 0 3px var(--accent),var(--node-shadow)}
@@ -727,8 +744,11 @@ let depthQueued=false;
 function queueDepth(){if(depthQueued)return;depthQueued=true;requestAnimationFrame(()=>{depthQueued=false;updateDepth()});}
 function updateDepth(){
   if(view!=='canvas')return;
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const nodes=document.querySelectorAll('#nodes .node');
+  if(nodes.length>36)return;
   const cx=innerWidth/2,cy=innerHeight/2;
-  document.querySelectorAll('#nodes .node').forEach(el=>{
+  nodes.forEach(el=>{
     const r=el.getBoundingClientRect();
     if(!r.width)return;
     const d=Math.hypot((r.left+r.width/2-cx)/innerWidth,(r.top+r.height/2-cy)/innerHeight);
@@ -797,11 +817,15 @@ function renderGraph(){
   const wrap=$('nodes'),svg=$('edges');
   const placed=layout();
   const ids=new Set(placed.map(p=>p.n.id));
-  wrap.innerHTML='';
+  const frag=document.createDocumentFragment();
+  let enterN=0;
   placed.forEach(({n,x,y},i)=>{
+    const fresh=!known.has(n.id)&&enterN<16;
+    if(fresh)enterN++;
     const el=document.createElement('article');
-    el.className='node k-'+n.kind+(selected===n.id?' on':'')+(known.has(n.id)?'':' enter')+(view==='kanban'?' compact':'');
-    el.style.left=x+'px';el.style.top=y+'px';el.style.animationDelay=(known.has(n.id)?0:Math.min(i*30,380))+'ms';
+    el.className='node k-'+n.kind+(selected===n.id?' on':'')+(fresh?' enter':'')+(view==='kanban'?' compact':'');
+    el.style.left=x+'px';el.style.top=y+'px';
+    if(fresh)el.style.animationDelay=Math.min(i*28,360)+'ms';
     el.dataset.id=n.id;el.dataset.col=n.collection||'(根)';
     const title=n.title||n.path.split('/').pop();
     let body='';
@@ -815,32 +839,27 @@ function renderGraph(){
     if(view!=='kanban'&&n.collection&&n.collection!=='附件')metaBits.push(`<span class="tag">${n.collection}</span>`);
     const metaRow=(tags.length||metaBits.length)?`<div class="n-tags">${chips}${metaBits.join('')}</div>`:'';
     el.innerHTML=`<div class="n-head"><i class="n-kind"></i><span class="n-title">${title}</span></div><div class="n-path">${n.path||''}</div>${body}${metaRow}`;
-    el.addEventListener('mousemove',ev=>{
-      if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-      const r=el.getBoundingClientRect();
-      const rx=((ev.clientY-r.top)/r.height-.5)*-6, ry=((ev.clientX-r.left)/r.width-.5)*6;
-      el.style.setProperty('--rx',rx.toFixed(2)+'deg');el.style.setProperty('--ry',ry.toFixed(2)+'deg');
-    });
-    el.addEventListener('mouseleave',()=>{el.style.setProperty('--rx','0deg');el.style.setProperty('--ry','0deg');});
-    wrap.appendChild(el);
+    frag.appendChild(el);
   });
+  wrap.replaceChildren(frag);
   const meta=layoutMeta();
   $('axis').innerHTML=meta.labels.map(l=>`<div class="axis-label${l.day?' day':''}" style="left:${l.x}px;top:${l.y}px">${l.text}</div>`).join('');
-  const maxY=Math.max(1200,...placed.map(p=>p.y+220));
+  const maxY=Math.max(600,...placed.map(p=>p.y+220));
   $('cols').innerHTML=meta.cols.map(c=>`<div class="col" data-col="${c.title}" style="left:${c.x}px;top:40px;height:${maxY}px"></div>`).join('');
   updateEdges(ids);
   known=new Set(graph.nodes.map(n=>n.id));
 }
 function updateEdges(ids){
   const svg=$('edges');if(!ids)ids=new Set(graph.nodes.filter(n=>lens==='all'||n.kind===lens).map(n=>n.id));
-  let d='';
+  let d=''; let maxX=800,maxY=600;
   graph.edges.forEach(e=>{
     if(!ids.has(e.from)||!ids.has(e.to))return;
     const a=board.nodes[e.from],b=board.nodes[e.to];if(!a||!b)return;
     const ax=a.x+NODE_W,ay=a.y+NODE_H/2,bx=b.x,by=b.y+NODE_H/2,mx=(ax+bx)/2;
+    maxX=Math.max(maxX,ax,bx); maxY=Math.max(maxY,ay,by);
     d+=`<path class="${e.kind==='link'?'link':''} draw" d="M${ax} ${ay} C${mx} ${ay} ${mx} ${by} ${bx} ${by}"/>`;
   });
-  svg.setAttribute('width',20000);svg.setAttribute('height',20000);svg.innerHTML=d;
+  svg.setAttribute('width',Math.ceil(maxX+40));svg.setAttribute('height',Math.ceil(maxY+40));svg.innerHTML=d;
 }
 function kernel_core_format(p){return /\.html?$/i.test(p||'')?'HTML 一等文档':'Markdown'};
 
@@ -927,6 +946,17 @@ canvas.addEventListener('wheel',e=>{
   applyVP();queueDepth();
 },{passive:false});
 
+$('nodes').addEventListener('pointermove',ev=>{
+  if(view!=='canvas'||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const el=ev.target.closest('.node'); if(!el)return;
+  const r=el.getBoundingClientRect();
+  el.style.setProperty('--rx',(((ev.clientY-r.top)/r.height-.5)*-6).toFixed(2)+'deg');
+  el.style.setProperty('--ry',(((ev.clientX-r.left)/r.width-.5)*6).toFixed(2)+'deg');
+});
+$('nodes').addEventListener('pointerout',ev=>{
+  const el=ev.target.closest('.node');
+  if(el&&!el.contains(ev.relatedTarget)){el.style.setProperty('--rx','0deg');el.style.setProperty('--ry','0deg');}
+});
 $('nodes').addEventListener('pointerdown',e=>{
   const el=e.target.closest('.node');if(!el)return;
   if(view==='timeline')return;
@@ -1062,6 +1092,7 @@ async function loadGraph(){
     return;
   }
   currentBrowse=b;
+  cacheSet('browse',{path:browsePath,data:b});
   const nodes=[];
   (b.folders||[]).forEach(f=>nodes.push({
     id:'folder:'+f.path, kind:'folder', path:f.path, title:'📁 '+f.name, excerpt:`${f.count} 篇`, collection:f.name, tags:[]
@@ -1086,51 +1117,54 @@ function renderBrowser(b){
   el.querySelectorAll('a[data-path]').forEach(a=>a.onclick=()=>{browsePath=a.dataset.path;loadGraph();});
 }
 async function loadRail(){
-  // ① 缓存优先：上一次的目录树立即渲染
   const cachedTree=cacheGet('tree');
   if(cachedTree){try{renderTreeFromTree(cachedTree)}catch{}}
   else railSkeleton();
-  // ② 拉轻量目录树（只文件夹+计数，百毫秒级）
   try{
     const t=await api('/tree');
     cacheSet('tree',t);
     renderTreeFromTree(t);
     $('rail-count').textContent=t.count;
+    maybeEmptyVault(t);
   }catch(e){ if(!cachedTree) railSkeleton(4); }
-  // ③ 后台静默：补全文件标题/标签（不阻塞界面）
-  setTimeout(()=>loadDocsFull(),1200);
+  setTimeout(()=>loadDocsFull(),1800);
+}
+function maybeEmptyVault(t){
   const empty=document.getElementById('empty');
-  if(!r.docs.length&&!empty){
-    const d=document.createElement('div');d.className='empty';d.id='empty';
-    d.innerHTML=`<h2>空库，三个起点</h2><p>这里什么都没有——建一篇，或让 agent 帮你采进来。</p>
-      <div class="row"><button class="act" id="e-new">＋ 新建文档</button><button class="act" id="e-topic" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">⚡ 一键采集主题</button><button class="act" id="e-pal">⌘K 命令</button></div>
-      <div id="topic-form" style="display:none;margin-top:14px">
-        <input class="inp" id="topic-input" placeholder="输入主题，如：大语言模型 / CRDT / 知识图谱">
-        <div style="display:flex;gap:8px;justify-content:center">
-          <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="wikipedia" checked> Wikipedia</label>
-          <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="hackernews" checked> Hacker News</label>
-          <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="arxiv"> arXiv</label>
-          <button class="act" id="topic-go">采集</button>
-        </div>
-      </div>`;
-    document.body.appendChild(d);
-    d.querySelector('#e-new').onclick=newDoc;d.querySelector('#e-road').onclick=()=>openOverlay('road-ov');d.querySelector('#e-pal').onclick=openPalette;
-    d.querySelector('#e-topic').onclick=()=>{const f=d.querySelector('#topic-form');f.style.display=f.style.display==='none'?'block':'none';d.querySelector('#topic-input').focus()};
-    d.querySelector('#topic-go').onclick=async()=>{
-      const topic=d.querySelector('#topic-input').value.trim();if(!topic)return;
-      const srcs=[...d.querySelectorAll('.src-cb:checked')].map(x=>x.value);
-      d.querySelector('#topic-go').textContent='采集中…';d.querySelector('#topic-go').disabled=true;
-      try{
-        const r=await api('/ingest/topic',{method:'POST',json:{topic,sources:srcs,limit:5}});
-        toast(`已采集 ${r.imported.length} 篇「${topic}」`,'ok');
-        d.remove();await refreshAll();fit();
-      }catch(e){toast('采集失败：'+e.message,'err')}
-      const b2=d.querySelector('#topic-go');if(b2){b2.textContent='采集';b2.disabled=false}
-    };
-  }else if(r.docs.length&&empty){empty.remove();}
+  const has=(t.count||0)>0||(t.files||0)>0;
+  if(has){ if(empty)empty.remove(); return; }
+  if(empty)return;
+  const d=document.createElement('div');d.className='empty';d.id='empty';
+  d.innerHTML=`<h2>空库，三个起点</h2><p>这里什么都没有——建一篇，或让 agent 帮你采进来。</p>
+    <div class="row"><button class="act" id="e-new">＋ 新建文档</button><button class="act" id="e-topic" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">⚡ 一键采集主题</button><button class="act" id="e-pal">⌘K 命令</button></div>
+    <div id="topic-form" style="display:none;margin-top:14px">
+      <input class="inp" id="topic-input" placeholder="输入主题，如：大语言模型 / CRDT / 知识图谱">
+      <div style="display:flex;gap:8px;justify-content:center">
+        <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="wikipedia" checked> Wikipedia</label>
+        <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="hackernews" checked> Hacker News</label>
+        <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="arxiv"> arXiv</label>
+        <button class="act" id="topic-go">采集</button>
+      </div>
+    </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#e-new').onclick=newDoc;
+  d.querySelector('#e-pal').onclick=openPalette;
+  d.querySelector('#e-topic').onclick=()=>{const f=d.querySelector('#topic-form');f.style.display=f.style.display==='none'?'block':'none';d.querySelector('#topic-input').focus()};
+  d.querySelector('#topic-go').onclick=async()=>{
+    const topic=d.querySelector('#topic-input').value.trim();if(!topic)return;
+    const srcs=[...d.querySelectorAll('.src-cb:checked')].map(x=>x.value);
+    d.querySelector('#topic-go').textContent='采集中…';d.querySelector('#topic-go').disabled=true;
+    try{
+      const r=await api('/ingest/topic',{method:'POST',json:{topic,sources:srcs,limit:5}});
+      toast(`已采集 ${r.imported.length} 篇「${topic}」`,'ok');
+      d.remove();await refreshAll();fit();
+    }catch(e){toast('采集失败：'+e.message,'err')}
+    const b2=d.querySelector('#topic-go');if(b2){b2.textContent='采集';b2.disabled=false}
+  };
 }
 async function loadStatus(){
   const s=await api('/status');
+  cacheSet('status',s);
   vaultName=s.vault;$('v-name').textContent=s.vault;$('v-docs').textContent=s.docs;$('v-idx').textContent=s.indexed;$('v-assets').textContent=s.assets;
   $('sb-stats').textContent=`${s.docs} docs · ${s.indexed} indexed · ${s.assets} assets`;
   $('sb-conn').textContent='connected';
@@ -1206,7 +1240,6 @@ function renderTreeFromTree(t){
   // 根目录直属文件（有缓存就列）
   docsOf('Notes').filter(d=>!d.path.slice(6).includes('/')).forEach(d=>box.appendChild(leaf(d)));
   if(!t.dirs?.length&&!t.files)box.innerHTML='<div style="padding:14px;color:var(--faint);font-size:12px">还没有文件夹</div>';
-  updateDepth();
 }
 /* 后台静默补全：拉全量文档标题/标签，更新侧栏与检索本地库 */
 async function loadDocsFull(){
@@ -2138,6 +2171,7 @@ $b('ws-add').onclick=async()=>{
 };
 $b('ws-close').onclick=()=>$('ws-panel').classList.remove('open');
 let vaultName='';
+let currentUser='';
 $('board-pill').oncontextmenu=e=>{e.preventDefault();$('ws-panel').classList.toggle('open');renderWorkspaces()};
 $('board-pill').addEventListener('dblclick',()=>{$('ws-panel').classList.toggle('open');renderWorkspaces()});
 
@@ -2450,24 +2484,36 @@ function bootDone(){
   setTimeout(()=>el.remove(),500);
 }
 (async function init(){
+  applyTheme();
   applyThemePreset();
-  // ① 先用缓存画出界面（毫秒级），不等任何请求
+  if(window.__TAURI_INTERNALS__||window.__TAURI__) document.documentElement.classList.add('desktop');
   const cs=cacheGet('status'); if(cs)applyStatus(cs);
-  const cb=cacheGet('browse'); if(cb){try{renderBrowseCached(cb)}catch{}}
-  canvasSkeleton(6);
-  bootStep(45,'界面就绪');
-  // ② 遮罩只等"外壳"，数据后台来
-  setTimeout(bootDone,250);
-  // ③ 分级并发：目录 → 当前文件夹 → 状态/配置
+  const raw=cacheGet('browse');
+  const cachedBrowse=(raw&&raw.data)?((!raw.path||raw.path==='Notes')?raw.data:null):(raw&&raw.folders?raw:null);
+  if(cachedBrowse){try{renderBrowseCached(cachedBrowse);setCanvasState('ready')}catch{}}
+  else canvasSkeleton(6);
+  bootStep(32, cachedBrowse?'正在校准…':'正在连接内核…');
+
+  let dismissed=false;
+  const dismiss=()=>{
+    if(dismissed)return; dismissed=true;
+    bootStep(100,'就绪');
+    bootDone();
+    requestAnimationFrame(()=>{applyVP();fit();});
+  };
+  if(cachedBrowse) setTimeout(dismiss, 180);
+
   loadRail().catch(()=>{});
-  bootStep(60,'读取文件夹…');
-  loadGraph().catch(()=>{});
-  bootStep(80,'读取状态…');
-  Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]).then(()=>bootStep(100,'就绪'));
-  applyVP();fit();
-  setTimeout(()=>initPresence(),800);
-  setTimeout(()=>maybeOnboard(),600);
-  addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索 融合内核」，或点 ⌘K 找文档/执行命令。');
+  loadGraph().then(()=>{ bootStep(82,'画布就绪'); dismiss(); }).catch(()=>dismiss());
+  Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]);
+  applyVP();
+  setTimeout(()=>initPresence(),1400);
+  setTimeout(()=>maybeOnboard(),700);
+  if(!localStorage.getItem('thirdc_welcomed')){
+    localStorage.setItem('thirdc_welcomed','1');
+    addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索」，或点 ⌘K 找文档。');
+  }
+  setTimeout(dismiss, 1600);
 })();
 </script>
 <div id="present-ov">
