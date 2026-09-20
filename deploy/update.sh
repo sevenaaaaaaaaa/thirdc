@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# ThirdC 线上更新：服务器从 GitHub 拉取 → 构建 → 重启（幂等）
+# 用法（服务器上）：/www/wwwroot/thirdc/update.sh
+set -euo pipefail
+APP=/www/wwwroot/thirdc
+REPO=https://github.com/sevenaaaaaaaaa/thirdc.git
+export PATH="$HOME/.cargo/bin:$PATH"
+
+echo "① 拉取最新代码"
+if [ -d "$APP/src/.git" ]; then
+  cd "$APP/src" && git fetch --depth=1 origin main && git reset --hard origin/main
+else
+  rm -rf "$APP/src" && git clone --depth=1 "$REPO" "$APP/src"
+fi
+echo "   当前版本: $(cd "$APP/src" && git rev-parse --short HEAD)"
+
+echo "② 构建（增量，通常 1-3 分钟）"
+cd "$APP/src" && cargo build --release -p thirdc 2>&1 | tail -2
+
+echo "③ 替换二进制并重启"
+systemctl stop thirdc || true
+cp "$APP/src/target/release/thirdc" "$APP/bin/thirdc"
+systemctl start thirdc
+sleep 2
+
+echo "④ 验证"
+curl -s -o /dev/null -w "   本机 / → %{http_code}\n" http://127.0.0.1:7700/ || true
+echo "✓ 更新完成: $(cd "$APP/src" && git rev-parse --short HEAD)"
