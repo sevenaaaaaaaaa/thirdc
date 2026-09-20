@@ -2,3 +2,6 @@
 Cargo.lock.orig
 *.swp
 .DS_Store
+
+# 其他项目（嵌套仓库，不属于本项目）
+InputFlow/

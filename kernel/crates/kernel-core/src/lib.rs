@@ -359,6 +359,78 @@ impl Kernel {
         self.index.items_count()
     }
 
+    // ---------- Agent 记忆 ----------
+
+    /// 追加一段对话到当天的对话文件（文件真相，用户可读可编辑）。
+    pub fn append_conversation(&mut self, date: &str, role: &str, text: &str) -> Result<String, SyncError> {
+        let rel = memory::conversation_path(date).to_string_lossy().into_owned();
+        let mut content = fs::read_to_string(self.vault.root.join(&rel)).unwrap_or_default();
+        if content.is_empty() {
+            content = memory::conversation_header(date);
+        }
+        let stamp = now_hhmm();
+        content.push_str(&format!("## {stamp} {role}
+
+{text}
+
+"));
+        self.put_doc(&rel, &content)?;
+        Ok(rel)
+    }
+
+    /// 写入一条长期记忆（追加到 memory.md，用户可编辑删除）。
+    pub fn save_memory(&mut self, kind: &str, text: &str) -> Result<String, SyncError> {
+        let rel = memory::MEMORY_FILE;
+        let mut content = fs::read_to_string(self.vault.root.join(rel)).unwrap_or_default();
+        if content.is_empty() {
+            content = memory::memory_header();
+        }
+        let text = text.replace('\n', " ").trim().to_string();
+        if text.is_empty() {
+            return Ok(rel.to_string());
+        }
+        let line = format!("- [{kind}] {text} · {}\n", now_date());
+        if content.contains(&text) {
+            return Ok(rel.to_string()); // 去重
+        }
+        content.push_str(&line);
+        self.put_doc(rel, &content)?;
+        Ok(rel.to_string())
+    }
+
+    /// 回忆：在 Agent 目录里做混合检索（TF-IDF 为主，规模小）。
+    pub fn recall(&mut self, query: &str, limit: usize) -> Result<Vec<(String, f64, String)>, SyncError> {
+        self.sync_all()?;
+        let dir = self.vault.root.join(memory::DIR);
+        let mut corpus: Vec<(String, String)> = Vec::new();
+        if dir.is_dir() {
+            for e in walkdir::WalkDir::new(&dir).into_iter().filter_map(|e| e.ok()) {
+                if !e.file_type().is_file() { continue; }
+                if e.path().extension().map_or(false, |x| x == "md") {
+                    if let (Some(rel), Ok(text)) = (
+                        e.path().strip_prefix(&self.vault.root).ok().and_then(|p| p.to_str()),
+                        fs::read_to_string(e.path()),
+                    ) {
+                        corpus.push((rel.to_string(), text));
+                    }
+                }
+            }
+        }
+        if corpus.is_empty() { return Ok(Vec::new()); }
+        let idx = rag::TfidfIndex::build(&corpus);
+        let hits = idx.search(query, limit);
+        let by_path: std::collections::HashMap<&str, &str> =
+            corpus.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        Ok(hits.into_iter().map(|(p, s)| {
+            // 取命中最相关的一行作为摘要
+            let body = by_path.get(p.as_str()).copied().unwrap_or("");
+            let snippet = body.lines()
+                .filter(|l| !l.trim().is_empty() && !l.starts_with('#') && !l.starts_with("---"))
+                .take(3).collect::<Vec<_>>().join(" ");
+            (p, s, snippet.chars().take(200).collect())
+        }).collect())
+    }
+
     /// 全部附件 (hash, path, mime)。
     pub fn asset_list(&self) -> Result<Vec<(String, String, String)>, StoreError> {
         Ok(self
@@ -405,6 +477,40 @@ impl Kernel {
     pub fn indexed_count(&self) -> Result<usize, StoreError> {
         self.index.doc_count()
     }
+}
+
+/// 今天的日期（YYYY-MM-DD）。
+pub fn today_string() -> String {
+    now_date()
+}
+
+fn now_date() -> String {
+    let secs = now_secs() as i64;
+    let (y, m, d, _, _, _) = kernel_deploy_free_civil(secs);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn now_hhmm() -> String {
+    let secs = now_secs() as i64;
+    let (_, _, _, h, mi, _) = kernel_deploy_free_civil(secs);
+    format!("{h:02}:{mi:02}")
+}
+
+/// UNIX 秒 → UTC 民用时间（Howard Hinnant 算法，避免依赖）。
+fn kernel_deploy_free_civil(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d, (rem / 3600) as u32, ((rem % 3600) / 60) as u32, (rem % 60) as u32)
 }
 
 fn now_secs() -> i64 {
@@ -1043,5 +1149,26 @@ mod rag_tests {
         let merged = rrf_merge(&fts, &vec, 3);
         assert_eq!(merged[0].0, "b.md", "两路都命中的排最前");
         assert_eq!(merged.len(), 3);
+    }
+}
+
+/// Agent 记忆：对话与决策落库（文件真相），回答前自动回忆。
+pub mod memory {
+    use std::path::PathBuf;
+
+    pub const DIR: &str = "Notes/Agent";
+    pub const MEMORY_FILE: &str = "Notes/Agent/memory.md";
+
+    /// 记忆文件头部（用户可直接编辑/删除条目）。
+    pub fn memory_header() -> String {
+        "---\ntype: memory\n---\n\n# Agent 记忆\n\n> 每条一行，用户可直接编辑或删除。`[偏好]` `[事实]` `[决策]` 三种类型。\n\n".into()
+    }
+
+    pub fn conversation_path(date: &str) -> PathBuf {
+        PathBuf::from(format!("Notes/Agent/{date} 对话.md"))
+    }
+
+    pub fn conversation_header(date: &str) -> String {
+        format!("---\ntype: conversation\ndate: {date}\n---\n\n# {date} 对话\n\n")
     }
 }

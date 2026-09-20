@@ -1185,7 +1185,10 @@ async function chat(message){
         chunk.split('\n').forEach(l=>{if(l.startsWith('event:'))ev=l.slice(6).trim();else if(l.startsWith('data:'))data+=l.slice(5).trim();});
         if(!data)continue;
         let d;try{d=JSON.parse(data)}catch{continue}
-        if(ev==='step'){
+        if(ev==='recall'){
+          const c=chipFor(`回忆到 ${d.count} 条相关记忆`,'run');
+          setTimeout(()=>{c.className='stepchip';c.textContent=`回忆 ${d.count} 条`;},900);
+        }else if(ev==='step'){
           chipFor(d.tool+(d.ok?' ✓':' ✕'),d.ok?'':'err');
         }else if(ev==='reply'){
           $('dock').classList.remove('thinking');$('aura').classList.remove('on');
@@ -1528,6 +1531,28 @@ const CMDS=[
       const r=await api('/ingest/web',{method:'POST',json:{url}});
       toast(`已本地化「${r.title||url}」→ ${r.rel}`,'ok');await refreshAll();openDoc(r.rel);
     }catch(e){toast('本地化失败：'+e.message,'err')}
+  }],
+  ['Agent 记忆','mem',async()=>{
+    closeAll();
+    const r=await api('/agent/memory');
+    const text=prompt('Agent 记忆（可直接编辑整段内容，每条一行）',r.memory||'');
+    if(text!==null){
+      // 整段覆盖写回
+      await api('/doc?path='+encodeURIComponent('Notes/Agent/memory.md'),{method:'PUT',body:text,headers:{'content-type':'text/markdown'}});
+      toast('记忆已保存','ok');await refreshAll();
+    }
+  }],
+  ['记住一件事','rm',async()=>{
+    closeAll();const t=prompt('要记住什么？','');if(!t)return;
+    const k=prompt('类型（偏好/事实/决策）','事实')||'事实';
+    await api('/agent/memory',{method:'POST',json:{kind:k,text:t}});
+    toast('已记住','ok');
+  }],
+  ['回忆（检索历史）','rc',async()=>{
+    closeAll();const q=prompt('回忆什么？','');if(!q)return;
+    const r=await api('/agent/recall?q='+encodeURIComponent(q));
+    if(!r.hits.length){toast('没有相关记忆','err');return}
+    alert(r.hits.map(h=>`${h.path}\n  ${h.snippet}`).join('\n\n'));
   }],
   ['内容日历','cal',async()=>{closeAll();await openCalendar()}],
   ['分享当前文档（加密）','sh',async()=>{if(current){$('share-pass').value='';shareEncrypted(current)}else toast('先打开一篇','err')}],

@@ -122,6 +122,8 @@ impl McpServer {
         match name {
             "search_vault" => self.t_search_vault(args),
             "search_semantic" => self.t_search_semantic(args),
+            "save_memory" => self.t_save_memory(args),
+            "recall_memory" => self.t_recall_memory(args),
             "list_docs" => self.t_list_docs(args),
             "read_doc" => self.t_read_doc(args),
             "write_doc" => self.t_write_doc(args),
@@ -181,6 +183,37 @@ impl McpServer {
             Ok(tool_result(
                 format!("混合检索 {} hit(s)", merged.len()),
                 json!({"query": query, "hits": arr}),
+            ))
+        })
+    }
+
+    /// 写入长期记忆（跨会话保留，用户可编辑）
+    fn t_save_memory(&self, args: Value) -> Result<Value, (i32, String)> {
+        let text = args.get("text").and_then(|t| t.as_str())
+            .ok_or((-32602, "missing 'text'".to_string()))?.to_string();
+        let kind = args.get("kind").and_then(|k| k.as_str()).unwrap_or("事实").to_string();
+        self.with_kernel(|k| {
+            let rel = k.save_memory(&kind, &text)?;
+            Ok(tool_result(
+                format!("已记住 [{kind}] {text}"),
+                json!({ "saved": rel, "kind": kind, "text": text }),
+            ))
+        })
+    }
+
+    /// 回忆：在历史对话与记忆中检索
+    fn t_recall_memory(&self, args: Value) -> Result<Value, (i32, String)> {
+        let query = args.get("query").and_then(|q| q.as_str())
+            .ok_or((-32602, "missing 'query'".to_string()))?.to_string();
+        let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(5) as usize;
+        self.with_kernel(|k| {
+            let hits = k.recall(&query, limit)?;
+            let arr: Vec<Value> = hits.iter()
+                .map(|(p, s, sn)| json!({"path": p, "score": s, "snippet": sn}))
+                .collect();
+            Ok(tool_result(
+                format!("回忆到 {} 条", arr.len()),
+                json!({ "query": query, "hits": arr }),
             ))
         })
     }
@@ -568,6 +601,30 @@ fn tool_definitions() -> Value {
                 "properties": {
                     "query": { "type": "string" },
                     "limit": { "type": "integer", "description": "默认 10" }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "save_memory",
+            "description": "写入长期记忆（跨会话保留）。kind 用 [偏好]/[事实]/[决策]。用户可在 Notes/Agent/memory.md 编辑或删除。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "要记住的内容，一句话" },
+                    "kind": { "type": "string", "description": "偏好 | 事实 | 决策" }
+                },
+                "required": ["text"]
+            }
+        },
+        {
+            "name": "recall_memory",
+            "description": "回忆：检索过去对话与长期记忆，找回上下文。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "limit": { "type": "integer" }
                 },
                 "required": ["query"]
             }

@@ -107,6 +107,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/auth/login", post(auth_login))
         .route("/refresh", post(force_refresh))
         .route("/backup", post(backup_vault))
+        .route("/agent/memory", get(agent_memory_list).post(agent_memory_add))
+        .route("/agent/recall", get(agent_recall))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -986,10 +988,30 @@ async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SseEvent>();
 
     tokio::spawn(async move {
+        // Agent 记忆 · 回忆：回答前先找相关记忆与历史
+        let recalled = {
+            match server.kernel.lock() {
+                Ok(mut k) => k.recall(&message, 3).unwrap_or_default(),
+                Err(_) => Vec::new(),
+            }
+        };
+        if !recalled.is_empty() {
+            let _ = tx.send(ev("recall", json!({
+                "count": recalled.len(),
+                "items": recalled.iter().map(|(p, sc, snip)| json!({"path": p, "score": sc, "snippet": snip})).collect::<Vec<_>>()
+            })));
+        }
+        let enriched = if recalled.is_empty() {
+            message.clone()
+        } else {
+            let mem: Vec<String> = recalled.iter().map(|(p, _, sn)| format!("- 〔{p}〕{sn}")).collect();
+            format!("{message}\n\n[相关记忆]\n{}", mem.join("\n"))
+        };
+
         let result = match ai {
             Some(cfg) if !cfg.base_url.is_empty() => {
                 let tx_step = tx.clone();
-                thirdc_mcp::agent::run_ai_with(&server, &cfg, &message, move |s| {
+                thirdc_mcp::agent::run_ai_with(&server, &cfg, &enriched, move |s| {
                     let _ = tx_step.send(ev(
                         "step",
                         json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary }),
@@ -998,13 +1020,23 @@ async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
                 .await
             }
             _ => {
-                let out = thirdc_mcp::agent::command_mode(&server, &message);
+                let out = thirdc_mcp::agent::command_mode(&server, &enriched);
                 for s in &out.steps {
                     let _ = tx.send(ev("step", json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary })));
                 }
                 Ok(out)
             }
         };
+        // 对话落库（Agent 记忆的第二半：记录）
+        {
+            let today = kernel_core::today_string();
+            if let Ok(mut k) = server.kernel.lock() {
+                let _ = k.append_conversation(&today, "我", &message);
+                if let Ok(out) = &result {
+                    let _ = k.append_conversation(&today, "studio", &out.reply);
+                }
+            }
+        }
         match result {
             Ok(out) => {
                 let _ = tx.send(ev(
@@ -2357,6 +2389,42 @@ async fn force_refresh(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl In
         "indexed": indexed,
         "message": format!("已刷新：{changed} 篇变更，{docs} 篇文档，{indexed} 篇已索引")
     })).into_response()
+}
+
+/// Agent 记忆：列出 / 追加 / 回忆。
+async fn agent_memory_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let content = std::fs::read_to_string(k.vault.root.join(kernel_core::memory::MEMORY_FILE)).unwrap_or_default();
+    Json(json!({ "memory": content })).into_response()
+}
+
+async fn agent_memory_add(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let kind = req.get("kind").and_then(|k| k.as_str()).unwrap_or("事实");
+    let text = req.get("text").and_then(|t| t.as_str()).unwrap_or("");
+    let mut k = st.kernel.lock().unwrap();
+    match k.save_memory(kind, text) {
+        Ok(rel) => Json(json!({ "saved": rel, "kind": kind })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+async fn agent_recall(State(st): State<Arc<AppState>>, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let query = q.get("q").cloned().unwrap_or_default();
+    let mut k = st.kernel.lock().unwrap();
+    match k.recall(&query, 5) {
+        Ok(hits) => Json(json!({ "query": query, "hits": hits.iter().map(|(p, s, sn)| json!({"path": p, "score": s, "snippet": sn})).collect::<Vec<_>>() })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }
 
 /// 全量备份：打包整个 vault（加密可选），返回文件或推送到 WebDAV。
