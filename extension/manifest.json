@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "ThirdC Clipper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "一键采集网页到 ThirdC 知识库",
-  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage", "notifications"],
   "host_permissions": ["<all_urls>"],
-  "action": { "default_popup": "popup.html", "default_icon": {"48": "icon48.png"} },
+  "action": { "default_popup": "popup.html", "default_icon": { "48": "icon48.png" } },
   "background": { "service_worker": "bg.js" },
   "icons": { "48": "icon48.png" }
 }
