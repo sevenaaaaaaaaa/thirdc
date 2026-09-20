@@ -14,8 +14,6 @@
   }catch(e){}
 })();
 </script>
-<link rel="preload" href="assets/fonts/space-grotesk-600.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="assets/fonts/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/tokens.css">
 <link rel="manifest" href="manifest-pwa.json">
 <link rel="icon" href="icon48.png">
@@ -686,7 +684,40 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   </div>
 </div>
 <div id="toast"></div>
+
+<div id="present-ov">
+  <div class="present-bar"><span class="t" id="p-title"></span><span class="badge ok" id="p-idx"></span>
+  <button class="act" id="p-prev">← 上一篇</button><button class="act" id="p-next">下一篇 →</button>
+  <button class="act" id="p-exit">退出 (Esc)</button></div>
+  <iframe id="p-frame" sandbox="" title="展示"></iframe>
+</div>
+<div id="share-overlay"><div class="share-card">
+  <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">加密分享</div>
+  <div style="color:var(--faint);font-size:12px;margin-bottom:10px">内容 AES-GCM 加密，密钥在链接 # 后面——服务器永远看不到</div>
+  <input id="share-pass" placeholder="自定义密码（可选，增强安全）">
+  <div class="link" id="share-link"></div>
+  <div class="hint">点击链接复制 · 收件人打开即可查看（无需安装）</div>
+  <br><button class="act" onclick="document.getElementById('share-overlay').classList.remove('open')" style="margin-top:10px">关闭</button>
+</div></div>
+<div id="ws-panel">
+  <span class="kicker">工作区</span><span id="ws-list"></span>
+  <button class="ws-chip" id="ws-add" style="border-style:dashed">＋ 添加库</button>
+  <button class="icon-btn" id="ws-close" style="width:26px;height:26px;margin-left:auto">✕</button>
+</div>
+<div id="cal-ov">
+  <div class="cal-head"><button class="icon-btn" id="cal-prev">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next">›</button><button class="icon-btn" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
+  <div class="cal-grid" id="cal-grid"></div>
+</div>
+<script>if("serviceWorker" in navigator){navigator.serviceWorker.register(BASE+"/sw.js").catch(()=>{});
+  navigator.serviceWorker.addEventListener('message',e=>{
+    if(e.data&&e.data.type==='shell-updated'){
+      toast('发现新版本，点顶栏 🔄 刷新即可更新','ok');
+    }
+  });}</script>
 <script data-cfasync="false">
+/* 兜底：任何脚本错误都不能把用户困在启动遮罩里 */
+window.addEventListener("error",()=>{try{const b=document.getElementById("boot");if(b)b.remove()}catch(e){}});
+
 const $=(id)=>document.getElementById(id);
 /* 安全绑定：元素缺失时静默（避免一个 null 让整个应用死掉） */
 const $b=(id)=>$(id)||new Proxy(function(){},{get:()=>()=>{},set:()=>true,apply:()=>{}});
@@ -2516,34 +2547,5 @@ function bootDone(){
   setTimeout(dismiss, 1600);
 })();
 </script>
-<div id="present-ov">
-  <div class="present-bar"><span class="t" id="p-title"></span><span class="badge ok" id="p-idx"></span>
-  <button class="act" id="p-prev">← 上一篇</button><button class="act" id="p-next">下一篇 →</button>
-  <button class="act" id="p-exit">退出 (Esc)</button></div>
-  <iframe id="p-frame" sandbox="" title="展示"></iframe>
-</div>
-<div id="share-overlay"><div class="share-card">
-  <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">加密分享</div>
-  <div style="color:var(--faint);font-size:12px;margin-bottom:10px">内容 AES-GCM 加密，密钥在链接 # 后面——服务器永远看不到</div>
-  <input id="share-pass" placeholder="自定义密码（可选，增强安全）">
-  <div class="link" id="share-link"></div>
-  <div class="hint">点击链接复制 · 收件人打开即可查看（无需安装）</div>
-  <br><button class="act" onclick="document.getElementById('share-overlay').classList.remove('open')" style="margin-top:10px">关闭</button>
-</div></div>
-<div id="ws-panel">
-  <span class="kicker">工作区</span><span id="ws-list"></span>
-  <button class="ws-chip" id="ws-add" style="border-style:dashed">＋ 添加库</button>
-  <button class="icon-btn" id="ws-close" style="width:26px;height:26px;margin-left:auto">✕</button>
-</div>
-<div id="cal-ov">
-  <div class="cal-head"><button class="icon-btn" id="cal-prev">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next">›</button><button class="icon-btn" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
-  <div class="cal-grid" id="cal-grid"></div>
-</div>
-<script>if("serviceWorker" in navigator){navigator.serviceWorker.register(BASE+"/sw.js").catch(()=>{});
-  navigator.serviceWorker.addEventListener('message',e=>{
-    if(e.data&&e.data.type==='shell-updated'){
-      toast('发现新版本，点顶栏 🔄 刷新即可更新','ok');
-    }
-  });}</script>
 </body>
 </html>
