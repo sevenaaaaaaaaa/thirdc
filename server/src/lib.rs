@@ -120,7 +120,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// 内嵌的 Web 客户端（单文件，无构建步骤）。开发期禁止缓存，避免看到旧版。
 async fn app() -> impl IntoResponse {
     (
-        [(header::CACHE_CONTROL, "no-store, must-revalidate")],
+        [(header::CACHE_CONTROL, "no-cache, must-revalidate")],
         axum::response::Html(include_str!("../web/index.html")),
     )
 }
@@ -139,12 +139,8 @@ async fn tokens_css() -> impl IntoResponse {
 async fn font(AxumPath(name): AxumPath<String>) -> impl IntoResponse {
     let bytes: &'static [u8] = match name.as_str() {
         "space-grotesk-400.woff2" => include_bytes!("../web/fonts/space-grotesk-400.woff2"),
-        "space-grotesk-500.woff2" => include_bytes!("../web/fonts/space-grotesk-500.woff2"),
         "space-grotesk-600.woff2" => include_bytes!("../web/fonts/space-grotesk-600.woff2"),
-        "space-grotesk-700.woff2" => include_bytes!("../web/fonts/space-grotesk-700.woff2"),
         "jetbrains-mono-400.woff2" => include_bytes!("../web/fonts/jetbrains-mono-400.woff2"),
-        "jetbrains-mono-500.woff2" => include_bytes!("../web/fonts/jetbrains-mono-500.woff2"),
-        "jetbrains-mono-600.woff2" => include_bytes!("../web/fonts/jetbrains-mono-600.woff2"),
         _ => return (StatusCode::NOT_FOUND, [(header::CONTENT_TYPE, "text/plain")], b"".as_slice()).into_response(),
     };
     (
