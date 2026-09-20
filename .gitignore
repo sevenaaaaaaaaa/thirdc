@@ -5,3 +5,6 @@ Cargo.lock.orig
 
 # 其他项目（嵌套仓库，不属于本项目）
 InputFlow/
+
+# Tauri 生成物（每次 build 自动重建）
+desktop/gen/schemas/

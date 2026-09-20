@@ -12,6 +12,20 @@ members = [
     "server",
     "mcp",
     "cli",
+    "desktop",
+]
+default-members = [
+    "kernel/crates/kernel-core",
+    "kernel/crates/kernel-md",
+    "kernel/crates/kernel-store",
+    "kernel/crates/kernel-sync",
+    "kernel/crates/kernel-design",
+    "kernel/crates/kernel-browser",
+    "kernel/crates/kernel-a2ui",
+    "kernel/crates/kernel-deploy",
+    "server",
+    "mcp",
+    "cli",
 ]
 
 [workspace.package]
