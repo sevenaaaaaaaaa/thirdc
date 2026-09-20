@@ -410,6 +410,11 @@ pub fn list_docs(vault: &Vault) -> Result<Vec<PathBuf>, StoreError> {
         .filter_map(|e| e.ok())
     {
         let p = entry.path();
+        // 跳过 macOS 元数据垃圾（._foo 是 AppleDouble，.DS_Store 是 Finder）
+        let name = entry.file_name().to_string_lossy();
+        if name.starts_with("._") || name == ".DS_Store" {
+            continue;
+        }
         if p.is_file()
             && p.extension()
                 .map_or(false, |e| e == "md" || e == "html" || e == "htm")
