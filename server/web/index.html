@@ -1061,16 +1061,34 @@ function renderTree(docs){
         f.appendChild(kids);f.dataset.loaded='1';f.classList.add('open');
       }
     }
-    renderDocs(node,el);
+    // 结构优先：本层有子文件夹时，文件默认收起（点一下才展开）
+    const hasFolders=node.dirs.size>0;
+    renderDocs(node,el,hasFolders&&!q);
   }
-  function renderDocs(node,el){
+  function renderDocs(node,el,collapsed){
     const list=q?node.docs.filter(match):node.docs;
-    list.slice(0,MAX_PER_DIR).forEach(d=>el.appendChild(leafFor(d)));
-    if(list.length>MAX_PER_DIR){
-      const more=document.createElement('div');more.className='tree-row';
-      more.innerHTML=`<span class="nm" style="color:var(--faint)">还有 ${list.length-MAX_PER_DIR} 篇…（用检索更快）</span>`;
-      el.appendChild(more);
-    }
+    if(!list.length)return;
+    const draw=()=>{
+      list.slice(0,MAX_PER_DIR).forEach(d=>el.appendChild(leafFor(d)));
+      if(list.length>MAX_PER_DIR){
+        const more=document.createElement('div');more.className='tree-row';
+        more.innerHTML=`<span class="nm" style="color:var(--faint)">还有 ${list.length-MAX_PER_DIR} 篇…（用检索更快）</span>`;
+        el.appendChild(more);
+      }
+    };
+    if(!collapsed){draw();return;}
+    const toggle=document.createElement('div');toggle.className='tree-row';
+    toggle.innerHTML=`<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nm" style="color:var(--faint)">${list.length} 篇文档</span>`;
+    toggle.onclick=()=>{
+      const open=!toggle.classList.contains('open');
+      toggle.classList.toggle('open',open);
+      toggle.querySelector('.chev').style.transform=open?'rotate(90deg)':'';
+      if(open&&!toggle.dataset.done){draw();toggle.dataset.done='1';}
+      holder.style.display=open?'block':'none';
+    };
+    const holder=document.createElement('div');holder.style.display='none';
+    holder.className='tree-kids';holder.style.borderLeft='none';
+    el.appendChild(toggle);el.appendChild(holder);
   }
   function leafFor(d){
     const leaf=document.createElement('div');leaf.className='tree-leaf'+(current===d.path?' on':'');
