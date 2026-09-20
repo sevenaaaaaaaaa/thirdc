@@ -6,7 +6,7 @@
 <title>ThirdC Studio</title>
 <link rel="stylesheet" href="assets/tokens.css">
 <link rel="manifest" href="manifest-pwa.json">
-<link rel="icon" href="assets/fonts/icon48.png">
+<link rel="icon" href="icon48.png">
 <style>
 /* ThirdC 私有样式 · 契约：零 hex、颜色全部来自 token、动效走 --ease-spring */
 *{box-sizing:border-box}
@@ -598,6 +598,10 @@ const BASE=location.pathname.replace(/\/+$/,'').replace(/\/index\.html$/,'');
 const params=new URLSearchParams(location.search);
 let token=params.get('token')||localStorage.getItem('thirdc_token')||'';
 if(params.get('token'))localStorage.setItem('thirdc_token',token);
+/* 登录门禁：必须在这里（早于任何 DOM 绑定）。showLogin/doLogin 是函数声明，
+   会被提升，因此登录页照常可用。若放到脚本末尾，前面的 $().onclick 绑定时
+   body 已被换成登录页，取到 null 抛错，连带 init 都跑不到。 */
+if(!token){ showLogin(); throw new Error('login-gate'); }
 
 function toast(msg,kind=''){const el=document.createElement('div');el.className='toast '+kind;el.textContent=msg;$('toast').appendChild(el);
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .4s'},2300);setTimeout(()=>el.remove(),2800);}
