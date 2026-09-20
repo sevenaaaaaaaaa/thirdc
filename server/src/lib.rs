@@ -108,6 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/refresh", post(force_refresh))
         .route("/backup", post(backup_vault))
         .route("/agent/memory", get(agent_memory_list).post(agent_memory_add))
+        .route("/view/resolve", post(view_resolve))
         .route("/agent/recall", get(agent_recall))
         .route("/ws", get(ws_handler))
         .with_state(state)
@@ -516,7 +517,7 @@ async fn get_doc(
     if let Err(e) = k.sync_all() {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
-    let html = k.render_doc_html(&path).ok();
+    let html = k.render_doc_html_with_views(&path).ok();
     let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
     let format = if kernel_core::is_html_rel(&path) { "html" } else { "markdown" };
     match k.get_doc(&path) {
@@ -2389,6 +2390,23 @@ async fn force_refresh(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl In
         "indexed": indexed,
         "message": format!("已刷新：{changed} 篇变更，{docs} 篇文档，{indexed} 篇已索引")
     })).into_response()
+}
+
+/// 内联视图：直接解析一个视图声明（调试/自定义面板用）。
+async fn view_resolve(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let spec = kernel_core::views::ViewSpec::from_yamlish(
+        req.get("spec").and_then(|s| s.as_str()).unwrap_or("type: table\nsource: all"),
+    );
+    let current = req.get("current").and_then(|c| c.as_str()).map(|s| s.to_string());
+    let mut k = st.kernel.lock().unwrap();
+    match k.resolve_view(&spec, current.as_deref()) {
+        Ok(rows) => Json(json!({ "spec": spec, "rows": rows, "html": kernel_core::views::render_html(&spec, &rows) })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }
 
 /// Agent 记忆：列出 / 追加 / 回忆。

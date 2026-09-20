@@ -33,6 +33,30 @@ pub fn find_asset_refs(text: &str) -> Vec<String> {
     out
 }
 
+/// 抽取行内 #标签（跳过标题行）。
+pub fn find_tag_refs(md: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in md.lines() {
+        if line.trim_start().starts_with('#') { continue; }
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0usize;
+        while i < chars.len() {
+            let prev_ok = i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '#');
+            if chars[i] == '#' && prev_ok {
+                let mut j = i + 1;
+                let mut s = String::new();
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '-' || chars[j] == '_') {
+                    s.push(chars[j]); j += 1;
+                }
+                let n = s.chars().count();
+                if n >= 2 && n <= 24 && !out.contains(&s) { out.push(s); }
+                i = j;
+            } else { i += 1; }
+        }
+    }
+    out
+}
+
 /// 从 `Assets/ab/cd/<name>` 路径提取 64 位 hex hash。
 fn hash_from_path(path: &str) -> Option<String> {
     let name = path.rsplit('/').next()?;

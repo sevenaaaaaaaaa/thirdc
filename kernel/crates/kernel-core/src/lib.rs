@@ -359,6 +359,96 @@ impl Kernel {
         self.index.items_count()
     }
 
+    // ---------- 内联视图（Views 层） ----------
+
+    /// 解析视图数据。source: here | folder:<path> | query:<词> | all
+    pub fn resolve_view(&mut self, spec: &views::ViewSpec, current: Option<&str>) -> Result<Vec<views::ViewRow>, SyncError> {
+        self.sync_all()?;
+        let mut rows: Vec<views::ViewRow> = Vec::new();
+        let src = spec.source.trim();
+        let root = self.vault.root.clone();
+
+        if src == "here" {
+            // 本页列表项作为行（结构化列表 → 视图）
+            if let Some(rel) = current {
+                if let Ok(m) = self.get_doc(rel) { let md = to_markdown(&m); rows.push(make_view_row(&root, rel, &m, &md)); }
+            }
+        } else if let Some(q) = src.strip_prefix("query:") {
+            for (path, _score) in self.search_hybrid(q, spec.limit.max(20))? {
+                if let Ok(m) = self.get_doc(&path) { let md = to_markdown(&m); rows.push(make_view_row(&root, &path, &m, &md)); }
+            }
+        } else {
+            let prefix = src.strip_prefix("folder:").map(|p| p.trim_end_matches('/').to_string());
+            for rel in list_docs(&self.vault).map_err(SyncError::Store)? {
+                let rel_str = rel.to_string_lossy().into_owned();
+                if let Some(pref) = &prefix {
+                    if !rel_str.starts_with(pref) { continue; }
+                }
+                if let Ok(m) = self.get_doc(&rel_str) {
+                    let md = to_markdown(&m);
+                    rows.push(make_view_row(&root, &rel_str, &m, &md));
+                }
+            }
+        }
+
+        // 过滤：tag:xxx / text:xxx / kind:xxx
+        if let Some(f) = &spec.filter {
+            let f = f.trim();
+            if let Some(t) = f.strip_prefix("tag:") {
+                rows.retain(|r| r.tags.iter().any(|x| x.eq_ignore_ascii_case(t.trim())));
+            } else if let Some(t) = f.strip_prefix("text:") {
+                let t = t.trim().to_lowercase();
+                rows.retain(|r| r.title.to_lowercase().contains(&t));
+            } else if let Some(t) = f.strip_prefix("kind:") {
+                rows.retain(|r| r.kind == t.trim());
+            } else {
+                let t = f.to_lowercase();
+                rows.retain(|r| r.title.to_lowercase().contains(&t));
+            }
+        }
+        // 排序
+        match spec.sort.as_deref().unwrap_or("updated_desc") {
+            "updated_asc" => rows.sort_by_key(|r| r.mtime),
+            "title_asc" | "title" => rows.sort_by(|a, b| a.title.cmp(&b.title)),
+            _ => rows.sort_by(|a, b| b.mtime.cmp(&a.mtime)),
+        }
+        rows.truncate(if spec.limit == 0 { 30 } else { spec.limit });
+        Ok(rows)
+    }
+
+    /// 渲染文档，并把 ```view 块替换成真实数据视图。
+    pub fn render_doc_html_with_views(&mut self, rel: &str) -> Result<String, SyncError> {
+        let mut model = self.get_doc(rel)?;
+        let mut specs: Vec<views::ViewSpec> = Vec::new();
+        for b in &model.blocks {
+            if let kernel_md::Block::Code { lang: Some(l), text, .. } = b {
+                if l == "view" {
+                    specs.push(views::ViewSpec::from_yamlish(text));
+                }
+            }
+        }
+        if specs.is_empty() {
+            return self.render_doc_html(rel);
+        }
+        // 依次把每个 view 块换成占位标记，再整体渲染
+        let mut idx = 0usize;
+        for b in model.blocks.iter_mut() {
+            if let kernel_md::Block::Code { lang: Some(l), .. } = b {
+                if l == "view" {
+                    let spec = specs.get(idx).cloned().unwrap_or_default();
+                    let rows = self.resolve_view(&spec, Some(rel))?;
+                    let rendered = format!("<!--KBVIEW:{}-->", views::render_html(&spec, &rows));
+                    let block_id = b.id().to_string();
+                    *b = kernel_md::Block::Raw { id: block_id, text: rendered };
+                    idx += 1;
+                }
+            }
+        }
+        let html = to_html(&model);
+        let profile = self.active_design().map(|p| apply_to_html(&html, &p)).unwrap_or(html);
+        Ok(profile.replace("<!--KBVIEW:", "").replace("-->", ""))
+    }
+
     // ---------- Agent 记忆 ----------
 
     /// 追加一段对话到当天的对话文件（文件真相，用户可读可编辑）。
@@ -482,6 +572,28 @@ impl Kernel {
 /// 今天的日期（YYYY-MM-DD）。
 pub fn today_string() -> String {
     now_date()
+}
+
+/// 构造视图行（自由函数：避免借用冲突）。
+fn make_view_row(root: &std::path::Path, path: &str, model: &DocModel, md: &str) -> views::ViewRow {
+    let collection = {
+        let rest = path.strip_prefix("Notes/").unwrap_or(path);
+        match rest.split_once('/') {
+            Some((seg, _)) if seg == "Sources" => "采集".to_string(),
+            Some((seg, _)) => seg.to_string(),
+            None => "(根)".to_string(),
+        }
+    };
+    let title = model.title.clone().unwrap_or_else(|| path.rsplit('/').next().unwrap_or(path).to_string());
+    let tags = kernel_store::refs::find_tag_refs(md);
+    let mtime = fs::metadata(root.join(path)).ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs()).unwrap_or(0);
+    let kind = if path.contains("/Agent/") { "agent".to_string() }
+        else if path.contains("/Sources/") { "capture".to_string() }
+        else { "doc".to_string() };
+    views::ViewRow { path: path.to_string(), title, tags, mtime, collection, kind }
 }
 
 fn now_date() -> String {
@@ -1170,5 +1282,172 @@ pub mod memory {
 
     pub fn conversation_header(date: &str) -> String {
         format!("---\ntype: conversation\ndate: {date}\n---\n\n# {date} 对话\n\n")
+    }
+}
+
+/// 内联视图（Views 层）：在笔记里声明表格/看板/日历，数据源可以是文件夹、
+/// 当前页列表、或检索结果。声明用 ```view 代码块（YAML 风格），不破坏 Markdown。
+pub mod views {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+    pub struct ViewSpec {
+        /// table | kanban | calendar | list
+        pub kind: String,
+        /// here（本页列表）| folder:Notes/x | query:关键词 | all
+        pub source: String,
+        #[serde(default)]
+        pub fields: Vec<String>,
+        #[serde(default)]
+        pub filter: Option<String>,
+        #[serde(default)]
+        pub sort: Option<String>,
+        #[serde(default)]
+        pub group_by: Option<String>,
+        #[serde(default)]
+        pub limit: usize,
+    }
+
+    impl ViewSpec {
+        pub fn from_yamlish(text: &str) -> Self {
+            let mut s = ViewSpec { kind: "table".into(), source: "all".into(), limit: 30, ..Default::default() };
+            for line in text.lines() {
+                let Some((k, v)) = line.split_once(':') else { continue };
+                let key = k.trim().to_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                if val.is_empty() { continue; }
+                match key.as_str() {
+                    "type" | "kind" => s.kind = val,
+                    "source" | "来源" => s.source = val,
+                    "filter" | "筛选" => s.filter = Some(val),
+                    "sort" | "排序" => s.sort = Some(val),
+                    "group_by" | "group" | "分组" => s.group_by = Some(val),
+                    "limit" | "条数" => s.limit = val.parse().unwrap_or(30),
+                    "fields" | "字段" => {
+                        s.fields = val.split([',', '，']).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+                    }
+                    _ => {}
+                }
+            }
+            s
+        }
+    }
+
+    /// 一行视图数据。
+    #[derive(Debug, Clone, Serialize)]
+    pub struct ViewRow {
+        pub path: String,
+        pub title: String,
+        pub tags: Vec<String>,
+        pub mtime: u64,
+        pub collection: String,
+        pub kind: String,
+    }
+
+    /// 渲染视图为静态 HTML（发布/预览用；行可点击，由客户端桥接打开文档）。
+    pub fn render_html(spec: &ViewSpec, rows: &[ViewRow]) -> String {
+        let title = format!(
+            "{} · {} · {} 行",
+            match spec.kind.as_str() { "kanban" => "看板", "calendar" => "日历", "list" => "列表", _ => "表格" },
+            spec.source,
+            rows.len()
+        );
+        let mut out = format!("<section class=\"kb-view\" data-kind=\"{}\"><header>{}</header>", spec.kind, esc(&title));
+        match spec.kind.as_str() {
+            "kanban" => {
+                let mut groups: std::collections::BTreeMap<String, Vec<&ViewRow>> = Default::default();
+                for r in rows {
+                    let g = spec.group_by.as_deref().and_then(|g| match g {
+                        "tag" => r.tags.first().cloned(),
+                        "collection" => Some(r.collection.clone()),
+                        "kind" => Some(r.kind.clone()),
+                        _ => None,
+                    }).unwrap_or_else(|| "(未分组)".into());
+                    groups.entry(g).or_default().push(r);
+                }
+                for (g, items) in groups {
+                    out.push_str(&format!("<div class=\"kb-col\"><h4>{} <span>{}</span></h4>", esc(&g), items.len()));
+                    for r in items {
+                        out.push_str(&format!("<a class=\"kb-card\" data-doc=\"{}\">{}</a>", esc(&r.path), esc(&r.title)));
+                    }
+                    out.push_str("</div>");
+                }
+            }
+            "calendar" => {
+                let mut by_day: std::collections::BTreeMap<String, Vec<&ViewRow>> = Default::default();
+                for r in rows {
+                    let day = fmt_day(r.mtime);
+                    by_day.entry(day).or_default().push(r);
+                }
+                for (day, items) in by_day {
+                    out.push_str(&format!("<div class=\"kb-day\"><h4>{}</h4>", esc(&day)));
+                    for r in items {
+                        out.push_str(&format!("<a class=\"kb-card\" data-doc=\"{}\">{}</a>", esc(&r.path), esc(&r.title)));
+                    }
+                    out.push_str("</div>");
+                }
+            }
+            "list" => {
+                out.push_str("<ul>");
+                for r in rows {
+                    out.push_str(&format!("<li><a data-doc=\"{}\">{}</a></li>", esc(&r.path), esc(&r.title)));
+                }
+                out.push_str("</ul>");
+            }
+            _ => {
+                let fields = if spec.fields.is_empty() {
+                    vec!["title".to_string(), "tags".to_string(), "updated".to_string()]
+                } else {
+                    spec.fields.clone()
+                };
+                out.push_str("<table><thead><tr>");
+                for f in &fields { out.push_str(&format!("<th>{}</th>", esc(f))); }
+                out.push_str("</tr></thead><tbody>");
+                for r in rows {
+                    out.push_str("<tr>");
+                    for f in &fields {
+                        let cell = match f.as_str() {
+                            "title" | "标题" => format!("<a data-doc=\"{}\">{}</a>", esc(&r.path), esc(&r.title)),
+                            "tags" | "标签" => r.tags.iter().map(|t| format!("<span class=\"kb-tag\">{}</span>", esc(t))).collect::<Vec<_>>().join(" "),
+                            "updated" | "更新时间" => fmt_day(r.mtime),
+                            "collection" | "集合" => esc(&r.collection),
+                            "path" | "路径" => format!("<code>{}</code>", esc(&r.path)),
+                            _ => String::new(),
+                        };
+                        out.push_str(&format!("<td>{cell}</td>"));
+                    }
+                    out.push_str("</tr>");
+                }
+                out.push_str("</tbody></table>");
+            }
+        }
+        out.push_str("</section>");
+        out
+    }
+
+    fn fmt_day(secs: u64) -> String {
+        if secs == 0 { return "—".into(); }
+        let (y, m, d, _, _, _) = civil(secs as i64);
+        format!("{y:04}-{m:02}-{d:02}")
+    }
+
+    fn civil(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+        let days = secs.div_euclid(86_400);
+        let rem = secs.rem_euclid(86_400);
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = (z - era * 146_097) as u64;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe as i64 + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+        let y = if m <= 2 { y + 1 } else { y };
+        (y, m, d, (rem / 3600) as u32, ((rem % 3600) / 60) as u32, (rem % 60) as u32)
+    }
+
+    fn esc(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
     }
 }

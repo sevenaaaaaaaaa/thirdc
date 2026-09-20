@@ -566,6 +566,18 @@ tbody tr:nth-child(even){{background:color-mix(in oklab,var(--doc-soft) 55%,tran
 img{{max-width:100%;border-radius:14px;display:block;margin:1.4em auto;box-shadow:0 18px 44px -22px oklch(0% 0 0/.42)}}\n\
 hr{{border:none;height:1px;background:var(--doc-line);margin:2.4em auto;width:62%}}\n\
 ::selection{{background:color-mix(in oklab,var(--doc-accent) 26%,transparent)}}\n\
+/* 内联视图（Views 层） */\n\
+.kb-view{{margin:1.6em 0;border:1px solid var(--doc-line);border-radius:14px;overflow:hidden}}\n\
+.kb-view>header{{padding:9px 14px;background:var(--doc-soft);font:600 12.5px var(--font-mono,monospace);color:var(--doc-muted)}}\n\
+.kb-view table{{margin:0;border:none;border-radius:0;width:100%}}\n\
+.kb-view a{{cursor:pointer}}\n\
+.kb-col{{padding:10px 14px;border-bottom:1px solid var(--doc-line)}}\n\
+.kb-col h4{{margin:0 0 8px;font-size:13px}}\n\
+.kb-col h4 span{{color:var(--doc-muted);font-weight:400;font-size:11px;margin-left:6px}}\n\
+.kb-card{{display:block;padding:7px 10px;margin:4px 0;border-radius:9px;background:var(--doc-soft);text-decoration:none;color:inherit;font-size:13px}}\n\
+.kb-card:hover{{background:color-mix(in oklab,var(--doc-accent) 14%,transparent)}}\n\
+.kb-day{{padding:10px 14px;border-bottom:1px solid var(--doc-line)}}\n\
+.kb-tag{{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--doc-soft);font-size:11px;margin-right:4px}}\n\
 </style>\n\
 </head><body><article data-kb-format=\"ai-html\" data-block-count=\"{n}\">\n{}\n</article></body></html>\n",
         title_esc,
