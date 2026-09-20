@@ -172,6 +172,8 @@ impl Kernel {
     /// 大库（迁移后首次索引）不再阻塞 daemon——调用方循环多次即可。
     pub fn sync_limited(&mut self, limit: usize) -> Result<(usize, bool), SyncError> {
         let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
+        // 批量取出 mtime/size 索引（一次查询代替 N 次）
+        let stats = self.index.stat_map().map_err(SyncError::Store)?;
         let mut changed = 0;
         let mut processed = 0usize;
         let mut more = false;
@@ -188,8 +190,8 @@ impl Kernel {
                     m.len() as i64,
                 ))
                 .unwrap_or((0, 0));
-            if self.index.stat_unchanged(rel_str, mtime, size) {
-                continue;
+            if stats.get(rel_str) == Some(&(mtime, size)) {
+                continue; // mtime+size 一致 → 文件没动，跳过（不读不哈希不查库）
             }
             let text = match fs::read_to_string(&abs) {
                 Ok(t) => t,

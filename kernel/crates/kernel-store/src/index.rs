@@ -65,6 +65,17 @@ impl Index {
         Ok(Index { conn })
     }
 
+    /// 一次性取出全部 (path → mtime,size)：避免每篇一次查询（大库关键优化）。
+    pub fn stat_map(&self) -> Result<std::collections::HashMap<String, (i64, i64)>, StoreError> {
+        let mut stmt = self.conn.prepare("SELECT path, mtime, size FROM docs")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, (r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))
+        })?;
+        let mut out = std::collections::HashMap::new();
+        for r in rows { let (p, v) = r?; out.insert(p, v); }
+        Ok(out)
+    }
+
     /// mtime+size 是否与索引记录一致（一致 = 文件几乎肯定没变 → 连读都不必读）。
     pub fn stat_unchanged(&self, rel: &str, mtime: i64, size: i64) -> bool {
         self.conn
