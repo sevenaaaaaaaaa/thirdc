@@ -256,6 +256,13 @@ impl Index {
         Ok(out)
     }
 
+    /// 该文档上次索引的内容哈希（用于增量同步判断）。
+    pub fn hash_of(&self, rel: &str) -> Option<String> {
+        self.conn
+            .query_row("SELECT hash FROM docs WHERE path = ?1", [rel], |r| r.get(0))
+            .ok()
+    }
+
     pub fn doc_count(&self) -> Result<usize, StoreError> {
         Ok(self.conn.query_row("SELECT COUNT(*) FROM docs", [], |r| {
             r.get::<_, i64>(0)

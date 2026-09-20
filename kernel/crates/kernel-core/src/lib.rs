@@ -173,19 +173,20 @@ impl Kernel {
                 Ok(t) => t,
                 Err(_) => continue,
             };
-            let before = match self.log.current_model(&self.vault, rel_str) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let before_md = kernel_md::to_markdown(&before);
-            if before_md != text {
-                match self.log.import_file(&self.vault, rel_str, &text) {
-                    Ok(()) => changed += 1,
-                    Err(_) => continue,
+            // 增量闸门：文件哈希未变 → O(1) 跳过（不再全量对比 op-log，
+            // 这是 2 万+ 文档规模下同步可用的前提）
+            let hash = kernel_store::Cas::hash_hex(text.as_bytes());
+            if self.index.hash_of(rel_str).as_deref() == Some(hash.as_str()) {
+                continue;
+            }
+            // 文件变了：写 op-log（失败也继续索引，索引比 op-log 更关键）
+            if let Ok(before) = self.log.current_model(&self.vault, rel_str) {
+                let before_md = kernel_md::to_markdown(&before);
+                if before_md != text && self.log.import_file(&self.vault, rel_str, &text).is_ok() {
+                    changed += 1;
                 }
             }
-            // 索引 upsert（内部按 hash 跳过未变文档）
-            let hash = kernel_store::Cas::hash_hex(text.as_bytes());
+            // 索引 upsert
             let reindexed = self
                 .index
                 .upsert(rel_str, &hash, &text)
