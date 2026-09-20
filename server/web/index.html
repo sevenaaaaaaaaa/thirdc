@@ -603,6 +603,12 @@ async function api(path,opts={}){const headers=Object.assign({},opts.headers||{}
   if(opts.json!==undefined){headers['content-type']='application/json';opts.body=JSON.stringify(opts.json);}
   const res=await fetch(path,Object.assign({},opts,{headers}));const text=await res.text();let data;
   try{data=text?JSON.parse(text):{};}catch{data={raw:text};}
+  if(res.status===401){
+    localStorage.removeItem('thirdc_token');localStorage.removeItem('thirdc_user');
+    token='';busy=false;
+    if(!document.getElementById('login-user'))showLogin();
+    throw new Error('登录已失效，请重新登录');
+  }
   if(!res.ok)throw new Error(data.error||res.status+' '+res.statusText);return data;}
 
 /* ───────── 状态 ───────── */
@@ -1512,6 +1518,10 @@ const CMDS=[
   ['管理画布','b',async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();}],
   ['A2UI 示例','a',()=>{closeAll();$('a2ui-demo').click();}],
   ['连接器管理','c',async()=>{closeAll();await openConnPanel();}],
+  ['退出登录','out',()=>{
+    localStorage.removeItem('thirdc_token');localStorage.removeItem('thirdc_user');
+    location.reload();
+  }],
   ['插入视图（表格/看板/日历）','vw',async()=>{
     closeAll();
     if(!current){toast('先打开一篇文档','err');return}
@@ -2097,13 +2107,14 @@ if(!token){
     window.__login_gate=true;
   }
 }
-if(window.__login_gate){throw new Error('login gate')}
+if(window.__login_gate){} else {
 
 (async function init(){
   try{await loadBoards();board=await api('/board?name='+encodeURIComponent(boardName));}catch{}
   applyThemePreset();await refreshAll();applyVP();fit();initPresence();
   addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索 融合内核」，或点 ⌘K 找文档/执行命令。');
 })();
+}
 </script>
 <div id="present-ov">
   <div class="present-bar"><span class="t" id="p-title"></span><span class="badge ok" id="p-idx"></span>
