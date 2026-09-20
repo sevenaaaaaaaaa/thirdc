@@ -375,6 +375,12 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .cal-cell .dot-n.cap{background:var(--type-capture)}
 .cal-cell .dot-n.memo{background:var(--type-asset)}
 .cal-empty{color:var(--faint);text-align:center;padding:60px;font-size:14px}
+#crumb{position:fixed;top:calc(var(--chrome-h) + 16px);left:50%;transform:translateX(-50%);z-index:56;
+  display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;border:1px solid var(--border);
+  background:var(--surface-strong);backdrop-filter:blur(14px);font:500 12.5px var(--font-body);box-shadow:var(--shadow-sm);max-width:70vw;overflow:auto}
+.node.k-folder{border-color:var(--border-strong);background:color-mix(in oklab,var(--accent) 7%,var(--node-bg))}
+.node.k-folder .n-kind{background:var(--accent)}
+.node.k-folder .n-title{font-weight:700}
 #toast{position:fixed;right:16px;bottom:44px;z-index:120;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
@@ -396,6 +402,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <body>
 <div id="grid"></div>
 <div id="aura"></div>
+<div id="crumb"></div>
 <div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div><div id="peers"></div></div></div>
 
 <header id="chrome">
@@ -667,7 +674,7 @@ function layoutMissing(){const miss=graph.nodes.filter(n=>!board.nodes[n.id]);
   miss.forEach((n,i)=>board.nodes[n.id]={x:(i%per)*COL,y:Math.floor(i/per)*ROW});}
 
 /* ───────── 布局（画布 / 时间线 / 看板） ───────── */
-function visibleNodes(){return graph.nodes.filter(n=>lens==='all'||n.kind===lens)}
+function visibleNodes(){return graph.nodes.filter(n=>lens==='all'||n.kind===lens||(lens==='doc'&&n.kind==='folder'))}
 function layout(){
   const vis=visibleNodes();
   if(view==='canvas')return vis.map(n=>({n,x:(board.nodes[n.id]||{x:0,y:0}).x,y:(board.nodes[n.id]||{x:0,y:0}).y}));
@@ -898,7 +905,9 @@ $('nodes').addEventListener('dblclick',e=>{
   const hit=e.target.closest('.n-hit');if(hit){openDoc(hit.dataset.open);return;}
   const el=e.target.closest('.node');if(!el)return;
   const n=graph.nodes.find(x=>x.id===el.dataset.id);
-  if(n&&n.kind!=='asset')openDoc(n.path);else if(n)toast('附件：'+n.mime);
+  if(n&&n.kind==='folder'){browsePath=n.path;loadGraph();}
+  else if(n&&n.kind!=='asset')openDoc(n.path);
+  else if(n)toast('附件：'+n.mime);
 });
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette();return;}
@@ -915,7 +924,33 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ───────── 数据 ───────── */
-async function loadGraph(){graph=await api('/graph');layoutMissing();renderGraph();}
+let browsePath='Notes';
+async function loadGraph(){
+  // 分层浏览：只加载当前文件夹（子文件夹 + 高频文档），不再一次铺开全库
+  const b=await api('/browse?path='+encodeURIComponent(browsePath));
+  currentBrowse=b;
+  const nodes=[];
+  (b.folders||[]).forEach(f=>nodes.push({
+    id:'folder:'+f.path, kind:'folder', path:f.path, title:'📁 '+f.name, excerpt:`${f.count} 篇`, collection:f.name, tags:[]
+  }));
+  (b.docs||[]).forEach(d=>nodes.push({
+    id:'doc:'+d.path, kind:(d.path.includes('/Sources/')?'capture':'doc'), path:d.path,
+    title:d.title, excerpt:'', mtime:d.mtime, collection:(d.path.split('/').slice(1,-1).pop()||'(根)'), tags:[], score:d.score
+  }));
+  graph={nodes,edges:[]};
+  board={nodes:{}};   // 分层视图不持久化位置，自动排布
+  layoutMissing();renderBrowser(b);
+  renderGraph();
+}
+/* 面包屑 + 规则提示 */
+function renderBrowser(b){
+  const el=$('crumb');if(!el)return;
+  el.innerHTML=(b.breadcrumb||[]).map((c,i)=>
+    `<a data-path="${c.path}" style="cursor:pointer;color:${i===b.breadcrumb.length-1?'var(--fg)':'var(--accent)'}">${c.name}</a>`
+  ).join('<span style="color:var(--faint)"> / </span>')
+  +`<span style="color:var(--faint);margin-left:10px;font-size:11px">${b.rule} · ${b.total_docs} 篇</span>`;
+  el.querySelectorAll('a[data-path]').forEach(a=>a.onclick=()=>{browsePath=a.dataset.path;loadGraph();});
+}
 async function loadRail(){
   const r=await api('/docs');
   renderTree(r.docs);

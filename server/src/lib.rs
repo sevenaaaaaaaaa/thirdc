@@ -62,6 +62,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/status", get(status))
         .route("/docs", get(list_docs_api))
         .route("/graph", get(graph))
+        .route("/browse", get(browse))
         .route("/board", get(get_board).put(put_board))
         .route("/boards", get(boards_list).post(boards_create))
         .route("/boards/{name}", axum::routing::delete(boards_delete))
@@ -2498,4 +2499,120 @@ fn chrono_today() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let (y, m, d, _, _, _) = kernel_deploy::s3::civil_from_unix(secs as i64);
     format!("{y:04}{m:02}{d:02}")
+}
+
+/// 画布浏览接口：只扫「当前文件夹」，返回子文件夹 + 该层高频文档。
+/// 规则：有子文件夹 → 列子文件夹 + 高频文档；无子文件夹 → 列全部（上限 N）。
+/// 高频 = 入链数×3 + 近期修改 + 体量对数（无需全库扫描，只算本层互联）。
+async fn browse(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let dir = q.get("path").cloned().unwrap_or_else(|| "Notes".into());
+    // 防穿越
+    if !dir.starts_with("Notes") || dir.contains("..") || dir.contains('\\') {
+        return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let abs = root.join(&dir);
+    if !abs.is_dir() {
+        return err(StatusCode::NOT_FOUND, "folder not found").into_response();
+    }
+
+    let mut folders: Vec<Value> = Vec::new();
+    let mut docs: Vec<(String, String, u64, i64, i64)> = Vec::new(); // path,title,mtime,size,score
+
+    let rd = match std::fs::read_dir(&abs) {
+        Ok(r) => r,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for e in entries {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') { continue; }
+        let p = e.path();
+        if p.is_dir() {
+            // 递归统计该子文件夹下的文档数（只统计数量，不读内容）
+            let mut n = 0usize;
+            let mut stack = vec![p.clone()];
+            while let Some(d) = stack.pop() {
+                let Ok(rd2) = std::fs::read_dir(&d) else { continue };
+                for e2 in rd2.filter_map(|x| x.ok()) {
+                    let p2 = e2.path();
+                    let n2 = e2.file_name().to_string_lossy().into_owned();
+                    if n2.starts_with('.') { continue; }
+                    if p2.is_dir() { stack.push(p2); continue; }
+                    if p2.extension().map_or(false, |x| x == "md" || x == "html") { n += 1; }
+                }
+            }
+            folders.push(json!({ "name": name, "path": format!("{dir}/{name}"), "count": n }));
+        } else if p.extension().map_or(false, |x| x == "md" || x == "html") {
+            let rel = format!("{dir}/{name}");
+            let text = std::fs::read_to_string(&p).unwrap_or_default();
+            let (title, _tags) = kernel_core::refs::extract_title_and_tags(&text);
+            let md = std::fs::metadata(&p).ok();
+            let mtime = md.as_ref().and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs()).unwrap_or(0);
+            let size = md.map(|m| m.len()).unwrap_or(0) as i64;
+            docs.push((rel, title.unwrap_or_else(|| name.clone()), mtime, size, 0));
+        }
+    }
+
+    // 本层互联：统计 [[链接]] 被本层其它文档引用的次数（高频信号之一）
+    {
+        let paths: Vec<String> = docs.iter().map(|d| d.0.clone()).collect();
+        let mut inbound: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for (rel, ..) in &docs {
+            let text = std::fs::read_to_string(root.join(rel)).unwrap_or_default();
+            for target in extract_wikilinks(&text) {
+                for p in &paths {
+                    let stem = p.rsplit('/').next().unwrap_or(p).trim_end_matches(".md").trim_end_matches(".html");
+                    let full = p.trim_end_matches(".md").trim_end_matches(".html");
+                    if target.eq_ignore_ascii_case(stem) || target.eq_ignore_ascii_case(full) || p.ends_with(&format!("{target}.md")) {
+                        *inbound.entry(p.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        for d in docs.iter_mut() {
+            let inb = inbound.get(&d.0).copied().unwrap_or(0);
+            let recent = if now.saturating_sub(d.2) < 7 * 86400 { 2.0 } else { 0.0 };
+            let score = inb as f64 * 3.0 + recent + (d.3 as f64 + 1.0).log10();
+            d.4 = (score * 1000.0) as i64; // 存分数（放大便于排序展示）
+        }
+        docs.sort_by(|a, b| b.4.cmp(&a.4).then(a.0.cmp(&b.0)));
+    }
+
+    let has_sub = !folders.is_empty();
+    let cap = if has_sub { 30 } else { 200 };
+    let arr: Vec<Value> = docs.iter().take(cap).map(|(p, t, mt, sz, sc)| {
+        json!({ "path": p, "title": t, "mtime": mt, "size": sz, "score": sc })
+    }).collect();
+
+    // 面包屑
+    let rel_to_root = dir.trim_start_matches("Notes").trim_start_matches('/');
+    let mut crumbs = vec![json!({ "name": "库根", "path": "Notes" })];
+    let mut acc = String::from("Notes");
+    if !rel_to_root.is_empty() {
+        for seg in rel_to_root.split('/') {
+            acc = format!("{acc}/{seg}");
+            crumbs.push(json!({ "name": seg, "path": acc }));
+        }
+    }
+    Json(json!({
+        "path": dir,
+        "breadcrumb": crumbs,
+        "folders": folders,
+        "docs": arr,
+        "total_docs": docs.len(),
+        "rule": if has_sub { "子文件夹 + 高频文档" } else { "全部文档（按高频）" },
+    })).into_response()
 }
