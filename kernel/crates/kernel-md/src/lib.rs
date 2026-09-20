@@ -644,8 +644,15 @@ tc:block raw -->
     }
 
     #[test]
-    fn unterminated_fence_is_error() {
-        assert!(from_markdown("```rust\nfn x()").is_err());
+    fn unterminated_fence_is_tolerated() {
+        // 刻意容错：真实 vault（Obsidian 等）里未闭合代码块很常见，
+        // 解析成"吃到文件末尾的代码块"而不是报错，否则整库导入会中断。
+        let doc = from_markdown("```rust\nfn x()").expect("应容忍未闭合的 fence");
+        assert!(
+            doc.blocks.iter().any(|b| matches!(b, Block::Code { .. })),
+            "未闭合 fence 应成为代码块：{:?}",
+            doc.blocks
+        );
     }
 
     #[test]
