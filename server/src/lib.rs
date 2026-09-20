@@ -63,6 +63,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/docs", get(list_docs_api))
         .route("/graph", get(graph))
         .route("/browse", get(browse))
+        .route("/tree", get(tree))
         .route("/board", get(get_board).put(put_board))
         .route("/boards", get(boards_list).post(boards_create))
         .route("/boards/{name}", axum::routing::delete(boards_delete))
@@ -2614,5 +2615,62 @@ async fn browse(
         "docs": arr,
         "total_docs": docs.len(),
         "rule": if has_sub { "子文件夹 + 高频文档" } else { "全部文档（按高频）" },
+    })).into_response()
+}
+
+/// 轻量目录树：只统计文件夹与文件数，不读文件内容（首屏用，百毫秒级）。
+async fn tree(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    #[derive(Default)]
+    struct N { name: String, path: String, count: usize, dirs: Vec<N> }
+    fn walk(dir: &std::path::Path, root: &std::path::Path, total: &mut usize) -> Vec<N> {
+        let mut out = Vec::new();
+        let Ok(rd) = std::fs::read_dir(dir) else { return out };
+        let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') { continue; }
+            let p = e.path();
+            if p.is_dir() {
+                let mut n = N { name: name.clone(), path: p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/"), ..Default::default() };
+                let kids = walk(&p, root, total);
+                n.count = kids.iter().map(|k| k.count).sum::<usize>();
+                n.count += count_files(&p);
+                n.dirs = kids;
+                // 只保留有内容的
+                if n.count > 0 { out.push(n); }
+            }
+        }
+        out
+    }
+    fn count_files(dir: &std::path::Path) -> usize {
+        let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+        rd.filter_map(|e| e.ok())
+            .filter(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                !n.starts_with('.') && e.path().is_file()
+                    && e.path().extension().map_or(false, |x| x == "md" || x == "html")
+            })
+            .count()
+    }
+    let notes = root.join("Notes");
+    let mut total = 0usize;
+    let dirs = {
+        let mut t = 0usize;
+        let d = walk(&notes, &root, &mut t);
+        total += t;
+        d
+    };
+    // 根目录直属文件数
+    let root_files = count_files(&notes);
+    Json(json!({
+        "path": "Notes",
+        "count": total + root_files,
+        "files": root_files,
+        "dirs": dirs.iter().map(|d| json!({"name": d.name, "path": d.path, "count": d.count, "dirs": d.dirs.iter().map(|x| json!({"name": x.name, "path": x.path, "count": x.count})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
     })).into_response()
 }
