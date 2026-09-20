@@ -708,12 +708,6 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <div class="cal-head"><button class="icon-btn" id="cal-prev">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next">›</button><button class="icon-btn" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
   <div class="cal-grid" id="cal-grid"></div>
 </div>
-<script>if("serviceWorker" in navigator){navigator.serviceWorker.register(BASE+"/sw.js").catch(()=>{});
-  navigator.serviceWorker.addEventListener('message',e=>{
-    if(e.data&&e.data.type==='shell-updated'){
-      toast('发现新版本，点顶栏 🔄 刷新即可更新','ok');
-    }
-  });}</script>
 <script data-cfasync="false">
 /* 兜底：任何脚本错误都不能把用户困在启动遮罩里 */
 window.addEventListener("error",()=>{try{const b=document.getElementById("boot");if(b)b.remove()}catch(e){}});
@@ -723,6 +717,14 @@ const $=(id)=>document.getElementById(id);
 const $b=(id)=>$(id)||new Proxy(function(){},{get:()=>()=>{},set:()=>true,apply:()=>{}});
 /* 子路径部署支持：应用挂在 /thirdc/ 下时，所有 API 都要带前缀 */
 const BASE=location.pathname.replace(/\/+$/,'').replace(/\/index\.html$/,'');
+/* Service Worker：外壳缓存（直连场景下重复打开秒开） */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register(BASE+'/sw.js').catch(()=>{});
+  navigator.serviceWorker.addEventListener('message',e=>{
+    if(e.data&&e.data.type==='shell-updated'&&typeof toast==='function')
+      toast('发现新版本，点顶栏 🔄 刷新即可更新','ok');
+  });
+}
 const params=new URLSearchParams(location.search);
 let token=params.get('token')||localStorage.getItem('thirdc_token')||'';
 if(params.get('token'))localStorage.setItem('thirdc_token',token);

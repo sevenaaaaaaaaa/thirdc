@@ -170,7 +170,10 @@ async fn app() -> impl IntoResponse {
     let html = PAGE.get_or_init(|| {
         include_str!("../web/index.html").replace(
             "<link rel=\"stylesheet\" href=\"assets/tokens.css\">",
-            &format!("<style>{}</style>", include_str!("../web/tokens.css")),
+            &format!(
+                "<style>{}</style>",
+                include_str!("../web/tokens.css").replace("url(\"fonts/", "url(\"/assets/fonts/")
+            ),
         )
     });
     (
