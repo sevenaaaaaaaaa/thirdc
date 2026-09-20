@@ -593,6 +593,8 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <div id="toast"></div>
 <script data-cfasync="false">
 const $=(id)=>document.getElementById(id);
+/* 安全绑定：元素缺失时静默（避免一个 null 让整个应用死掉） */
+const $b=(id)=>$(id)||new Proxy(function(){},{get:()=>()=>{},set:()=>true,apply:()=>{}});
 /* 子路径部署支持：应用挂在 /thirdc/ 下时，所有 API 都要带前缀 */
 const BASE=location.pathname.replace(/\/+$/,'').replace(/\/index\.html$/,'');
 const params=new URLSearchParams(location.search);
@@ -1079,11 +1081,11 @@ async function newDoc(){
     await refreshAll();openDoc(path);toast('已创建 '+path,'ok');
   }catch(e){toast('创建失败：'+e.message,'err');}
 }
-$('d-save').onclick=saveDoc;$('d-close').onclick=()=>{$('drawer').classList.remove('open');$('toc').classList.remove('open');$('toc-line').classList.remove('on')};
-$('d-mode').onclick=()=>$('d-body').classList.toggle('view');
+$b('d-save').onclick=saveDoc;$b('d-close').onclick=()=>{$('drawer').classList.remove('open');$('toc').classList.remove('open');$('toc-line').classList.remove('on')};
+$b('d-mode').onclick=()=>$('d-body').classList.toggle('view');
 
 /* ───────── 本地上传（图片/PDF/DOCX/HTML）───────── */
-$('d-upload').onclick=()=>$('d-file').click();
+$b('d-upload').onclick=()=>$('d-file').click();
 $('d-file').addEventListener('change',async e=>{
   for(const f of [...e.target.files]){
     const buf=new Uint8Array(await f.arrayBuffer());
@@ -1121,7 +1123,7 @@ $('d-file').addEventListener('change',async e=>{
   e.target.value='';
 });
 
-$('d-pub').onclick=()=>current?doPublish(current):toast('先打开一篇文档','err');
+$b('d-pub').onclick=()=>current?doPublish(current):toast('先打开一篇文档','err');
 $('editor').addEventListener('input',()=>dirty=true);
 /* 光标离开即渲染：不覆盖底层源码，只刷新预览 */
 $('editor').addEventListener('blur',async()=>{
@@ -1171,14 +1173,14 @@ $('editor').addEventListener('paste',async e=>{
     const t=$('editor'),s=t.selectionStart;t.value=t.value.slice(0,s)+r.markdown+'\n'+t.value.slice(s);dirty=true;toast('图片入库 '+r.hash.slice(0,8)+'…','ok');
   }catch(err){toast('图片入库失败：'+err.message,'err');}
 });
-$('rail-new').onclick=newDoc;
+$b('rail-new').onclick=newDoc;
 
 /* ───────── 检查器动作 ───────── */
-$('ins-open').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.kind!=='asset')openDoc(n.path);};
-$('ins-pub').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.kind!=='asset')doPublish(n.path);};
-$('ins-focus').onclick=()=>selected&&focusNodes(new Set([selected]));
-$('ins-copy').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(!n)return;navigator.clipboard?.writeText(n.path);toast('已复制 '+n.path);};
-$('ins-del').onclick=async()=>{
+$b('ins-open').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.kind!=='asset')openDoc(n.path);};
+$b('ins-pub').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.kind!=='asset')doPublish(n.path);};
+$b('ins-focus').onclick=()=>selected&&focusNodes(new Set([selected]));
+$b('ins-copy').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(!n)return;navigator.clipboard?.writeText(n.path);toast('已复制 '+n.path);};
+$b('ins-del').onclick=async()=>{
   const n=graph.nodes.find(x=>x.id===selected);if(!n||n.kind==='asset')return;
   if(!confirm('删除 '+n.path+'？文件真相将被移除（op-log 保留历史）。'))return;
   await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});
@@ -1251,10 +1253,10 @@ async function chat(message){
   }
   busy=false;$('dock').classList.remove('thinking');$('aura').classList.remove('on');
 }
-$('send').onclick=()=>chat();
+$b('send').onclick=()=>chat();
 $('say').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chat();}});
 document.querySelectorAll('.quick button').forEach(b=>{if(b.dataset.cmd)b.onclick=()=>chat(b.dataset.cmd)});
-$('a2ui-demo').onclick=()=>{
+$b('a2ui-demo').onclick=()=>{
   const el=document.createElement('div');el.className='msg ai';
   el.innerHTML='<div class="who">A2UI · 本地示例</div>';
   $('thread').appendChild(el);$('thread').scrollTop=1e9;
@@ -1349,7 +1351,7 @@ async function loadPublishList(){
     <a href="${i.url}" target="_blank">${i.url}</a><span class="h" style="font-family:var(--font-mono);font-size:11px;color:var(--faint)">${(i.bytes/1024).toFixed(1)}KB</span></div>`).join('')
     +`<div class="pub-item"><span class="badge plan">llms.txt</span><a href="${r.llms_txt}" target="_blank">${r.llms_txt}</a></div>`;
 }
-$('pub-btn').onclick=async()=>{await Promise.all([loadPublishTargets(),loadPublishList()]);openOverlay('pub-ov');};
+$b('pub-btn').onclick=async()=>{await Promise.all([loadPublishTargets(),loadPublishList()]);openOverlay('pub-ov');};
 
 /* ───────── 路线图（让规划可见） ───────── */
 const ROAD=[
@@ -1369,7 +1371,7 @@ function renderRoad(){
     <span class="badge ${s==='ok'?'ok':'plan'}">${s==='ok'?'已上线':'规划中'}</span>
     <span class="txt"><b>${t}</b>${d}</span></div>`).join('');
 }
-$('road-btn').onclick=()=>{renderRoad();openOverlay('road-ov');};
+$b('road-btn').onclick=()=>{renderRoad();openOverlay('road-ov');};
 
 /* ───────── 视图切换与多画布 ───────── */
 document.querySelectorAll('#view-seg button').forEach(b=>b.onclick=()=>{
@@ -1379,7 +1381,7 @@ document.querySelectorAll('#view-seg button').forEach(b=>b.onclick=()=>{
   toast(hint,'ok');
 });
 async function loadBoards(){try{boards=(await api('/boards')).boards}catch{boards=['main']}}
-$('board-pill').onclick=async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();};
+$b('board-pill').onclick=async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();};
 function renderBoards(){
   const box=$('boards-list');box.innerHTML='';
   boards.forEach(b=>{
@@ -1498,7 +1500,7 @@ async function importDesignPath(path){
     await loadDesigns();
   }catch(e){toast('导入失败：'+e.message,'err');}
 }
-$('design-btn').onclick=openDesign;
+$b('design-btn').onclick=openDesign;
 $('design-path').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.value.trim()){importDesignPath(e.target.value.trim());e.target.value='';}});
 $('design-url').addEventListener('keydown',async e=>{
   if(e.key!=='Enter'||!e.target.value.trim())return;
@@ -1511,7 +1513,7 @@ $('design-url').addEventListener('keydown',async e=>{
   }catch(err){ toast('消化失败：'+err.message,'err'); }
   drop.innerHTML='拖入 design.md / SKILL 目录里的 md / tokens.css / 页面 HTML，或点击选择文件<br><span style="font-size:11px;color:var(--faint)">也可以直接粘贴路径（服务端目录，如 /Users/you/Design/skill）</span>';
 });
-$('design-drop').onclick=()=>$('design-file').click();
+$b('design-drop').onclick=()=>$('design-file').click();
 $('design-file').addEventListener('change',async e=>{
   for(const f of [...e.target.files]){
     await importDesignContent(f.name.replace(/\.[^.]+$/,''), await f.text());
@@ -1631,7 +1633,7 @@ function renderPalette(q){
     el.innerHTML=`<span class="badge ok">${d.kind==='capture'?'采集':'文档'}</span><span class="t">${d.title||d.path.split('/').pop()}</span><span class="h">${d.path}</span>`;
     el.onclick=()=>{closeAll();openDoc(d.path);};box.appendChild(el);});
 }
-$('open-palette').onclick=openPalette;
+$b('open-palette').onclick=openPalette;
 $('palette-in').addEventListener('input',e=>renderPalette(e.target.value));
 $('palette-in').addEventListener('keydown',e=>{
   if(e.key==='Enter'){const first=$('palette-list').querySelector('.prow');if(first)first.click();}
@@ -1645,15 +1647,15 @@ document.querySelectorAll('.tab-pill').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tab-pill').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   lens=b.dataset.lens;renderGraph();fit();
 });
-$('fit').onclick=fit;$('tidy').onclick=tidy;
+$b('fit').onclick=fit;$b('tidy').onclick=tidy;
 applyThemePreset();
 const _oldSetTheme=$('theme').onclick;
-$('theme').onclick=()=>{applyThemePreset();
+$b('theme').onclick=()=>{applyThemePreset();
   themePref=themePref==='auto'?'light':(themePref==='light'?'dark':'auto');
   localStorage.setItem('thirdc_theme',themePref); applyTheme();
   toast('主题：'+(themePref==='auto'?'跟随系统':(themePref==='light'?'浅色':'深色')),'ok');
 };
-$('force-refresh').onclick=async()=>{
+$b('force-refresh').onclick=async()=>{
   const b=$('force-refresh');b.style.color='var(--accent)';b.style.animation='spin 1s linear infinite';
   try{
     const r=await api('/refresh',{method:'POST'});
@@ -1664,7 +1666,7 @@ $('force-refresh').onclick=async()=>{
   }catch(e){toast('刷新失败：'+e.message,'err')}
   b.style.animation='';b.style.color='';
 };
-$('sync').onclick=async()=>{const r=await api('/sync',{method:'POST'});toast('同步完成，合入 '+r.changed+' 篇');await refreshAll();};
+$b('sync').onclick=async()=>{const r=await api('/sync',{method:'POST'});toast('同步完成，合入 '+r.changed+' 篇');await refreshAll();};
 
 /* ───────── 协作光标（WS presence） ───────── */
 let myId=null;const peers=new Map();let cursorTimer=null;let presenceWs=null;
@@ -1802,14 +1804,14 @@ async function sendMemo(){
     await refreshAll();
   }catch(e){toast('Memo 失败：'+e.message,'err')}
 }
-$('memo-send').onclick=sendMemo;
+$b('memo-send').onclick=sendMemo;
 $('memo-input').addEventListener('keydown',e=>{if(e.key==='Enter')sendMemo()});
 
 /* ───────── 发布水滴特效 ───────── */
 function showWaterEffect(url){
   $('env-link').textContent=url;
   $('water-overlay').classList.add('open');
-  setTimeout(()=>$('envelope').onclick=()=>{
+  setTimeout(()=>$b('envelope').onclick=()=>{
     navigator.clipboard?.writeText(url);
     toast('链接已复制','ok');
     setTimeout(()=>$('water-overlay').classList.remove('open'),600);
@@ -1842,7 +1844,7 @@ async function shareEncrypted(path){
     const url=`${location.origin}${BASE}/s/${id}#k=${btoa(pass)}`;
     $('share-link').textContent=url;
     $('share-overlay').classList.add('open');
-    $('share-link').onclick=()=>{navigator.clipboard?.writeText(url);toast('链接已复制','ok')};
+    $b('share-link').onclick=()=>{navigator.clipboard?.writeText(url);toast('链接已复制','ok')};
   }catch(e){toast('分享失败：'+e.message,'err')}
 }
 $('share-pass')?.addEventListener('keydown',e=>{if(e.key==='Enter')shareEncrypted(current)});
@@ -1858,14 +1860,14 @@ function renderWorkspaces(){
     box.appendChild(b);
   });
 }
-$('ws-add').onclick=async()=>{
+$b('ws-add').onclick=async()=>{
   const url=prompt('另一个 ThirdC 的 URL','http://127.0.0.1:7700');if(!url)return;
   const t2=prompt('Token','');if(!t2)return;
   const name=prompt('显示名','新工作区')||url;
   const list=loadWorkspaces();list.push({name,url:url.replace(/\/+$/,''),token:t2});
   localStorage.setItem('thirdc_workspaces',JSON.stringify(list));renderWorkspaces();
 };
-$('ws-close').onclick=()=>$('ws-panel').classList.remove('open');
+$b('ws-close').onclick=()=>$('ws-panel').classList.remove('open');
 let vaultName='';
 $('board-pill').oncontextmenu=e=>{e.preventDefault();$('ws-panel').classList.toggle('open');renderWorkspaces()};
 $('board-pill').addEventListener('dblclick',()=>{$('ws-panel').classList.toggle('open');renderWorkspaces()});
@@ -1905,8 +1907,8 @@ async function renderCalendar(){
     g.appendChild(cell);
   }
 }
-$('cal-prev').onclick=()=>{calM--;if(calM<0){calM=11;calY--}renderCalendar()};
-$('cal-next').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderCalendar()};
+$b('cal-prev').onclick=()=>{calM--;if(calM<0){calM=11;calY--}renderCalendar()};
+$b('cal-next').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderCalendar()};
 
 /* ───────── 模式框架 ───────── */
 function setMode(m){
@@ -1951,9 +1953,9 @@ async function showPresent(){
     $('p-frame').srcdoc=d.html;
   }catch(e){toast('展示加载失败：'+e.message,'err')}
 }
-$('p-next').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx+1)%n;showPresent()}};
-$('p-prev').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx-1+n)%n;showPresent()}};
-$('p-exit').onclick=()=>{$('present-ov').classList.remove('open');setMode('studio')};
+$b('p-next').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx+1)%n;showPresent()}};
+$b('p-prev').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx-1+n)%n;showPresent()}};
+$b('p-exit').onclick=()=>{$('present-ov').classList.remove('open');setMode('studio')};
 
 /* ───────── 圈选（整理模式） ───────── */
 let lasso=null;
@@ -1986,8 +1988,8 @@ canvas.addEventListener('pointerup',e=>{
   $('batchbar').classList.toggle('show',multiSel.size>0);
 });
 function clearSel(){multiSel.clear();document.querySelectorAll('#nodes .node').forEach(el=>el.classList.remove('multi'));$('batchbar').classList.remove('show')}
-$('b-clear').onclick=clearSel;
-$('b-del').onclick=async()=>{
+$b('b-clear').onclick=clearSel;
+$b('b-del').onclick=async()=>{
   if(!multiSel.size)return;
   if(!confirm(`删除选中的 ${multiSel.size} 篇文档？（文件真相将被移除）`))return;
   let ok=0;
@@ -1997,7 +1999,7 @@ $('b-del').onclick=async()=>{
   }
   clearSel();toast(`已删除 ${ok} 篇`,'ok');await refreshAll();
 };
-$('b-move').onclick=async()=>{
+$b('b-move').onclick=async()=>{
   if(!multiSel.size)return;
   const dir=prompt('移动到目录（如 研究或 Sources/知识库；留空=根目录）','研究');
   if(dir===null)return;
@@ -2012,7 +2014,7 @@ $('b-move').onclick=async()=>{
   }
   clearSel();toast(`已移动 ${ok} 篇`,'ok');await refreshAll();
 };
-$('b-tag').onclick=async()=>{
+$b('b-tag').onclick=async()=>{
   if(!multiSel.size)return;
   const tag=prompt('标签名（写入文档正文 #标签）');
   if(!tag||!tag.trim())return;
@@ -2045,7 +2047,7 @@ function sparkle(n){
     document.body.appendChild(p);setTimeout(()=>p.remove(),1600);
   }
 }
-$('organize-btn').onclick=async()=>{
+$b('organize-btn').onclick=async()=>{
   sparkle(26);toast('✨ 正在分析结构，生成整理方案…');
   try{
     const plan=await api('/organize/plan',{method:'POST',json:{}});
@@ -2070,22 +2072,22 @@ async function gitRefresh(){
     $('gitpanel').classList.add('open');
   }catch(e){toast('git 状态失败：'+e.message,'err')}
 }
-$('git-do-commit').onclick=async()=>{
+$b('git-do-commit').onclick=async()=>{
   try{const r=await api('/git/commit',{method:'POST',json:{message:$('git-msg').value||'wip'}});
     toast(`已存档 ${r.committed} 个文件`,'ok');$('git-msg').value='';gitRefresh();
   }catch(e){toast('存档失败：'+e.message,'err')}
 };
-$('git-do-branch').onclick=async()=>{
+$b('git-do-branch').onclick=async()=>{
   const n=$('git-newbranch').value.trim();if(!n)return;
   try{await api('/git/checkout',{method:'POST',json:{name:n,create:true}});toast(`已创建并切换到 ${n}`,'ok');$('git-newbranch').value='';gitRefresh()}
   catch(e){toast('失败：'+e.message,'err')}
 };
-$('git-do-sync').onclick=async()=>{
+$b('git-do-sync').onclick=async()=>{
   const r=$('git-remote').value.trim();if(!r)return;
   try{const x=await api('/git/sync',{method:'POST',json:{remote:r}});toast(x.detail,'ok');gitRefresh()}
   catch(e){toast('同步失败：'+e.message,'err')}
 };
-$('git-close').onclick=()=>$('gitpanel').classList.remove('open');
+$b('git-close').onclick=()=>$('gitpanel').classList.remove('open');
 
 /* ───────── 展示：整库 PPT ───────── */
 $('p-all')?.remove();
@@ -2135,17 +2137,14 @@ if(!token){
   if(!localStorage.getItem('thirdc_token')){
     showLogin();
     // 阻止后续初始化
-    window.__login_gate=true;
+
   }
 }
-if(window.__login_gate){} else {
-
 (async function init(){
   try{await loadBoards();board=await api('/board?name='+encodeURIComponent(boardName));}catch{}
   applyThemePreset();await refreshAll();applyVP();fit();initPresence();
   addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索 融合内核」，或点 ⌘K 找文档/执行命令。');
 })();
-}
 </script>
 <div id="present-ov">
   <div class="present-bar"><span class="t" id="p-title"></span><span class="badge ok" id="p-idx"></span>
