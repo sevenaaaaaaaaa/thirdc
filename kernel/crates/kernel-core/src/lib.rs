@@ -178,7 +178,20 @@ impl Kernel {
         for rel in &docs {
             if processed >= limit { more = true; break; }
             let rel_str = rel.to_str().unwrap_or("");
-            let text = match fs::read_to_string(self.vault.root.join(rel)) {
+            let abs = self.vault.root.join(rel);
+            // mtime+size 短路：文件没动就连读都不读（1.2 万篇时这是秒开的关键）
+            let (mtime, size) = fs::metadata(&abs)
+                .map(|m| (
+                    m.modified().ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64).unwrap_or(0),
+                    m.len() as i64,
+                ))
+                .unwrap_or((0, 0));
+            if self.index.stat_unchanged(rel_str, mtime, size) {
+                continue;
+            }
+            let text = match fs::read_to_string(&abs) {
                 Ok(t) => t,
                 Err(_) => continue,
             };
@@ -199,7 +212,7 @@ impl Kernel {
             // 索引 upsert
             let reindexed = self
                 .index
-                .upsert(rel_str, &hash, &text)
+                .upsert(rel_str, &hash, &text, mtime, size)
                 .map_err(SyncError::Store)?;
             if reindexed {
                 let refs = refs::find_asset_refs(&text);
@@ -240,9 +253,17 @@ impl Kernel {
         // 索引
         let text = fs::read_to_string(&abs).unwrap_or_default();
         let hash = kernel_store::Cas::hash_hex(text.as_bytes());
+        let (mt, sz) = fs::metadata(&abs)
+            .map(|m| (
+                m.modified().ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64).unwrap_or(0),
+                m.len() as i64,
+            ))
+            .unwrap_or((0, 0));
         if self
             .index
-            .upsert(rel, &hash, &text)
+            .upsert(rel, &hash, &text, mt, sz)
             .map_err(SyncError::Store)?
         {
             let refs = refs::find_asset_refs(&text);

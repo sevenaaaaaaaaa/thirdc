@@ -10,7 +10,9 @@ use crate::{StoreError, Vault};
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS docs(
     path TEXT PRIMARY KEY,
-    hash TEXT NOT NULL
+    hash TEXT NOT NULL,
+    mtime INTEGER NOT NULL DEFAULT 0,
+    size INTEGER NOT NULL DEFAULT 0
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
     path UNINDEXED,
@@ -57,11 +59,28 @@ impl Index {
         std::fs::create_dir_all(&dir)?;
         let conn = Connection::open(dir.join("index.db"))?;
         conn.execute_batch(SCHEMA)?;
+        // 老库迁移：补 mtime/size 列
+        let _ = conn.execute_batch("ALTER TABLE docs ADD COLUMN mtime INTEGER NOT NULL DEFAULT 0");
+        let _ = conn.execute_batch("ALTER TABLE docs ADD COLUMN size INTEGER NOT NULL DEFAULT 0");
         Ok(Index { conn })
     }
 
+    /// mtime+size 是否与索引记录一致（一致 = 文件几乎肯定没变 → 连读都不必读）。
+    pub fn stat_unchanged(&self, rel: &str, mtime: i64, size: i64) -> bool {
+        self.conn
+            .query_row(
+                "SELECT mtime, size FROM docs WHERE path = ?1",
+                [rel],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .map(|(m, s)| m == mtime && s == size)
+            .unwrap_or(false)
+    }
+
     /// upsert 一篇文档。hash 未变则跳过，返回是否重建了索引行。
-    pub fn upsert(&self, rel: &str, hash: &str, content: &str) -> Result<bool, StoreError> {
+    pub fn upsert(&self, rel: &str, hash: &str, content: &str, mtime: i64, size: i64) -> Result<bool, StoreError> {
+        let _ = mtime;
+        let _ = size;
         let existing: Option<String> = self
             .conn
             .query_row("SELECT hash FROM docs WHERE path = ?1", [rel], |r| {
@@ -77,8 +96,8 @@ impl Index {
             [rel, content],
         )?;
         self.conn.execute(
-            "INSERT INTO docs(path, hash) VALUES (?1, ?2)",
-            [rel, hash],
+            "INSERT INTO docs(path, hash, mtime, size) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![rel, hash, mtime, size],
         )?;
         Ok(true)
     }
@@ -321,18 +340,18 @@ mod tests {
     fn upsert_search_remove() {
         let (_d, ix) = idx();
         let h1 = crate::Cas::hash_hex(b"a");
-        assert!(ix.upsert("Notes/x.md", &h1, "推送所有，管理所有").unwrap());
+        assert!(ix.upsert("Notes/x.md", &h1, "推送所有，管理所有", 1, 10).unwrap());
         let h2 = crate::Cas::hash_hex(b"b");
-        ix.upsert("Notes/y.md", &h2, "采集与发布").unwrap();
+        ix.upsert("Notes/y.md", &h2, "采集与发布", 1, 10).unwrap();
         assert_eq!(ix.doc_count().unwrap(), 2);
 
         let hits = ix.search("推送所有").unwrap();
         assert_eq!(hits[0].0, "Notes/x.md");
 
         // hash 不变跳过
-        assert!(!ix.upsert("Notes/x.md", &h1, "推送所有，管理所有").unwrap());
+        assert!(!ix.upsert("Notes/x.md", &h1, "推送所有，管理所有", 1, 10).unwrap());
         // 变更重建
-        assert!(ix.upsert("Notes/x.md", &h2, "新内容").unwrap());
+        assert!(ix.upsert("Notes/x.md", &h2, "新内容", 2, 20).unwrap());
         assert!(ix.search("新内容").unwrap().len() == 1);
 
         ix.remove("Notes/x.md").unwrap();
@@ -342,7 +361,7 @@ mod tests {
     #[test]
     fn short_query_fallback() {
         let (_d, ix) = idx();
-        ix.upsert("Notes/x.md", "h", "推送所有").unwrap();
+        ix.upsert("Notes/x.md", "h", "推送所有", 1, 4).unwrap();
         let hits = ix.search("推送").unwrap();
         assert_eq!(hits.len(), 1);
     }
@@ -350,7 +369,7 @@ mod tests {
     #[test]
     fn quotes_do_not_break_match() {
         let (_d, ix) = idx();
-        ix.upsert("Notes/x.md", "h", "she said \"hello\"").unwrap();
+        ix.upsert("Notes/x.md", "h", "she said \"hello\"", 1, 16).unwrap();
         assert_eq!(ix.search("said \"hel").unwrap().len(), 1);
     }
 }
