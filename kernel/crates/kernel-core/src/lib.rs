@@ -60,12 +60,13 @@ impl Kernel {
         })
     }
 
-    /// 读路径专用：节流同步。10s 内已同步过则直接返回（大库上
-    /// 每次 /doc、/search 都全量 walk 是不可承受的）。
-    /// 写入路径、手动「同步」按钮仍走 force 的 sync_all。
+    /// 读路径专用：节流同步。60s 内已同步过则直接返回（大库上每次全库
+    /// walk 是秒级开销，不能挂在 /doc、/search 上）。
+    /// 外部改动的可见延迟上限 60s；UI 内写入直接走索引不经过这里，
+    /// 顶栏「同步」按钮（/sync）随时强制全量。
     pub fn sync_throttled(&mut self) -> Result<usize, SyncError> {
         if let Some(t) = self.last_sync {
-            if t.elapsed() < std::time::Duration::from_secs(10) {
+            if t.elapsed() < std::time::Duration::from_secs(60) {
                 return Ok(0);
             }
         }
