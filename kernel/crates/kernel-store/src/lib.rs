@@ -49,6 +49,18 @@ pub struct VaultConfig {
     /// 发布：站点构建目录与推送目标
     #[serde(default)]
     pub publish: PublishConfig,
+    /// Web 登录凭据覆盖。缺省 admin / machine token；设置了用户名密码则以这里为准。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthConfig>,
+}
+
+/// 登录凭据覆盖（thirdc.toml [auth]）。API token 鉴权不受影响，这里只管 Web 登录表单。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuthConfig {
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
 }
 
 /// 发布配置。

@@ -58,7 +58,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v4';
+const SHELL = 'thirdc-shell-v5';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -2478,7 +2478,7 @@ async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
 }
 
 /// 用户名密码登录：验证后返回 token。
-/// 初始凭据从 vault 配置读取；没有则默认 admin / machine token 后 8 位。
+/// 凭据：thirdc.toml [auth] 设了用户名密码则用它；否则默认 admin / machine token。
 async fn auth_login(
     State(st): State<Arc<AppState>>,
     body: Bytes,
@@ -2489,10 +2489,17 @@ async fn auth_login(
     if username.is_empty() || password.is_empty() {
         return err(StatusCode::BAD_REQUEST, "需要 username 和 password").into_response();
     }
-    let machine = st.kernel.lock().unwrap().vault.ensure_machine().unwrap_or_default();
-    let expected_password = machine.token; // 密码 = API token
-    if username == "admin" && password == expected_password {
-        Json(json!({ "token": expected_password, "ok": true })).into_response()
+    let (machine, auth_cfg) = {
+        let k = st.kernel.lock().unwrap();
+        (k.vault.ensure_machine().unwrap_or_default(), k.vault.config.auth.clone())
+    };
+    let (expected_user, expected_password) = match auth_cfg {
+        Some(a) if !a.username.is_empty() && !a.password.is_empty() => (a.username, a.password),
+        _ => ("admin".to_string(), machine.token.clone()),
+    };
+    // 会话一律发 machine token：API 鉴权（check_token）只认它，密码只守登录表单
+    if username == expected_user && password == expected_password {
+        Json(json!({ "token": machine.token, "ok": true })).into_response()
     } else {
         err(StatusCode::UNAUTHORIZED, "用户名或密码错误").into_response()
     }
