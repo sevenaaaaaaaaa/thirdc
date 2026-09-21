@@ -915,20 +915,26 @@ pub async fn serve_listener(
             if !more {
                 k.mark_synced();
                 eprintln!("preheat: 索引就绪（{}ms，本批 {} 篇变更）", t0.elapsed().as_millis(), n);
-                // 暖混合检索语料缓存：否则重启后首次对话要在锁内现建 TF-IDF（20s+ 卡顿）
+                // 语料/memo 预热在锁外构建：锁内只取快照（秒级），构建期间站点照常服务
                 let hw = t0.elapsed();
-                match k.search_hybrid("预热", 1) {
-                    Ok(_) => eprintln!("preheat: 混合检索语料就绪（+{}ms）", (t0.elapsed() - hw).as_millis()),
-                    Err(e) => eprintln!("preheat: 语料预热失败：{e}"),
+                let snap = match k.hybrid_snapshot() {
+                    Ok(v) => v,
+                    Err(e) => { eprintln!("preheat: 语料快照失败：{e}"); return; }
+                };
+                let memo_stats = k.doc_stats().unwrap_or_default();
+                let memo_root = k.vault.root.clone();
+                drop(k); // 长构建全程不持内核锁
+
+                let idx = kernel_core::rag::TfidfIndex::build(&snap.1);
+                if let Ok(mut k) = preheat.lock() {
+                    k.hybrid_install(snap.0, idx);
+                    eprintln!("preheat: 混合检索语料就绪（+{}ms）", (t0.elapsed() - hw).as_millis());
                 }
-                // 暖 memo 索引缓存：首次打开 Memo 面板免等 12k 文件头扫描
                 let hm = t0.elapsed();
-                let stats = k.doc_stats().unwrap_or_default();
-                let root = k.vault.root.clone();
-                let docs = memo_build_sync(&root, &stats);
+                let docs = memo_build_sync(&memo_root, &memo_stats);
                 let payload = json!({ "docs": docs, "total": docs.len() });
                 let built = axum::body::Bytes::from(serde_json::to_vec(&payload).unwrap_or_default());
-                *preheat_state.memo_cache.lock().unwrap() = Some((k.data_epoch(), built));
+                *preheat_state.memo_cache.lock().unwrap() = Some((snap.0.0 as u64, built));
                 eprintln!("preheat: memo 索引就绪（+{}ms）", (t0.elapsed() - hm).as_millis());
                 return;
             }

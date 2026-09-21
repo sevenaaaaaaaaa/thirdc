@@ -686,6 +686,23 @@ impl Kernel {
         Ok(rag::rrf_merge(&fts, &vec_hits, limit))
     }
 
+    /// 混合检索语料快照：(epoch, 语料)。锁内只做一次 SQL 顺序读（秒级），
+    /// TF-IDF 构建交给调用方在锁外慢慢算——启动预热用，避免部署后站点不可用。
+    pub fn hybrid_snapshot(&self) -> Result<((usize, i64), Vec<(String, String)>), SyncError> {
+        let stats = self.index.stat_map().map_err(SyncError::Store)?;
+        let epoch = (stats.len(), stats.values().map(|(m, _)| *m).max().unwrap_or(0));
+        let corpus = self.index.corpus().map_err(SyncError::Store)?
+            .into_iter()
+            .filter(|(rel, _)| rel.starts_with("Notes/") && (rel.ends_with(".md") || rel.ends_with(".html")))
+            .collect();
+        Ok((epoch, corpus))
+    }
+
+    /// 安装锁外构建好的 TF-IDF 语料缓存。
+    pub fn hybrid_install(&mut self, epoch: (usize, i64), idx: rag::TfidfIndex) {
+        self.hybrid_cache = Some((epoch, idx));
+    }
+
     /// 已索引文档数。
     pub fn indexed_count(&self) -> Result<usize, StoreError> {
         self.index.doc_count()
