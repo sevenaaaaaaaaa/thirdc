@@ -36,8 +36,13 @@ pub struct Kernel {
     pub log: OpLog,
     index: Index,
     designs: DesignStore,
-    /// 上次全量同步时刻（读路径节流用：10s 内的重复 sync 直接跳过）。
+    /// 上次全量同步时刻（读路径节流用）。
     last_sync: Option<std::time::Instant>,
+    /// 文件监听置位的脏标记：Notes/ 下有任何外部改动即置 true，
+    /// 读路径据此决定是否真的需要全库 walk（无事发生时零开销）。
+    dirty: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 文件监听句柄，存活即监听生效；丢弃即停止。
+    _watcher: Option<notify::RecommendedWatcher>,
     /// 数据代数：任何内容变更（sync 命中 / 写 / 删）+1，供上层缓存失效。
     epoch: u64,
     /// 混合检索的 TF-IDF 语料缓存，键为 (文档数, 最大 mtime)。
@@ -49,26 +54,55 @@ impl Kernel {
         let index = Index::open(&vault)?;
         let designs = DesignStore::open(&vault.sidecar())
             .map_err(|e| StoreError::Config(e.to_string()))?;
+        let dirty = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _watcher = Self::spawn_watcher(vault.root.join("Notes"), dirty.clone());
         Ok(Kernel {
             vault,
             log: OpLog::new(),
             index,
             designs,
             last_sync: None,
+            dirty,
+            _watcher,
             epoch: 0,
             hybrid_cache: None,
         })
     }
 
-    /// 读路径专用：节流同步。60s 内已同步过则直接返回（大库上每次全库
-    /// walk 是秒级开销，不能挂在 /doc、/search 上）。
-    /// 外部改动的可见延迟上限 60s；UI 内写入直接走索引不经过这里，
-    /// 顶栏「同步」按钮（/sync）随时强制全量。
+    /// Notes/ 递归监听：任何事件置脏标记。监听失败只降级（回到周期兜底），不阻断开库。
+    fn spawn_watcher(
+        dir: std::path::PathBuf,
+        flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Option<notify::RecommendedWatcher> {
+        use notify::Watcher;
+        use std::sync::atomic::Ordering;
+        let mut watcher = notify::recommended_watcher(move |_res| {
+            flag.store(true, Ordering::Relaxed);
+        })
+        .ok()?;
+        watcher.watch(&dir, notify::RecursiveMode::Recursive).ok()?;
+        Some(watcher)
+    }
+
+    /// 读路径专用：按需同步。三档判定——
+    /// ① 监听没报脏且 60s 内同步过 → 直接返回（浏览热路径零开销，不 walk）；
+    /// ② 报脏（外部改动）→ 立即全库 walk，改动一次请求内可见；
+    /// ③ 兜底：即使监听漏报，每 10 分钟也强制走一遍。
+    /// UI 内写入直接更新索引不经过这里；顶栏「同步」（/sync）走 force 的 sync_all。
     pub fn sync_throttled(&mut self) -> Result<usize, SyncError> {
-        if let Some(t) = self.last_sync {
-            if t.elapsed() < std::time::Duration::from_secs(60) {
-                return Ok(0);
-            }
+        use std::sync::atomic::Ordering;
+        let dirty = self.dirty.load(Ordering::Relaxed);
+        let recent = self
+            .last_sync
+            .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(60));
+        if recent && !dirty {
+            return Ok(0);
+        }
+        let periodic = self
+            .last_sync
+            .map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(600));
+        if !dirty && !periodic {
+            return Ok(0);
         }
         let n = self.sync_all()?;
         self.last_sync = Some(std::time::Instant::now());
@@ -78,6 +112,12 @@ impl Kernel {
     /// 当前数据代数（memo 等上层缓存的失效依据）。
     pub fn data_epoch(&self) -> u64 {
         self.epoch
+    }
+
+    /// 标记「索引刚与磁盘对齐」：启动预热分批同步完成后调用，
+    /// 让读路径的 sync_throttled 进入零开销档。
+    pub fn mark_synced(&mut self) {
+        self.last_sync = Some(std::time::Instant::now());
     }
 
     /// 全库 path → (mtime, size) 快照（索引表直出，不碰文件）。
@@ -204,6 +244,8 @@ impl Kernel {
     /// 扫描 Notes/，把所有外部改动导入 op-log 并同步全文索引。
     /// 返回发生内容变化的文档数。已删除的文档自动从索引回收。
     pub fn sync_all(&mut self) -> Result<usize, SyncError> {
+        use std::sync::atomic::Ordering;
+        self.dirty.store(false, Ordering::Relaxed); // walk 前清脏；walk 中的新改动会重新置位
         let (n, _) = self.sync_limited(usize::MAX)?;
         if n > 0 {
             self.epoch += 1;
@@ -318,6 +360,7 @@ impl Kernel {
         }
         self.epoch += 1;
         self.last_sync = Some(std::time::Instant::now());
+        self.dirty.store(false, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 

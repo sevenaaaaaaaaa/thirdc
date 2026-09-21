@@ -30,8 +30,9 @@ pub struct AppState {
     pub hub: Arc<PresenceHub>,
     pub token: String,
     /// memo 模式的文档索引缓存：(构建时的数据代数, 文档列表)。
-    /// memo 模式的文档索引缓存：(构建时的数据代数, 文档列表)。
-    memo_cache: Arc<Mutex<Option<(u64, Arc<Vec<MemoDoc>>)> >>,
+    /// memo 模式的文档索引缓存：(构建时的数据代数, 序列化好的 JSON 响应体)。
+    /// 缓存字节而非结构体：1.2 万篇 3MB 的 JSON 不必每次请求重序列化。
+    memo_cache: Arc<Mutex<Option<(u64, axum::body::Bytes)>>>,
 }
 
 fn err(code: StatusCode, msg: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
@@ -61,7 +62,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v6';
+const SHELL = 'thirdc-shell-v7';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -621,17 +622,19 @@ async fn memo_docs(
         k.data_epoch()
     };
     let cached = st.memo_cache.lock().unwrap().clone();
-    let docs = match cached {
-        Some((e, d)) if e == epoch => d,
+    let body = match cached {
+        Some((e, b)) if e == epoch => b,
         _ => {
             let stats = st.kernel.lock().unwrap().doc_stats().unwrap_or_default();
             let root = st.kernel.lock().unwrap().vault.root.clone();
-            let built = Arc::new(memo_build_sync(&root, &stats));
+            let docs = memo_build_sync(&root, &stats);
+            let payload = json!({ "docs": docs, "total": docs.len() });
+            let built = axum::body::Bytes::from(serde_json::to_vec(&payload).unwrap_or_default());
             *st.memo_cache.lock().unwrap() = Some((epoch, built.clone()));
             built
         }
     };
-    Json(json!({ "docs": &*docs, "total": docs.len() })).into_response()
+    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 async fn health(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
@@ -899,6 +902,22 @@ pub async fn serve_listener(
     listener: tokio::net::TcpListener,
     state: Arc<AppState>,
 ) -> anyhow::Result<()> {
+    // 启动预热：后台分批全量同步（每批 2000 篇，批间释放内核锁），
+    // 把首次点开文档的冷同步挪到 daemon 起步时，用户登录后即是热路径。
+    let preheat = state.kernel.clone();
+    std::thread::spawn(move || {
+        let t0 = std::time::Instant::now();
+        loop {
+            let Ok(mut k) = preheat.lock() else { return };
+            let Ok((n, more)) = k.sync_limited(2000) else { return };
+            if !more {
+                k.mark_synced();
+                eprintln!("preheat: 索引就绪（{}ms，本批 {} 篇变更）", t0.elapsed().as_millis(), n);
+                return;
+            }
+            drop(k); // 批间放锁，UI 请求可插入
+        }
+    });
     axum::serve(listener, router(state)).await?;
     Ok(())
 }

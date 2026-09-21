@@ -256,10 +256,10 @@ html.desktop .lights{display:none}
 .conn-item .h{font-family:var(--font-mono);font-size:10px;color:var(--faint);word-break:break-all}
 .conn-result{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding:8px 10px;border-radius:10px;background:var(--hover);margin-top:6px;white-space:pre-wrap}
 /* ── 模式 ── */
-#mode-seg{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:3px;gap:2px}
-#mode-seg button{height:30px;padding:0 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .25s var(--ease-spring)}
-#mode-seg button:hover{color:var(--fg);background:var(--glass)}
-#mode-seg button.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+#mode-seg,#view-seg{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:3px;gap:2px}
+#mode-seg button,#view-seg button{height:30px;padding:0 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .25s var(--ease-spring)}
+#mode-seg button:hover,#view-seg button:hover{color:var(--fg);background:var(--glass)}
+#mode-seg button.on,#view-seg button.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
 body[data-mode="organize"] #dock{display:none}
 body[data-mode="learn"] #dock{display:none}
 body[data-mode="agent"] #dock .thread{max-height:72vh}
@@ -503,6 +503,11 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button data-mode="rag">RAG</button>
     <button data-mode="online">线上</button>
     <button data-mode="agent">Agent</button>
+  </nav>
+  <nav id="view-seg" title="视图（快捷键 1/2/3）">
+    <button data-view="canvas" class="on">画布</button>
+    <button data-view="timeline">时间线</button>
+    <button data-view="kanban">看板</button>
   </nav>
   <button id="board-pill" title="切换画布"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <nav class="tabs">
@@ -1138,15 +1143,21 @@ function showHint(){
   bar.querySelector('.x').onclick=()=>{localStorage.setItem('thirdc_hint_off','1');bar.innerHTML='';};
 }
 
-async function loadGraph(){
+async function loadGraph(force){
   showHint();
   setCanvasState('loading',{name:browsePath.split('/').pop()});
-  let b;
-  try{
-    b=await api('/browse?path='+encodeURIComponent(browsePath));
-  }catch(e){
-    setCanvasState('error',{msg:e.message});
-    return;
+  // 按路径缓存最近看过的文件夹（来回切换零请求）；force 绕过（刷新/保存后）
+  window.__browseCache=window.__browseCache||new Map();
+  let b=force?null:window.__browseCache.get(browsePath);
+  if(!b){
+    try{
+      b=await api('/browse?path='+encodeURIComponent(browsePath));
+    }catch(e){
+      setCanvasState('error',{msg:e.message});
+      return;
+    }
+    window.__browseCache.set(browsePath,b);
+    if(window.__browseCache.size>30)window.__browseCache.delete(window.__browseCache.keys().next().value);
   }
   currentBrowse=b;
   cacheSet('browse',{path:browsePath,data:b});
@@ -1232,7 +1243,10 @@ async function loadMeta(){
     $('sb-mode').textContent=(m.ai&&m.ai.configured?`AI ${m.ai.model}`:`命令模式 · ${(m.connections||[]).length} 连接`)+` · ${view==='canvas'?'画布':view==='timeline'?'时间线':'看板'}`;
   }catch{}
 }
-async function refreshAll(){await Promise.all([loadGraph(),loadRail(),loadStatus(),loadMeta()]);}
+async function refreshAll(){
+  window.__docsFetchedAt=0; // 全量刷新时绕过 /docs 时间缓存
+  await Promise.all([loadGraph(true),loadRail(),loadStatus(),loadMeta()]);
+}
 
 /* ───────── 侧栏树 ───────── */
 function tagColor(t){let h=0;for(const c of t)h=(h*31+c.codePointAt(0))%360;const dark=document.documentElement.dataset.theme==='dark';return `oklch(${dark?'72%':'52%'} .14 ${h})`}
@@ -1300,9 +1314,13 @@ function renderTreeFromTree(t){
 }
 /* 后台静默补全：拉全量文档标题/标签，更新侧栏与检索本地库 */
 async function loadDocsFull(){
+  // 2 分钟内已拉过全量列表就跳过（1.2 万篇 ~1.5MB，palette/检索够用）
+  const last=window.__docsFetchedAt||0;
+  if(Date.now()-last<120000&&window.__fullDocs)return;
   try{
     const r=await api('/docs');
     window.__fullDocs=r.docs;
+    window.__docsFetchedAt=Date.now();
     cacheSet('docs',r.docs);
     if(!($('rail-search').value||'').trim())renderTreeFromTree(cacheGet('tree')||{dirs:[]});
     $('rail-count').textContent=r.docs.length;
@@ -1429,7 +1447,9 @@ async function openDoc(path){
 async function saveDoc(){
   if(!current)return;
   try{await api('/doc?path='+encodeURIComponent(current),{method:'PUT',body:$('editor').value,headers:{'content-type':'text/markdown'}});
-    dirty=false;toast('已保存 '+current,'ok');await openDoc(current);await refreshAll();
+    dirty=false;toast('已保存 '+current,'ok');await openDoc(current);
+    // 内容保存不动树结构：只刷统计，不做全量 refreshAll（那会连拉 /tree+/browse+/docs）
+    loadStatus().catch(()=>{});
   }catch(e){toast('保存失败：'+e.message,'err');}
 }
 async function newDoc(){
@@ -1751,7 +1771,7 @@ $b('road-btn').onclick=()=>{renderRoad();openOverlay('road-ov');};
 /* ───────── 视图切换与多画布 ───────── */
 document.querySelectorAll('#view-seg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#view-seg button').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); view=b.dataset.view; renderGraph(); fit();
+  b.classList.add('on'); view=b.dataset.view; document.body.dataset.view=view; renderGraph(); fit();
   const hint={canvas:'画布：自由排布，拖节点定位',timeline:'时间线：按创建时间分组',kanban:'看板：按集合分栏，拖卡片跨栏即移动文件'}[view];
   toast(hint,'ok');
 });
