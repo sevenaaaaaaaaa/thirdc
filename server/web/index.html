@@ -498,6 +498,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button data-mode="studio" class="on">Studio</button>
     <button data-mode="organize">整理</button>
     <button data-mode="learn">学习</button>
+    <button data-mode="memo">Memo</button>
     <button data-mode="present">展示</button>
     <button data-mode="rag">RAG</button>
     <button data-mode="online">线上</button>
@@ -595,6 +596,29 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <div class="overlay" id="palette-ov"><div class="panel">
   <input class="palette-in" id="palette-in" placeholder="搜索文档，或输入命令：新建 / 发布 / 整理 / 同步 / 主题 / 路线">
   <div class="panel-body" id="palette-list"></div>
+</div></div>
+
+<div class="overlay" id="memo-ov"><div class="panel" style="width:min(940px,94vw);max-height:88vh;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+    <b style="font-family:var(--font-display);font-size:15px">Memo</b>
+    <span style="color:var(--faint);font-size:12px" id="memo-total"></span>
+    <input class="inp" id="memo-q" placeholder="搜标题 / 路径 / 标签…" style="margin-left:auto;width:230px;height:32px">
+    <button class="act" data-close="memo-ov">关闭</button>
+  </div>
+  <div style="padding:14px 16px 8px;overflow:auto;border-bottom:1px solid var(--border)">
+    <div id="memo-heat" style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,12px);gap:3px;width:max-content"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--faint);font-size:11px">
+      <span id="memo-heat-range"></span><span>少</span>
+      <i style="width:10px;height:10px;border-radius:3px;background:var(--hover)"></i>
+      <i style="width:10px;height:10px;border-radius:3px;background:var(--accent-soft)"></i>
+      <i style="width:10px;height:10px;border-radius:3px;background:color-mix(in oklab,var(--accent) 55%,transparent)"></i>
+      <i style="width:10px;height:10px;border-radius:3px;background:var(--accent)"></i>
+      <span>多</span>
+      <span id="memo-pick" style="color:var(--accent)"></span>
+    </div>
+    <div id="memo-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
+  </div>
+  <div id="memo-list" style="flex:1;overflow:auto;padding:6px 16px 16px"></div>
 </div></div>
 
 <div class="overlay" id="pub-ov"><div class="panel">
@@ -1399,7 +1423,7 @@ async function openDoc(path){
     $('editor').value=currentFormat==='html'?d.source:d.markdown;
     $('preview').srcdoc=d.html;
     buildToc(d.markdown);
-    $('drawer').classList.add('open');selectNode('doc:'+path);loadRail();
+    $('drawer').classList.add('open');selectNode('doc:'+path);
   }catch(e){toast('打开失败：'+e.message,'err');}
 }
 async function saveDoc(){
@@ -1538,6 +1562,21 @@ function typeInto(el,text){
   el.addEventListener('click',()=>{clearInterval(t);body.textContent=text;},{once:true});
 }
 let busy=false;
+/* 从回复文本中提取知识库路径，渲染为可点击的来源文档条 */
+function renderSources(ai,text){
+  const found=[...new Set((text||'').match(/Notes\/[^\s`)"'，。；！？、\[\]]+\.(?:md|html)/g)||[])].slice(0,8);
+  if(!found.length)return;
+  const row=document.createElement('div');row.className='steps';
+  row.innerHTML='<span class="stepchip" style="color:var(--faint)">来源</span>';
+  found.forEach(p=>{
+    const c=document.createElement('span');c.className='stepchip';
+    c.style.cursor='pointer';c.title=p;
+    c.textContent=p.split('/').pop();
+    c.onclick=()=>openDoc(p);
+    row.appendChild(c);
+  });
+  ai.appendChild(row);$('thread').scrollTop=1e9;
+}
 async function chat(message){
   const msg=(message??$('say').value).trim();if(!msg||busy)return;
   $('say').value='';busy=true;$('dock').classList.add('thinking');$('aura').classList.add('on');
@@ -1577,6 +1616,7 @@ async function chat(message){
           }else{
             body.innerHTML='';typeInto(ai,d.reply);
           }
+          renderSources(ai,d.reply);
         }else if(ev==='error'){
           chipFor('error','err');body.textContent='出错了：'+d.message;
         }
@@ -1960,14 +2000,47 @@ function renderPalette(q){
   const box=$('palette-list');box.innerHTML='';
   const ql=q.trim().toLowerCase();
   const cmds=CMDS.filter(c=>!ql||c[0].toLowerCase().includes(ql));
-  const docs=graph.nodes.filter(n=>n.kind!=='asset' && (!ql || ((n.title||'')+' '+n.path).toLowerCase().includes(ql))).slice(0,12);
+  // 全库文档索引（/docs 后台补全的 window.__fullDocs），不依赖当前画布的 graph.nodes
+  const pool=(window.__fullDocs&&window.__fullDocs.length)?window.__fullDocs:(cacheGet('docs')||[]);
+  const docs=pool.filter(d=>!ql||((d.title||'')+' '+d.path).toLowerCase().includes(ql)).slice(0,12);
+  const seen=new Set();
   cmds.forEach((c,i)=>{const el=document.createElement('div');el.className='prow'+(i===0?' on':'');
     el.innerHTML=`<span class="badge plan">命令</span><span class="t">${c[0]}</span><span class="h">${c[1]}</span>`;
     el.onclick=()=>{closeAll();c[2]();};box.appendChild(el);});
-  docs.forEach(d=>{const el=document.createElement('div');el.className='prow';
-    el.innerHTML=`<span class="badge ok">${d.kind==='capture'?'采集':'文档'}</span><span class="t">${d.title||d.path.split('/').pop()}</span><span class="h">${d.path}</span>`;
+  docs.forEach(d=>{seen.add(d.path);const el=document.createElement('div');el.className='prow';
+    el.innerHTML=`<span class="badge ok">文档</span><span class="t"></span><span class="h">${d.path}</span>`;
+    el.querySelector('.t').textContent=d.title||d.path.split('/').pop();
     el.onclick=()=>{closeAll();openDoc(d.path);};box.appendChild(el);});
+  // 全文命中（FTS5）：标题没中但内容里有的也补上
+  if(ql.length>=2){
+    api('/search?q='+encodeURIComponent(ql)).then(r=>{
+      const hits=(r.hits||[]).filter(x=>!seen.has(x.path)).slice(0,6);
+      if(!hits.length)return;
+      const lbl=document.createElement('div');
+      lbl.style.cssText='padding:6px 10px;color:var(--faint);font-size:11px';
+      lbl.textContent='全文命中';
+      box.appendChild(lbl);
+      hits.forEach(x=>{const el=document.createElement('div');el.className='prow';
+        el.innerHTML=`<span class="badge">FTS</span><span class="t"></span><span class="h">${x.path}</span>`;
+        el.querySelector('.t').textContent=x.path.split('/').pop();
+        el.onclick=()=>{closeAll();openDoc(x.path);};box.appendChild(el);});
+    }).catch(()=>{});
+  }
 }
+/* 侧栏过滤：有词 → 平铺过滤视图（标题/路径/标签）；清空 → 回到文件夹树 */
+let railT=null;
+$('rail-search').addEventListener('input',()=>{
+  clearTimeout(railT);
+  railT=setTimeout(()=>{
+    const q=($('rail-search').value||'').trim().toLowerCase();
+    if(q){
+      const docs=window.__fullDocs||cacheGet('docs')||[];
+      renderTree(docs);
+    }else{
+      renderTreeFromTree(cacheGet('tree')||{dirs:[]});
+    }
+  },160);
+});
 $b('open-palette').onclick=openPalette;
 $('palette-in').addEventListener('input',e=>renderPalette(e.target.value));
 $('palette-in').addEventListener('keydown',e=>{
@@ -2247,27 +2320,134 @@ $b('cal-prev').onclick=()=>{calM--;if(calM<0){calM=11;calY--}renderCalendar()};
 $b('cal-next').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderCalendar()};
 
 /* ───────── 模式框架 ───────── */
+/* 模式注册表：新模式的唯一入口。登记 { label, enter } 即生效；
+   #mode-seg 里加 <button data-mode="id"> 后，setMode 自动走这里分发。 */
+const MODES={
+  studio:{label:'Studio',enter(){ $('d-body').classList.remove('view'); }},
+  organize:{label:'整理',enter(){
+    document.querySelector('[data-view=kanban]')?.click();
+    toast('整理模式：空白拖拽圈选，批量移动/打标签/删除');
+  }},
+  learn:{label:'学习',enter(){
+    if(current){openDoc(current);}else{const d=graph.nodes.find(n=>n.kind!=='asset');if(d)openDoc(d.path);}
+    $('d-body').classList.add('view');
+    toast('学习模式：正文阅读，Esc 返回 Studio');
+  }},
+  memo:{label:'Memo',enter(){ openMemo(); }},
+  present:{label:'展示',enter(){ openPresent(); }},
+  rag:{label:'RAG',enter(){ openPalette(); }},
+  online:{label:'线上',enter(){ $('pub-btn').click(); }},
+  agent:{label:'Agent',enter(){ toast('Agent 模式：对话优先，画布退居背景'); }},
+};
 function setMode(m){
   mode=m;localStorage.setItem('thirdc_mode',m);
   document.body.dataset.mode=m;
   document.querySelectorAll('#mode-seg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
-  if(m==='organize'){
-    document.querySelector('[data-view=kanban]')?.click();
-    toast('整理模式：空白拖拽圈选，批量移动/打标签/删除');
-  }
-  if(m==='learn'){
-    if(current){openDoc(current);}else{const d=graph.nodes.find(n=>n.kind!=='asset');if(d)openDoc(d.path);}
-    $('d-body').classList.add('view');
-    toast('学习模式：正文阅读，Esc 返回 Studio');
-  }
-  if(m==='present'){openPresent();}
-  if(m==='rag'){openPalette();}
-  if(m==='online'){$('pub-btn').click();}
-  if(m==='agent'){toast('Agent 模式：对话优先，画布退居背景');}
-  if(m==='studio'){$('d-body').classList.remove('view');}
+  const def=MODES[m];
+  if(def&&def.enter)def.enter();
 }
 document.querySelectorAll('#mode-seg button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 setMode(localStorage.getItem('thirdc_mode')||'studio');
+
+/* ───────── Memo 模式：热力图 + 日期/标签快查 ───────── */
+let memoData=null;
+let memoFilter={date:null,tag:null,q:''};
+async function loadMemo(force){
+  if(memoData&&!force)return memoData;
+  const r=await api('/memo/docs');
+  memoData=r;return r;
+}
+function memoDate(ts){
+  const d=new Date(ts*1000);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+async function openMemo(){
+  openOverlay('memo-ov');
+  if(!memoData)$('memo-total').textContent='载入中…';
+  try{
+    const r=await loadMemo(!$('memo-total').textContent);
+    $('memo-total').textContent=`${r.total} 篇`;
+    renderMemoHeat();renderMemoTags();renderMemoList();
+  }catch(e){$('memo-total').textContent='';toast('Memo 载入失败：'+e.message,'err')}
+}
+function renderMemoHeat(){
+  const byDate={};
+  (memoData?.docs||[]).forEach(d=>{const k=memoDate(d.mtime);byDate[k]=(byDate[k]||0)+1;});
+  const heat=$('memo-heat');heat.innerHTML='';
+  const end=new Date();end.setHours(0,0,0,0);
+  const days=[];
+  for(let i=181;i>=0;i--){const d=new Date(end);d.setDate(end.getDate()-i);days.push(d);}
+  while(days.length%7)days.unshift(null); // 对齐网格
+  days.forEach(d=>{
+    const cell=document.createElement('i');
+    cell.style.cssText='width:12px;height:12px;border-radius:3px;background:var(--hover)';
+    if(d){
+      const k=memoDate(d.getTime()/1000);
+      const n=byDate[k]||0;
+      if(n>=20)cell.style.background='var(--accent)';
+      else if(n>=8)cell.style.background='color-mix(in oklab,var(--accent) 55%,transparent)';
+      else if(n>=3)cell.style.background='var(--accent-soft)';
+      if(n)cell.style.cursor='pointer';
+      cell.title=`${k} · ${n} 篇`;
+      if(memoFilter.date===k)cell.style.outline='2px solid var(--accent)';
+      cell.onclick=()=>{
+        memoFilter.date=memoFilter.date===k?null:k;memoFilter.tag=null;
+        $('memo-pick').textContent=memoFilter.date?('日期 '+memoFilter.date):'';
+        renderMemoHeat();renderMemoTags();renderMemoList();
+      };
+    }
+    heat.appendChild(cell);
+  });
+  $('memo-heat-range').textContent=`近 ${days.filter(Boolean).length} 天 · 点格子看当天`;
+}
+function renderMemoTags(){
+  const cnt={};
+  (memoData?.docs||[]).forEach(d=>(d.tags||[]).forEach(t=>{if(t.length<=24)cnt[t]=(cnt[t]||0)+1;}));
+  const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,40);
+  const box=$('memo-tags');box.innerHTML='';
+  if(!top.length){box.innerHTML='<span style="color:var(--faint);font-size:12px">暂无标签（frontmatter keywords/tags 或正文 #标签 可被识别）</span>';return;}
+  top.forEach(([t,n])=>{
+    const c=document.createElement('span');c.className='tagchip';c.style.background=tagColor(t);
+    c.style.cursor='pointer';c.textContent=`${t} ${n}`;
+    if(memoFilter.tag===t)c.style.outline='2px solid var(--accent)';
+    c.onclick=()=>{
+      memoFilter.tag=memoFilter.tag===t?null:t;memoFilter.date=null;
+      $('memo-pick').textContent=memoFilter.tag?('标签 '+memoFilter.tag):'';
+      renderMemoHeat();renderMemoTags();renderMemoList();
+    };
+    box.appendChild(c);
+  });
+}
+function renderMemoList(){
+  const {date,tag,q}=memoFilter;
+  const ql=(q||'').trim().toLowerCase();
+  let list=(memoData?.docs||[]);
+  if(date)list=list.filter(d=>memoDate(d.mtime)===date);
+  if(tag)list=list.filter(d=>(d.tags||[]).includes(tag));
+  if(ql)list=list.filter(d=>(d.title||'').toLowerCase().includes(ql)||d.path.toLowerCase().includes(ql)||(d.tags||[]).some(t=>t.toLowerCase().includes(ql)));
+  const total=list.length;
+  list=list.slice(0,200);
+  const box=$('memo-list');box.innerHTML='';
+  const head=document.createElement('div');
+  head.style.cssText='color:var(--faint);font-size:11.5px;padding:6px 2px';
+  head.textContent=`${total}${total>200?'+':''} 篇${date?' · '+date:''}${tag?' · #'+tag:''}${ql?' · “'+q+'”':''}`;
+  box.appendChild(head);
+  const frag=document.createDocumentFragment();
+  list.forEach(d=>{
+    const el=document.createElement('div');
+    el.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:10px;cursor:pointer';
+    el.onmouseenter=()=>el.style.background='var(--hover)';
+    el.onmouseleave=()=>el.style.background='';
+    const chips=(d.tags||[]).slice(0,3).map(t=>`<span class="tagchip" style="background:${tagColor(t)}">${t}</span>`).join('');
+    el.innerHTML=`<span style="font-size:13px"></span>${chips}<span style="margin-left:auto;color:var(--faint);font-size:11px;font-family:var(--font-mono)">${memoDate(d.mtime)}</span>`;
+    el.querySelector('span').textContent=d.title||d.path.split('/').pop();
+    el.title=d.path;
+    el.onclick=()=>{closeAll();openDoc(d.path);};
+    frag.appendChild(el);
+  });
+  box.appendChild(frag);
+}
+$('memo-q').addEventListener('input',e=>{memoFilter.q=e.target.value;renderMemoList();});
 
 /* ───────── 展示模式 ───────── */
 let pIdx=0;

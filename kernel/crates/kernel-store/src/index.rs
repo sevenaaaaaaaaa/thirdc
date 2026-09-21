@@ -299,6 +299,22 @@ impl Index {
         })? as usize)
     }
 
+    /// 按修改日期（本地时区）的文档数直方图，memo 热力图用。
+    pub fn date_histogram(&self) -> Result<Vec<(String, i64)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT strftime('%Y-%m-%d', mtime, 'unixepoch', 'localtime') AS d, COUNT(*) \
+             FROM docs WHERE mtime > 0 GROUP BY d ORDER BY d",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// 全文检索，按相关度（bm25）排序。返回 (相对路径, 相关度)。
     pub fn search(&self, query: &str) -> Result<Vec<(String, f64)>, StoreError> {
         let qlen = query.chars().count();

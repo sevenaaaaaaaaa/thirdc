@@ -36,6 +36,12 @@ pub struct Kernel {
     pub log: OpLog,
     index: Index,
     designs: DesignStore,
+    /// 上次全量同步时刻（读路径节流用：10s 内的重复 sync 直接跳过）。
+    last_sync: Option<std::time::Instant>,
+    /// 数据代数：任何内容变更（sync 命中 / 写 / 删）+1，供上层缓存失效。
+    epoch: u64,
+    /// 混合检索的 TF-IDF 语料缓存，键为 (文档数, 最大 mtime)。
+    hybrid_cache: Option<((usize, i64), rag::TfidfIndex)>,
 }
 
 impl Kernel {
@@ -48,7 +54,39 @@ impl Kernel {
             log: OpLog::new(),
             index,
             designs,
+            last_sync: None,
+            epoch: 0,
+            hybrid_cache: None,
         })
+    }
+
+    /// 读路径专用：节流同步。10s 内已同步过则直接返回（大库上
+    /// 每次 /doc、/search 都全量 walk 是不可承受的）。
+    /// 写入路径、手动「同步」按钮仍走 force 的 sync_all。
+    pub fn sync_throttled(&mut self) -> Result<usize, SyncError> {
+        if let Some(t) = self.last_sync {
+            if t.elapsed() < std::time::Duration::from_secs(10) {
+                return Ok(0);
+            }
+        }
+        let n = self.sync_all()?;
+        self.last_sync = Some(std::time::Instant::now());
+        Ok(n)
+    }
+
+    /// 当前数据代数（memo 等上层缓存的失效依据）。
+    pub fn data_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// 全库 path → (mtime, size) 快照（索引表直出，不碰文件）。
+    pub fn doc_stats(&self) -> Result<std::collections::HashMap<String, (i64, i64)>, StoreError> {
+        self.index.stat_map()
+    }
+
+    /// 按修改日期的文档数直方图（memo 热力图数据源）。
+    pub fn date_histogram(&self) -> Result<Vec<(String, i64)>, StoreError> {
+        self.index.date_histogram()
     }
 
     // ---------- 设计规范（一等知识对象） ----------
@@ -165,7 +203,11 @@ impl Kernel {
     /// 扫描 Notes/，把所有外部改动导入 op-log 并同步全文索引。
     /// 返回发生内容变化的文档数。已删除的文档自动从索引回收。
     pub fn sync_all(&mut self) -> Result<usize, SyncError> {
-        Ok(self.sync_limited(usize::MAX)?.0)
+        let (n, _) = self.sync_limited(usize::MAX)?;
+        if n > 0 {
+            self.epoch += 1;
+        }
+        Ok(n)
     }
 
     /// 分批同步：单次最多处理 `limit` 篇变更，返回 (changed, 是否还有剩余)。
@@ -273,6 +315,8 @@ impl Kernel {
                 .set_doc_assets(rel, &refs)
                 .map_err(SyncError::Store)?;
         }
+        self.epoch += 1;
+        self.last_sync = Some(std::time::Instant::now());
         Ok(())
     }
 
@@ -570,19 +614,29 @@ impl Kernel {
     }
 
     /// 混合检索：FTS5 + TF-IDF 向量 → RRF 合并。
-    pub fn search_hybrid(&self, query: &str, limit: usize) -> Result<Vec<(String, f64)>, SyncError> {
+    /// 语料按 (文档数, 最大 mtime) 缓存：库没变就不重建（1.2 万篇全量读一遍是秒级开销）。
+    pub fn search_hybrid(&mut self, query: &str, limit: usize) -> Result<Vec<(String, f64)>, SyncError> {
         let fts = self.search(query)?;
-        // 全库文本 → TF-IDF
-        let docs = list_docs(&self.vault).map_err(SyncError::Store)?;
-        let corpus: Vec<(String, String)> = docs.iter()
-            .filter_map(|p| {
-                let rel = p.to_str()?;
-                let text = fs::read_to_string(self.vault.root.join(p)).ok()?;
-                Some((rel.to_string(), text))
-            })
-            .collect();
-        let idx = rag::TfidfIndex::build(&corpus);
-        let vec_hits = idx.search(query, limit * 2);
+        let stats = self.index.stat_map().map_err(SyncError::Store)?;
+        let corpus_epoch = (stats.len(), stats.values().map(|(m, _)| *m).max().unwrap_or(0));
+        let stale = match &self.hybrid_cache {
+            Some((e, _)) => *e != corpus_epoch,
+            None => true,
+        };
+        if stale {
+            let corpus: Vec<(String, String)> = stats.iter()
+                .filter_map(|(rel, _)| {
+                    let text = fs::read_to_string(self.vault.root.join(rel)).ok()?;
+                    Some((rel.clone(), text))
+                })
+                .collect();
+            let idx = rag::TfidfIndex::build(&corpus);
+            self.hybrid_cache = Some((corpus_epoch, idx));
+        }
+        let vec_hits = {
+            let (_, idx) = self.hybrid_cache.as_ref().expect("hybrid cache just set");
+            idx.search(query, limit * 2)
+        };
         Ok(rag::rrf_merge(&fts, &vec_hits, limit))
     }
 

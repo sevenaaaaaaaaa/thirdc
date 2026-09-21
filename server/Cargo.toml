@@ -15,6 +15,7 @@ kernel-a2ui = { path = "../kernel/crates/kernel-a2ui" }
 kernel-deploy = { path = "../kernel/crates/kernel-deploy" }
 axum.workspace = true
 tokio.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 notify.workspace = true
 futures-util.workspace = true

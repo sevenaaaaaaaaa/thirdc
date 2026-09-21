@@ -29,6 +29,9 @@ pub struct AppState {
     pub mcp: Arc<thirdc_mcp::McpServer>,
     pub hub: Arc<PresenceHub>,
     pub token: String,
+    /// memo 模式的文档索引缓存：(构建时的数据代数, 文档列表)。
+    /// memo 模式的文档索引缓存：(构建时的数据代数, 文档列表)。
+    memo_cache: Arc<Mutex<Option<(u64, Arc<Vec<MemoDoc>>)> >>,
 }
 
 fn err(code: StatusCode, msg: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
@@ -58,7 +61,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v5';
+const SHELL = 'thirdc-shell-v6';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -111,6 +114,7 @@ self.addEventListener('fetch', e => {
         .route("/health", get(health))
         .route("/status", get(status))
         .route("/docs", get(list_docs_api))
+        .route("/memo/docs", get(memo_docs))
         .route("/graph", get(graph))
         .route("/browse", get(browse))
         .route("/tree", get(tree))
@@ -217,7 +221,7 @@ async fn graph(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespon
         return e.into_response();
     }
     let mut k = st.kernel.lock().unwrap();
-    if let Err(e) = k.sync_all() {
+    if let Err(e) = k.sync_throttled() {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     match build_graph(&mut k) {
@@ -450,7 +454,7 @@ async fn chat(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> imp
     let steps: Vec<Value> = outcome
         .steps
         .iter()
-        .map(|s| json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary }))
+        .map(|s| json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary, "args": s.args }))
         .collect();
     Json(json!({ "mode": outcome.mode, "reply": outcome.reply, "steps": steps })).into_response()
 }
@@ -475,6 +479,159 @@ async fn list_docs_api(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl In
         })
         .collect();
     Json(json!({ "docs": arr })).into_response()
+}
+
+/// memo 模式的文档索引行。
+#[derive(Clone, serde::Serialize)]
+struct MemoDoc {
+    path: String,
+    title: String,
+    tags: Vec<String>,
+    mtime: i64,
+}
+
+fn memo_push_tag(out: &mut Vec<String>, t: &str) {
+    let t = t.trim().trim_matches('"').trim_matches('\'')
+        .trim_start_matches(['#', '[', '('])
+        .trim_end_matches([',', '，', '、', ';', '；', ']', ')'])
+        .trim();
+    if t.is_empty() || t.chars().count() > 40 || t.contains(['[', ']', '(', ')']) {
+        return; // 括号残留说明是链接/引用文本，不是标签
+    }
+    if !out.iter().any(|x| x == t) {
+        out.push(t.to_string());
+    }
+}
+
+/// 从文件头部提取标签：frontmatter 的 keywords/tags（行内或列表式）+ 正文行内 #标签。
+/// 只读前 4KB —— 1.2 万篇全量读正文是秒级开销，头部覆盖绝大多数标签场景。
+fn extract_memo_tags(head: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_fm = false;
+    let mut fm_seen = 0usize;
+    let mut list_key: Option<String> = None;
+    for raw in head.lines() {
+        let line = raw.trim_end();
+        let t = line.trim();
+        if t == "---" {
+            fm_seen += 1;
+            if fm_seen >= 2 {
+                // frontmatter 结束，剩余部分只做行内 #标签 扫描
+                in_fm = false;
+                list_key = None;
+                continue;
+            }
+            in_fm = true;
+            continue;
+        }
+        if in_fm {
+            if let Some((k, v)) = t.split_once(':') {
+                let k = k.trim();
+                if k == "keywords" || k == "tags" || k == "keyword" || k == "tag" {
+                    list_key = if v.trim().is_empty() { Some(k.to_string()) } else { None };
+                    if !v.trim().is_empty() {
+                        // 行内写法：keywords: a, b 或 YAML 流式 [a, b] —— 按逗号切，不按空格
+                        let flow = v.trim().trim_start_matches('[').trim_end_matches(']');
+                        for part in flow.split([',', '，', '、', ';', '；']) {
+                            memo_push_tag(&mut out, part);
+                        }
+                    }
+                    continue;
+                }
+                if list_key.is_some() {
+                    list_key = None; // 下一个键，列表结束
+                }
+                continue;
+            }
+            if let Some(key) = &list_key {
+                if let Some(item) = t.strip_prefix("- ") {
+                    let _ = key;
+                    memo_push_tag(&mut out, item);
+                }
+            }
+            continue;
+        }
+        // 正文：行内 #标签。跳过 markdown 标题行（# 后带空格）；#后紧跟字母/数字才算。
+        let heading = t.starts_with('#')
+            && t[1..].starts_with(|c: char| c.is_whitespace() || t[1..].trim_start_matches('#').starts_with(' '));
+        if !heading {
+            for tok in t.split_whitespace() {
+                let mut cs = tok.chars();
+                if cs.next() != Some('#') {
+                    continue;
+                }
+                let rest = cs.as_str();
+                let mut rc = rest.chars();
+                let valid = match rc.next() {
+                    Some(c) if c.is_alphanumeric() => true,
+                    _ => false,
+                };
+                if !valid {
+                    continue; // `#`、`##`、`#!` 之类都不是标签
+                }
+                let core = rest.trim_end_matches(|c: char| ".,;!?，。；！？)）」\"'".contains(c));
+                if !core.is_empty() {
+                    memo_push_tag(&mut out, core);
+                }
+            }
+        }
+        if out.len() >= 12 {
+            break; // 头部足够了
+        }
+    }
+    out
+}
+
+/// 构建 memo 文档索引：路径/标题来自索引表，标签读每篇头部 4KB。
+fn memo_build_sync(root: &std::path::Path, stats: &HashMap<String, (i64, i64)>) -> Vec<MemoDoc> {
+    use std::io::Read;
+    let mut docs: Vec<MemoDoc> = Vec::with_capacity(stats.len());
+    for (p, (mt, _sz)) in stats {
+        if !p.starts_with("Notes/") || !(p.ends_with(".md") || p.ends_with(".html")) {
+            continue;
+        }
+        let mut buf = [0u8; 4096];
+        let n = std::fs::File::open(root.join(p))
+            .and_then(|mut f| f.read(&mut buf))
+            .unwrap_or(0);
+        let head = String::from_utf8_lossy(&buf[..n]);
+        let name = p.rsplit('/').next().unwrap_or(p);
+        docs.push(MemoDoc {
+            path: p.clone(),
+            title: title_from_filename(name),
+            tags: extract_memo_tags(&head),
+            mtime: *mt,
+        });
+    }
+    docs.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    docs
+}
+
+/// GET /memo/docs —— memo 模式数据源（按数据代数缓存；日期/标签筛选由前端做）。
+async fn memo_docs(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let epoch = {
+        let mut k = st.kernel.lock().unwrap();
+        let _ = k.sync_throttled();
+        k.data_epoch()
+    };
+    let cached = st.memo_cache.lock().unwrap().clone();
+    let docs = match cached {
+        Some((e, d)) if e == epoch => d,
+        _ => {
+            let stats = st.kernel.lock().unwrap().doc_stats().unwrap_or_default();
+            let root = st.kernel.lock().unwrap().vault.root.clone();
+            let built = Arc::new(memo_build_sync(&root, &stats));
+            *st.memo_cache.lock().unwrap() = Some((epoch, built.clone()));
+            built
+        }
+    };
+    Json(json!({ "docs": &*docs, "total": docs.len() })).into_response()
 }
 
 async fn health(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
@@ -517,26 +674,19 @@ async fn search_hybrid(
     }
     let query = q.get("q").cloned().unwrap_or_default();
     let mut k = st.kernel.lock().unwrap();
-    if let Err(e) = k.sync_all() {
+    if let Err(e) = k.sync_throttled() {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     let fts = k.search(&query).unwrap_or_default();
-    // 构建 TF-IDF 索引（每次搜索重建；缓存可后续优化）
-    let docs = kernel_core::list_docs(&k.vault).unwrap_or_default();
-    let corpus: Vec<(String, String)> = docs.iter()
-        .filter_map(|p| {
-            let rel = p.to_str()?;
-            let text = std::fs::read_to_string(k.vault.root.join(p)).ok()?;
-            Some((rel.to_string(), text))
-        })
-        .collect();
-    let idx = kernel_core::rag::TfidfIndex::build(&corpus);
-    let vec_hits = idx.search(&query, 20);
-    let merged = kernel_core::rag::rrf_merge(&fts, &vec_hits, 20);
+    // 混合检索走内核（语料按 epoch 缓存，库没变不重建）
+    let merged = match k.search_hybrid(&query, 20) {
+        Ok(m) => m,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
     let hits: Vec<Value> = merged.iter()
         .map(|(path, score)| json!({ "path": path, "score": score, "source": "rrf" }))
         .collect();
-    Json(json!({ "query": query, "hits": hits, "fts_count": fts.len(), "vec_count": vec_hits.len() })).into_response()
+    Json(json!({ "query": query, "hits": hits, "fts_count": fts.len(), "vec_count": merged.len() })).into_response()
 }
 
 async fn search(
@@ -549,7 +699,7 @@ async fn search(
     }
     let query = q.get("q").cloned().unwrap_or_default();
     let mut k = st.kernel.lock().unwrap();
-    if let Err(e) = k.sync_all() {
+    if let Err(e) = k.sync_throttled() {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     match k.search(&query) {
@@ -577,7 +727,7 @@ async fn get_doc(
         return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
     }
     let mut k = st.kernel.lock().unwrap();
-    if let Err(e) = k.sync_all() {
+    if let Err(e) = k.sync_throttled() {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     let html = k.render_doc_html_with_views(&path).ok();
@@ -734,6 +884,7 @@ pub fn build_state(vault: Vault) -> anyhow::Result<Arc<AppState>> {
         mcp,
         hub: Arc::new(PresenceHub::new()),
         token: machine.token,
+        memo_cache: Arc::new(Mutex::new(None)),
     }))
 }
 
@@ -1147,7 +1298,7 @@ async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
             _ => {
                 let out = thirdc_mcp::agent::command_mode(&server, &enriched);
                 for s in &out.steps {
-                    let _ = tx.send(ev("step", json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary })));
+                    let _ = tx.send(ev("step", json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary, "args": s.args })));
                 }
                 Ok(out)
             }

@@ -157,15 +157,22 @@ impl McpServer {
             .and_then(|v| v.as_u64())
             .unwrap_or(10) as usize;
         self.with_kernel(|k| {
-            k.sync_all()?;
+            k.sync_throttled()?;
             let hits = k.search(&query)?;
             let arr: Vec<Value> = hits
                 .into_iter()
                 .take(limit)
                 .map(|(path, rank)| json!({ "path": path, "rank": rank }))
                 .collect();
+            // 文本里直接列出路径：模型可引用，用户可见可跳转
+            let lines: String = arr
+                .iter()
+                .enumerate()
+                .map(|(i, h)| format!("{}. {}", i + 1, h["path"].as_str().unwrap_or("")))
+                .collect::<Vec<_>>()
+                .join("\n");
             Ok(tool_result(
-                format!("{} hit(s) for {:?}", arr.len(), query),
+                format!("{} hit(s) for {:?}\n{}", arr.len(), query, lines),
                 json!({ "query": query, "hits": arr }),
             ))
         })
@@ -176,12 +183,15 @@ impl McpServer {
             .ok_or((-32602, "missing 'query'".to_string()))?.to_string();
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
         self.with_kernel(|k| {
-            k.sync_all()?;
+            k.sync_throttled()?;
             let merged = k.search_hybrid(&query, limit)?;
             let arr: Vec<Value> = merged.iter()
                 .map(|(p, s)| json!({"path": p, "score": s})).collect();
+            let lines: String = arr.iter().enumerate()
+                .map(|(i, h)| format!("{}. {}", i + 1, h["path"].as_str().unwrap_or("")))
+                .collect::<Vec<_>>().join("\n");
             Ok(tool_result(
-                format!("混合检索 {} hit(s)", merged.len()),
+                format!("混合检索 {} hit(s)\n{}", merged.len(), lines),
                 json!({"query": query, "hits": arr}),
             ))
         })
