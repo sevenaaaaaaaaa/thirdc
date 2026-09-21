@@ -474,7 +474,7 @@ impl Kernel {
 
     /// 解析视图数据。source: here | folder:<path> | query:<词> | all
     pub fn resolve_view(&mut self, spec: &views::ViewSpec, current: Option<&str>) -> Result<Vec<views::ViewRow>, SyncError> {
-        self.sync_all()?;
+        self.sync_throttled()?;
         let mut rows: Vec<views::ViewRow> = Vec::new();
         let src = spec.source.trim();
         let root = self.vault.root.clone();
@@ -601,7 +601,7 @@ impl Kernel {
 
     /// 回忆：在 Agent 目录里做混合检索（TF-IDF 为主，规模小）。
     pub fn recall(&mut self, query: &str, limit: usize) -> Result<Vec<(String, f64, String)>, SyncError> {
-        self.sync_all()?;
+        self.sync_throttled()?;
         let dir = self.vault.root.join(memory::DIR);
         let mut corpus: Vec<(String, String)> = Vec::new();
         if dir.is_dir() {
@@ -668,11 +668,13 @@ impl Kernel {
             None => true,
         };
         if stale {
-            let corpus: Vec<(String, String)> = stats.iter()
-                .filter_map(|(rel, _)| {
-                    let text = fs::read_to_string(self.vault.root.join(rel)).ok()?;
-                    Some((rel.clone(), text))
-                })
+            // 语料从索引库（docs_fts）直读：单文件顺序读，比逐个打开文件快一个数量级
+            let corpus: Vec<(String, String)> = self
+                .index
+                .corpus()
+                .map_err(SyncError::Store)?
+                .into_iter()
+                .filter(|(rel, _)| rel.starts_with("Notes/") && (rel.ends_with(".md") || rel.ends_with(".html")))
                 .collect();
             let idx = rag::TfidfIndex::build(&corpus);
             self.hybrid_cache = Some((corpus_epoch, idx));

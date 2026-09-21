@@ -315,6 +315,21 @@ impl Index {
         Ok(out)
     }
 
+    /// 全库语料（路径, 全文）：直接读 FTS5 表里已索引的正文。
+    /// 单文件顺序读 + page cache 友好，比 12k 次文件打开快一个数量级；
+    /// 同步后索引即最新，语料不必再回源文件。
+    pub fn corpus(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let mut stmt = self.conn.prepare("SELECT path, content FROM docs_fts")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// 全文检索，按相关度（bm25）排序。返回 (相对路径, 相关度)。
     pub fn search(&self, query: &str) -> Result<Vec<(String, f64)>, StoreError> {
         let qlen = query.chars().count();

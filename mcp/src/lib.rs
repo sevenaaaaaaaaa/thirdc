@@ -230,7 +230,7 @@ impl McpServer {
 
     fn t_list_docs(&self, _args: Value) -> Result<Value, (i32, String)> {
         self.with_kernel(|k| {
-            k.sync_all()?;
+            k.sync_throttled()?;
             let docs = kernel_core::list_docs(&k.vault)?;
             let arr: Vec<Value> = docs
                 .iter()
@@ -261,7 +261,7 @@ impl McpServer {
             return Err((-32602, "path must be under Notes/".into()));
         }
         self.with_kernel(|k| {
-            k.sync_all()?;
+            k.sync_throttled()?;
             let model = k.get_doc(&path)?;
             let md = to_markdown(&model);
             let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
@@ -547,7 +547,7 @@ impl McpServer {
             return Err((-32602, "path must be under Notes/".into()));
         }
         self.with_kernel(|k| {
-            k.sync_all()?;
+            k.sync_throttled()?;
             let model = k.get_doc(&path)?;
             Ok(json!({
                 "contents": [
@@ -1104,6 +1104,8 @@ pub mod agent {
         pub mode: &'static str,
         pub reply: String,
         pub steps: Vec<Step>,
+        /// 模型用量（usage.total_tokens 累计；命令模式为 0）。
+        pub tokens: u64,
     }
 
     /// 命令模式：无需模型即可驱动（"搜索 X" / "列出" / "新建 X" / "采集 <连接>" / "同步"）。
@@ -1140,11 +1142,13 @@ pub mod agent {
                         mode: "command",
                         reply: format!("已创建 {path}"),
                         steps: vec![Step { tool: "write_doc".into(), args, ok: true, summary: crate::extract_tool_text(&v) }],
+                        tokens: 0,
                     },
                     Err(e) => Outcome {
                         mode: "command",
                         reply: format!("创建失败：{e}"),
                         steps: vec![Step { tool: "write_doc".into(), args, ok: false, summary: e }],
+                        tokens: 0,
                     },
                 };
             }
@@ -1152,7 +1156,7 @@ pub mod agent {
                 let (cfg, _) = {
                     let k = match server.kernel.lock() {
                         Ok(k) => k,
-                        Err(_) => return Outcome { mode: "command", reply: "内核锁异常".into(), steps: vec![] },
+                        Err(_) => return Outcome { mode: "command", reply: "内核锁异常".into(), steps: vec![], tokens: 0 },
                     };
                     let found = k
                         .vault
@@ -1177,6 +1181,7 @@ pub mod agent {
                             format!("指定要采集的连接：{}", names.join(" / "))
                         },
                         steps: vec![],
+                        tokens: 0,
                     };
                 };
                 let kernel_arc = server.kernel.clone();
@@ -1194,8 +1199,9 @@ pub mod agent {
                                 summary: rel.clone(),
                             })
                             .collect(),
+                        tokens: 0,
                     },
-                    Err(e) => Outcome { mode: "command", reply: format!("采集失败：{e}"), steps: vec![] },
+                    Err(e) => Outcome { mode: "command", reply: format!("采集失败：{e}"), steps: vec![], tokens: 0 },
                 };
             }
             _ => {}
@@ -1219,7 +1225,7 @@ pub mod agent {
                 format!("执行失败：{e}")
             }
         };
-        Outcome { mode: "command", reply, steps }
+        Outcome { mode: "command", reply, steps, tokens: 0 }
     }
 
     /// AI 模式：模型选择工具 → 执行 → 回灌结果，直到给出最终答复。
@@ -1250,6 +1256,7 @@ pub mod agent {
         let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
         let client = reqwest::Client::new();
         let mut steps = Vec::new();
+        let mut tokens = 0u64;
 
         for _ in 0..cfg.max_steps.max(1) {
             let mut req = client.post(&url).json(&json!({
@@ -1267,13 +1274,14 @@ pub mod agent {
             if !status.is_success() {
                 anyhow::bail!("模型接口返回 {status}: {}", body);
             }
+            tokens += body["usage"]["total_tokens"].as_u64().unwrap_or(0);
             let choice = body["choices"].get(0).cloned().unwrap_or(Value::Null);
             let msg = choice["message"].clone();
             let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
 
             if tool_calls.is_empty() {
                 let reply = msg["content"].as_str().unwrap_or("(模型没有返回内容)").to_string();
-                return Ok(Outcome { mode: "ai", reply, steps });
+                return Ok(Outcome { mode: "ai", reply, steps, tokens });
             }
 
             messages.push(msg.clone());
@@ -1301,6 +1309,7 @@ pub mod agent {
             mode: "ai",
             reply: "已达到工具调用步数上限，未得到最终答复。可细化问题后重试。".into(),
             steps,
+            tokens,
         })
     }
 }

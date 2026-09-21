@@ -62,7 +62,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v7';
+const SHELL = 'thirdc-shell-v8';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -446,6 +446,7 @@ async fn chat(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> imp
                     mode: "ai-error",
                     reply: format!("模型调用失败：{e}"),
                     steps: Vec::new(),
+                    tokens: 0,
                 },
             }
         }
@@ -905,6 +906,7 @@ pub async fn serve_listener(
     // 启动预热：后台分批全量同步（每批 2000 篇，批间释放内核锁），
     // 把首次点开文档的冷同步挪到 daemon 起步时，用户登录后即是热路径。
     let preheat = state.kernel.clone();
+    let preheat_state = state.clone();
     std::thread::spawn(move || {
         let t0 = std::time::Instant::now();
         loop {
@@ -913,6 +915,21 @@ pub async fn serve_listener(
             if !more {
                 k.mark_synced();
                 eprintln!("preheat: 索引就绪（{}ms，本批 {} 篇变更）", t0.elapsed().as_millis(), n);
+                // 暖混合检索语料缓存：否则重启后首次对话要在锁内现建 TF-IDF（20s+ 卡顿）
+                let hw = t0.elapsed();
+                match k.search_hybrid("预热", 1) {
+                    Ok(_) => eprintln!("preheat: 混合检索语料就绪（+{}ms）", (t0.elapsed() - hw).as_millis()),
+                    Err(e) => eprintln!("preheat: 语料预热失败：{e}"),
+                }
+                // 暖 memo 索引缓存：首次打开 Memo 面板免等 12k 文件头扫描
+                let hm = t0.elapsed();
+                let stats = k.doc_stats().unwrap_or_default();
+                let root = k.vault.root.clone();
+                let docs = memo_build_sync(&root, &stats);
+                let payload = json!({ "docs": docs, "total": docs.len() });
+                let built = axum::body::Bytes::from(serde_json::to_vec(&payload).unwrap_or_default());
+                *preheat_state.memo_cache.lock().unwrap() = Some((k.data_epoch(), built));
+                eprintln!("preheat: memo 索引就绪（+{}ms）", (t0.elapsed() - hm).as_millis());
                 return;
             }
             drop(k); // 批间放锁，UI 请求可插入
@@ -1282,6 +1299,7 @@ async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SseEvent>();
 
+    let chat_t0 = std::time::Instant::now();
     tokio::spawn(async move {
         // Agent 记忆 · 回忆：回答前先找相关记忆与历史
         let recalled = {
@@ -1338,11 +1356,15 @@ async fn chat_stream(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
                     "reply",
                     json!({ "mode": out.mode, "reply": out.reply }),
                 ));
-                let _ = tx.send(ev("done", json!({ "ok": true })));
+                let _ = tx.send(ev("done", json!({
+                    "ok": true,
+                    "tokens": out.tokens,
+                    "elapsed_ms": chat_t0.elapsed().as_millis() as u64,
+                })));
             }
             Err(e) => {
                 let _ = tx.send(ev("error", json!({ "message": e.to_string() })));
-                let _ = tx.send(ev("done", json!({ "ok": false })));
+                let _ = tx.send(ev("done", json!({ "ok": false, "elapsed_ms": chat_t0.elapsed().as_millis() as u64 })));
             }
         }
     });
