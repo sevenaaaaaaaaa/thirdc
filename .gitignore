@@ -8,3 +8,7 @@ InputFlow/
 
 # Tauri 生成物（每次 build 自动重建）
 desktop/gen/schemas/
+
+# 服务器知识库镜像（含 machine.toml 登录 token 与用户数据，禁止入库/推送）
+server-kb/
+.deploy-ssh/
