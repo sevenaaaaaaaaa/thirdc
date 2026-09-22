@@ -78,11 +78,86 @@
 |---|---|---|
 | P0 | 桌面壳 + 免登录 + 窗口拖动 + 设置面板 | ✅ 已完成（8395172） |
 | P1 | `desktop_mode` 门禁 + `/desktop/info` + 本机能力面板 + 任意目录导入 + 内部命令行 | 🚧 本轮 |
-| P2 | 转码队列（office/pdf/epub/ocr）+ Finder 拖拽 + 去重 | 下一轮 |
-| P3 | 本地嵌入（ONNX）+ 私密 agent 模式 + 本地模型探测 | 规划 |
-| P4 | 内嵌 PTY 终端 + 脚本任务 + 自动 Git 快照 + 系统集成 | 规划 |
+| P2 | 转码队列（**产出 OKF-DocModel**）+ 去重 + Finder 拖拽 | 下一轮 |
+| P3 | 去噪/隔离（严苛标准 + 可逆）+ 本地嵌入（ONNX） | 规划 |
+| P4 | 本地 agent 能力（分析/自动化/语音）+ 私密模式 | 规划 |
+| P5 | 内嵌 PTY 终端 + 脚本任务 + 系统集成（Git 只读，自动提交待定） | 规划 |
 
-## 5. 与线上版本的关系
+## 5. 转码：面向 agent 的 AI 原生表示（不是通用 MD）
+
+**前提**：docx/pdf/epub → Markdown 已经很成熟，第三方工具一堆。ThirdC 的转码价值不在「变成文字」，
+而在**变成 agent 能直接结构化使用的东西**。
+
+库内的 AI 原生表示是 `kernel-md::DocModel`（`Notes/` 下 md 与 html 并存，md 是它的确定性序列化）：
+
+```
+DocModel {
+  title: Option<String>,
+  blocks: Vec<Block>,                       // 有序语义块：标题/列表/代码/表格/图注/引用/脚注
+  meta:  BTreeMap<String,String>,           // OKF：机器可读元数据层
+  anchors: Vec<Option<String>>,             // 每块的稳定 ID（块引用 + CRDT 的根）
+}
+```
+
+因此转码流水线的目标产物 = **OKF-DocModel**，而不是一份扁平 md。四件通用 md 不会做的事：
+
+| 维度 | 通用 md 转换 | ThirdC AI 原生转码 |
+|---|---|---|
+| 结构 | 拍平成 `#`/`-` | 保留 Block 语义（表格仍是表格对象、图注绑定图、脚注成对） |
+| 溯源 | 无 | `meta` 写入 source_path / sha256 / mtime / extractor+版本 / 页码范围 |
+| 可引用 | 无 | 每块生成稳定 `anchors`，agent 可精确引用某块、CRDT 可合并 |
+| 可检索 | 纯文本 | 生成 outline + 摘要 + 实体/主题标签块，向量按块嵌入 |
+| 资产 | 丢图 | 图片落 `Assets/`，表格转结构化，公式转 LaTeX 块 |
+
+**元数据契约（`meta`，OKF）**：`source`、`source_sha256`、`source_mtime`、`extractor`、
+`extractor_ver`、`extracted_at`、`page_range`、`lang`、`confidence`。
+这套键同时是去重（sha256）与去噪（mtime/来源血缘）的地基。
+
+**实现分工**：抽取（重、可外挂）与结构化（轻、必自研）分离。
+- 抽取层：`pdftotext`/`pandoc`/`libreoffice --headless`/`tesseract` 等外部程序，或 Rust crate；产出「带版式的中间文本」。
+- 结构化层（ThirdC 内核）：中间文本 → DocModel（分块、语义识别、锚点、meta、资产抽取、outline/摘要）。
+
+## 6. 去重与去噪（最严苛标准，可逆）
+
+在「导入去重」之上加一层**主动清理**：用严苛标准找出**已经没用的文档**，默认只**隔离不删除**。
+
+**去重（幂等）**：双键 `source_sha256` + `source_path`；同来源同内容直接跳过；同内容异来源只留一份并记 alias。
+
+**去噪信号（命中≥阈值 → 进候选清单，逐条给出理由）**：
+- 空/近空：正文 token 低于最小值。
+- 样板：导航/页脚/cookie/目录页占比过高。
+- 精确重复：规范化内容 sha256 相同。
+- 近重复：shingle Jaccard / simhash 超阈值（保留信息量更高的一份）。
+- 孤儿 + 陈旧：零入链且长期未修改、未被任何视图/发布引用。
+- 被取代：同 `source_path` 血缘里有更新版本，旧版标记 superseded。
+- 低信息：高噪声/OCR 乱码（字符熵异常、词典命中率低）。
+
+**动作**：输出 `去噪报告`（路径 + 命中信号 + 建议），一键把候选移入 `.thirdc/quarantine/`（可还原），
+从索引中摘除。**绝不自动硬删**；默认只报告，用户确认才隔离。
+
+## 7. 客户端内部脚本与终端
+
+- 内嵌终端（xterm.js + PTY）：跑 `thirdc` 与白名单只读 shell，cwd=库根。
+- 脚本任务：`.thirdc/tasks/*.sh` 注册为可点按钮；agent 可调用（危险步骤需确认）。
+- Git：**待定**——取决于 ThirdC 是否定位为开发工具；暂只读（`status/log/diff`），不做自动提交。
+
+## 8. 本地模型的范围（收敛）
+
+本地模型**不做**面向用户的「本地大模型工具/模型广场」。只为 **agent 自身**的有限能力服务：
+
+| 用途 | 说明 |
+|---|---|
+| 分析 | 摘要、分类、实体/主题抽取、元数据补全、去噪判定 |
+| 自动化 | 根据库状态决定下一步动作、生成/执行脚本任务 |
+| 语音 | 本地 ASR（录音→文字，替代 Web Speech 的云端依赖） |
+
+形态：探测器发现本机 Ollama/llama.cpp/MLX → 作为**内部能力**注册（`/internal/agent/*`），
+不暴露模型选择器。敏感库可开 `privacy=local`，强制所有分析/自动化走本机、禁出网。
+嵌入优先本地 ONNX（`bge-small-zh`），RAG 全离线。
+
+**收益**：agent 的运行只依赖「小模型 + 本地嵌入 + 外部抽取器」，不背大模型推理的包袱，稳定且私密。
+
+## 9. 与线上版本的关系
 
 - 同一套内核（`kernel-*`），同一套前端（`server/web`），桌面只是**多了能力与门禁**。
 - 用户在桌面端建立的库，可直接 `git push` 到自己的远端，用线上 `kb.nownexts.com` 只读浏览/分享。
