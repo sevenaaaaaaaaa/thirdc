@@ -2879,6 +2879,90 @@ const pAllBtn=document.createElement('button');pAllBtn.className='act';pAllBtn.t
 pAllBtn.onclick=()=>window.open(`${BASE}/presentation?token=${encodeURIComponent(token)}`,'_blank');
 $('p-exit').parentNode.insertBefore(pAllBtn,$('p-exit'));
 
+/* Memo 流面板 */
+async function openMemoFeed(){
+  $('memo-feed').classList.add('open');
+  const box=$('mf-list');box.innerHTML='<div style="padding:14px;color:var(--faint);font-size:12px">加载中…</div>';
+  try{
+    const docs=(await api('/docs')).docs.filter(d=>d.path.startsWith('Notes/Memos/')).sort((a,b)=>b.path.localeCompare(a.path));
+    if(!docs.length){box.innerHTML='<div style="padding:14px;color:var(--faint);font-size:12px">还没有 Memo</div>';return}
+    box.innerHTML='';
+    for(const d of docs){
+      const card=document.createElement('div');card.className='memo-card';
+      try{
+        const md=await api('/doc?path='+encodeURIComponent(d.path));
+        const body=(md.markdown||'').replace(/^#.*\n/,'').trim();
+        card.innerHTML='<div class="d">'+d.path.split('/').pop().replace('.md','')+'</div><div class="c">'+(body.slice(0,200)||'(空)')+'</div>';
+        card.onclick=()=>openDoc(d.path);
+      }catch{card.innerHTML='<div class="d">'+d.path.split('/').pop()+'</div>'}
+      box.appendChild(card);
+    }
+  }catch(e){box.innerHTML='<div style="padding:14px;color:var(--danger);font-size:12px">'+e.message+'</div>'}
+}
+let mediaRec=null,speechRec=null,audioChunks=[],isRecording=false;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+async function toggleRecording(){
+  if(isRecording){stopRecording();return}
+  isRecording=true;
+  const b=$('memo-rec');if(b){b.classList.add('rec-on');b.title='停止录音'}
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    mediaRec=new MediaRecorder(stream);audioChunks=[];
+    mediaRec.ondataavailable=e=>audioChunks.push(e.data);
+    mediaRec.start();
+  }catch(e){toast('麦克风权限被拒绝','err');stopRecording();return}
+  if(SR){
+    speechRec=new SR();speechRec.lang='zh-CN';speechRec.continuous=true;speechRec.interimResults=true;
+    speechRec.onresult=e=>{
+      let fin='';
+      for(let i=e.resultIndex;i<e.results.length;i++)fin+=e.results[i][0].transcript;
+      $('memo-input').value=fin;
+    };
+    speechRec.start();
+  }
+  toast('录音中…说完点停止','ok');
+}
+function stopRecording(){
+  isRecording=false;
+  const b=$('memo-rec');if(b){b.classList.remove('rec-on');b.title='语音记录'}
+  if(speechRec){try{speechRec.stop()}catch{}speechRec=null}
+  const text=$('memo-input')?$('memo-input').value.trim():'';
+  if(text)sendMemoText(text);
+  if(mediaRec&&mediaRec.state!=='inactive'){
+    mediaRec.onstop=async()=>{
+      const blob=new Blob(audioChunks,{type:'audio/webm'});
+      if(blob.size<1000)return;
+      const buf=new Uint8Array(await blob.arrayBuffer());
+      const r=await api('/asset?name='+encodeURIComponent('memo-'+Date.now()+'.webm'),{method:'POST',body:buf,headers:{'content-type':'application/octet-stream'}});
+      const now=new Date();
+      const date=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+      const path='Notes/Memos/'+date+'.md';
+      try{
+        let ex='';try{const d=await api('/doc?path='+encodeURIComponent(path));ex=d.markdown||''}catch{}
+        if(!ex)ex='# '+date+' Memo\n';
+        ex+='\n> 录音链接：'+r.path+'\n';
+        await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:ex,headers:{'content-type':'text/markdown'}});
+      }catch{}
+      toast('录音已保存','ok');await refreshAll();
+    };
+    mediaRec.stop();
+  }
+}
+async function sendMemoText(text){
+  if(!text||!text.trim())return;
+  const now=new Date();
+  const date=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  const time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const path='Notes/Memos/'+date+'.md';
+  try{
+    let ex='';try{const d=await api('/doc?path='+encodeURIComponent(path));ex=d.markdown||''}catch{}
+    if(!ex)ex='# '+date+' Memo\n';
+    ex+='\n- '+time+' '+text;
+    await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:ex,headers:{'content-type':'text/markdown'}});
+    await refreshAll();
+  }catch(e){}
+}
+
 /* ───────── 启动 ───────── */
 
 /* ───────── 登录门禁 ───────── */
