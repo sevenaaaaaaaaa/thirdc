@@ -767,16 +767,21 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 </div>
 
 <div id="settings-ov" style="position:fixed;inset:0;z-index:200;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
-<div style="width:min(420px,92vw);padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
+<div style="width:min(460px,92vw);max-height:88vh;overflow:auto;padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:14px">设置</div>
   <div style="margin-bottom:16px">
     <div style="font-size:12px;color:var(--faint);margin-bottom:6px">账号</div>
     <button class="act" id="set-logout" style="border-color:var(--danger);color:var(--danger);width:100%">退出登录</button>
   </div>
-  <div style="margin-bottom:16px">
-    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">导入 Obsidian 库</div>
-    <input class="inp" id="set-vault-path" placeholder="Obsidian 库路径（如 ~/Knowledge/Obsidian）" style="margin-bottom:6px">
-    <button class="act" id="set-import" style="width:100%;border-style:dashed">导入到当前库</button>
+  <div id="desk-block" style="display:none;margin-bottom:16px">
+    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">本机能力</div>
+    <div id="desk-info" style="font-size:12.5px;line-height:1.8;color:var(--muted);margin-bottom:8px"></div>
+    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">导入本机目录（md/txt/html 复制入库）</div>
+    <input class="inp" id="set-vault-path" placeholder="绝对路径（如 /Users/你/Documents）" style="margin-bottom:6px">
+    <div style="display:flex;gap:6px">
+      <button class="act" id="set-import" style="flex:1;border-style:dashed">导入目录</button>
+      <button class="act" id="set-term" style="flex:1">终端</button>
+    </div>
   </div>
   <div style="margin-bottom:16px">
     <div style="font-size:12px;color:var(--faint);margin-bottom:6px">远程同步</div>
@@ -784,6 +789,14 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button class="act" id="set-push" style="margin-top:6px;width:100%">推送</button>
   </div>
   <button class="act" onclick="document.getElementById('settings-ov').style.display='none'" style="margin-top:10px;width:100%">关闭</button>
+</div></div>
+<div id="term-ov" style="position:fixed;inset:0;z-index:210;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
+<div style="width:min(680px,94vw);padding:20px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
+  <div style="font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:4px">终端</div>
+  <div style="font-size:12px;color:var(--faint);margin-bottom:10px">thirdc 命令需路径参数时用 <b>.</b>（工作目录已设为库根）<br>白名单：thirdc 子命令 · ls/cat/grep/rg/find/head/tail/wc/tree/du/file/stat · git status|log|diff|branch</div>
+  <input class="inp" id="term-in" placeholder="thirdc status" style="font-family:var(--font-mono)" autocomplete="off">
+  <pre id="term-out" style="margin:10px 0 0;padding:12px;border-radius:12px;background:oklch(50% 0 0/.08);border:1px solid var(--border);font-family:var(--font-mono);font-size:12.5px;white-space:pre-wrap;max-height:48vh;overflow:auto;min-height:80px"></pre>
+  <button class="act" onclick="document.getElementById('term-ov').style.display='none'" style="margin-top:10px;width:100%">关闭</button>
 </div></div>
 <div id="toast"></div>
 
@@ -2985,9 +2998,23 @@ async function sendMemoText(text){
 }
 
 /* 设置面板 */
-$('settings-btn').addEventListener('click',()=>{
+$('settings-btn').addEventListener('click',()=>{openSettings()});
+async function openSettings(){
   document.getElementById('settings-ov').style.display='grid';
-});
+  try{
+    const info=await api('/desktop/info');
+    document.getElementById('desk-block').style.display='block';
+    const m=info.machine, v=info.vault, c=info.capabilities;
+    const lm=c.local_model||{};
+    document.getElementById('desk-info').innerHTML=
+      `CPU ${m.cores} 核 · 内存 ${m.memory_gb}GB<br>`+
+      `库 ${v.files} 篇 · ${(v.bytes/1048576).toFixed(1)}MB<br>`+
+      `本地模型 ${lm.available?'✓ '+lm.kind+'（'+lm.endpoint+'）':'未检测到'} · `+
+      `转码 ${c.transcode?'✓':'待开发'}`;
+    if(!document.getElementById('set-vault-path').value)
+      document.getElementById('set-vault-path').value=v.root;
+  }catch(e){toast('读取本机能力失败：'+e.message,'err')}
+}
 $('set-logout').addEventListener('click',()=>{
   localStorage.removeItem('thirdc_token');
   localStorage.removeItem('thirdc_user');
@@ -2999,16 +3026,34 @@ $('set-import').addEventListener('click',async()=>{
   const b=document.getElementById('set-import');
   b.textContent='导入中…';b.disabled=true;
   try{
-    const r=await api('/ingest/obsidian',{method:'POST',json:{path}});
-    toast('已导入 '+r.copied+' 篇','ok');
+    const r=await api('/desktop/import',{method:'POST',json:{path,mode:'copy'}});
+    toast(`导入 ${r.copied} 篇${r.pending_transcode?`，${r.pending_transcode} 篇待转码`:''}`+(r.skipped?`（跳过 ${r.skipped}）`:''),'ok');
   }catch(e){toast('导入失败：'+e.message,'err')}
-  b.textContent='导入到当前库';b.disabled=false;
+  b.textContent='导入目录';b.disabled=false;
+});
+$('set-term').addEventListener('click',()=>{
+  document.getElementById('settings-ov').style.display='none';
+  document.getElementById('term-ov').style.display='grid';
+  document.getElementById('term-in').focus();
+});
+$('term-in').addEventListener('keydown',async e=>{
+  if(e.key!=='Enter')return;
+  const cmd=e.target.value.trim();if(!cmd)return;
+  const out=document.getElementById('term-out');
+  out.textContent+=(out.textContent?'\n':'')+'$ '+cmd+'\n…';
+  try{
+    const r=await api('/desktop/terminal',{method:'POST',json:{cmd}});
+    const body=(r.stdout||'')+(r.stderr?('\n[stderr] '+r.stderr):'');
+    out.textContent=out.textContent.replace(/…$/,'')+(body||'(无输出)')+'\n[exit '+r.code+']';
+  }catch(err){out.textContent=out.textContent.replace(/…$/,'')+'[错误] '+err.message}
+  out.scrollTop=out.scrollHeight;
+  e.target.value='';
 });
 $('set-push').addEventListener('click',async()=>{
   const url=document.getElementById('set-remote').value.trim();
   if(!url){toast('请填远程地址','err');return}
   toast('推送中…');
-  try{const r=await api('/backup',{method:'POST',json:{password:'default-backup',webdav_url:url}});
+  try{await api('/backup',{method:'POST',json:{password:'default-backup',webdav_url:url}});
     toast('已推送','ok');
   }catch(e){toast('推送失败：'+e.message,'err')}
 });

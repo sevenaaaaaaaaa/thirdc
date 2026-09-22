@@ -132,6 +132,8 @@ ol{{margin:0;padding-left:20px;color:var(--muted)}} li{{margin:6px 0}}
 }
 
 fn main() {
+    // 告诉内核：这是桌面壳，开启 /desktop/* 独占端点。
+    std::env::set_var("THIRDC_DESKTOP", "1");
     let vault_path = std::env::var_os("THIRDC_VAULT")
         .map(PathBuf::from)
         .unwrap_or_else(default_vault);

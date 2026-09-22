@@ -33,6 +33,8 @@ pub struct AppState {
     /// memo 模式的文档索引缓存：(构建时的数据代数, 序列化好的 JSON 响应体)。
     /// 缓存字节而非结构体：1.2 万篇 3MB 的 JSON 不必每次请求重序列化。
     memo_cache: Arc<Mutex<Option<(u64, axum::body::Bytes)>>>,
+    /// 是否由桌面壳启动（THIRDC_DESKTOP=1）：控制 /desktop/* 独占端点的可用性。
+    pub desktop: bool,
 }
 
 fn err(code: StatusCode, msg: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
@@ -136,6 +138,9 @@ self.addEventListener('fetch', e => {
         .route("/ingest/topic", post(ingest_topic))
         .route("/ingest/web", post(ingest_web))
         .route("/ingest/file", post(ingest_file))
+        .route("/desktop/info", get(desktop_info))
+        .route("/desktop/import", post(desktop_import))
+        .route("/desktop/terminal", post(desktop_terminal))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -889,6 +894,7 @@ pub fn build_state(vault: Vault) -> anyhow::Result<Arc<AppState>> {
         hub: Arc::new(PresenceHub::new()),
         token: machine.token,
         memo_cache: Arc::new(Mutex::new(None)),
+        desktop: std::env::var("THIRDC_DESKTOP").map(|v| v == "1").unwrap_or(false),
     }))
 }
 
@@ -3046,38 +3052,142 @@ async fn tree(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespons
     .into_response()
 }
 
-/// 从 Obsidian 库导入（设置面板用，与 CLI import-obsidian 等价）。
-async fn ingest_obsidian(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
-    if let Err(e) = check_token(&st, &h) {
-        return e.into_response();
+
+// ───────────────────────── 桌面端独占能力（/desktop/*） ─────────────────────────
+// 仅当 THIRDC_DESKTOP=1（桌面壳启动）时可用；线上部署返回 404。
+
+fn desktop_guard(st: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    if st.desktop {
+        Ok(())
+    } else {
+        Err(err(StatusCode::NOT_FOUND, "not found"))
     }
+}
+
+/// 探测本机是否有可用的本地模型服务（Ollama / LM Studio）。
+fn probe_local_model() -> Value {
+    let probe = |host: &str, port: u16| {
+        std::net::TcpStream::connect_timeout(
+            &format!("{host}:{port}").parse().unwrap(),
+            std::time::Duration::from_millis(120),
+        )
+        .is_ok()
+    };
+    if probe("127.0.0.1", 11434) {
+        json!({"available": true, "kind": "ollama", "endpoint": "http://127.0.0.1:11434"})
+    } else if probe("127.0.0.1", 1234) {
+        json!({"available": true, "kind": "lmstudio", "endpoint": "http://127.0.0.1:1234"})
+    } else {
+        json!({"available": false})
+    }
+}
+
+/// 本机硬件与库概况：让前端知道能开多重的后台任务。
+async fn desktop_info(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let mem_gb = total_memory_gb();
+    let counts = count_vault_files(&root);
+    Json(json!({
+        "desktop": true,
+        "machine": { "cores": cores, "memory_gb": mem_gb },
+        "vault": { "root": root.display().to_string(), "files": counts.0, "bytes": counts.1 },
+        "capabilities": {
+            "local_import": true,
+            "terminal": true,
+            "transcode": false,
+            "local_model": probe_local_model(),
+            "local_embedding": false,
+        }
+    })).into_response()
+}
+
+fn total_memory_gb() -> f64 {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("sysctl").arg("-n").arg("hw.memsize").output() {
+            if let Ok(s) = String::from_utf8(out.stdout) {
+                if let Ok(bytes) = s.trim().parse::<u64>() {
+                    return (bytes as f64 / 1e9 * 10.0).round() / 10.0;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
+            for line in s.lines() {
+                if let Some(rest) = line.strip_prefix("MemTotal:") {
+                    if let Some(kb) = rest.split_whitespace().next().and_then(|x| x.parse::<u64>().ok()) {
+                        return (kb as f64 / 1e6 * 10.0).round() / 10.0;
+                    }
+                }
+            }
+        }
+    }
+    0.0
+}
+
+/// 统计库内文件数与总字节（跳过 .git/.thirdc 等）。
+fn count_vault_files(root: &std::path::Path) -> (usize, u64) {
+    let mut n = 0usize;
+    let mut bytes = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') { continue; }
+            if p.is_dir() { stack.push(p); continue; }
+            n += 1;
+            bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    (n, bytes)
+}
+
+/// 导入本机目录到库：md/txt/html 复制进 Notes/Imported/，其余格式仅计入待转码。
+/// body: { path: "/abs/dir", mode: "copy"|"index" }
+async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
     let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
     let path = req.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
-    if path.is_empty() || !path.starts_with('/') {
-        return err(StatusCode::BAD_REQUEST, "需要绝对路径").into_response();
-    }
-    let src = std::path::Path::new(&path);
-    if !src.is_dir() {
-        return err(StatusCode::NOT_FOUND, format!("路径不存在：{path}")).into_response();
+    if !path.starts_with('/') || !std::path::Path::new(&path).is_dir() {
+        return err(StatusCode::BAD_REQUEST, format!("路径无效或不存在：{path}")).into_response();
     }
     let root = { st.kernel.lock().unwrap().vault.root.clone() };
-    let notes = root.join("Notes");
+    let dest_root = root.join("Notes").join("Imported");
+    let src = std::path::Path::new(&path);
     let mut copied = 0usize;
+    let mut skipped = 0usize;
+    let mut pending = 0usize;
     let mut stack = vec![src.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
         for e in rd.filter_map(|e| e.ok()) {
             let p = e.path();
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || name == ".obsidian" || name == ".git" || name == ".trash" { continue; }
+            if name.starts_with('.') || name == "node_modules" || name == "target" { continue; }
             if p.is_dir() { stack.push(p); continue; }
             let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
-            if ext == "md" || ext == "html" {
-                let rel_dir = p.parent().unwrap().strip_prefix(src).unwrap_or(std::path::Path::new(""));
-                let dest_dir = notes.join(rel_dir);
-                let _ = std::fs::create_dir_all(&dest_dir);
-                let dest = dest_dir.join(&name);
-                if !dest.exists() && std::fs::copy(&p, &dest).is_ok() { copied += 1; }
+            let rel = p.parent().unwrap().strip_prefix(src).unwrap_or(std::path::Path::new(""));
+            match ext.as_str() {
+                "md" | "markdown" | "txt" | "html" => {
+                    let dest = dest_root.join(rel);
+                    let _ = std::fs::create_dir_all(&dest);
+                    let target = dest.join(&name);
+                    if target.exists() {
+                        skipped += 1;
+                    } else if std::fs::copy(&p, &target).is_ok() {
+                        copied += 1;
+                    }
+                }
+                "docx" | "pptx" | "xlsx" | "pdf" | "epub" | "rtf" => pending += 1,
+                _ => skipped += 1,
             }
         }
     }
@@ -3085,6 +3195,74 @@ async fn ingest_obsidian(State(st): State<Arc<AppState>>, h: HeaderMap, body: By
         let mut k = st.kernel.lock().unwrap();
         let _ = k.sync_all();
     }
-    audit_log(&root.join(".thirdc"), "import-obsidian", &json!({"path": path, "copied": copied}));
-    Json(json!({ "copied": copied })).into_response()
+    audit_log(&root.join(".thirdc"), "desktop-import", &json!({"path": path, "copied": copied, "pending": pending}));
+    Json(json!({"copied": copied, "skipped": skipped, "pending_transcode": pending})).into_response()
+}
+
+/// 客户端内部命令行：白名单只读命令 + thirdc 子命令，cwd 固定为库根。
+/// body: { cmd: "thirdc status" }
+async fn desktop_terminal(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let cmd = req.get("cmd").and_then(|c| c.as_str()).unwrap_or("").trim().to_string();
+    if cmd.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "命令为空").into_response();
+    }
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let prog = parts[0];
+    let allowed = if prog == "thirdc" {
+        true
+    } else if matches!(prog, "ls" | "cat" | "grep" | "rg" | "find" | "head" | "tail" | "wc" | "tree" | "du" | "file" | "stat") {
+        true
+    } else if prog == "git" {
+        matches!(parts.get(1).copied(), Some("status") | Some("log") | Some("diff") | Some("branch"))
+    } else {
+        false
+    };
+    if !allowed {
+        return err(StatusCode::FORBIDDEN, format!("命令不在白名单：{prog}")).into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    // 解析可执行文件：`thirdc` 子命令用 THIRDC_CLI > 自身(若就是 CLI) > 同级 thirdc > PATH。
+    let bin: std::path::PathBuf = if prog == "thirdc" {
+        match std::env::var("THIRDC_CLI") {
+            Ok(p) if !p.is_empty() => std::path::PathBuf::from(p),
+            _ => {
+                let exe = std::env::current_exe().ok();
+                let is_cli = exe
+                    .as_ref()
+                    .and_then(|e| e.file_stem())
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with("thirdc") && s != "thirdc-desktop")
+                    .unwrap_or(false);
+                if is_cli {
+                    exe.unwrap()
+                } else {
+                    exe.and_then(|e| e.parent().map(|d| d.join("thirdc")))
+                        .filter(|p| p.is_file())
+                        .unwrap_or_else(|| std::path::PathBuf::from("thirdc"))
+                }
+            }
+        }
+    } else {
+        std::path::PathBuf::from(prog)
+    };
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        tokio::process::Command::new(&bin).args(&parts[1..]).current_dir(&root).output(),
+    )
+    .await;
+    match out {
+        Ok(Ok(o)) => {
+            let cap = |b: &[u8]| String::from_utf8_lossy(&b[..b.len().min(64_000)]).into_owned();
+            Json(json!({
+                "code": o.status.code().unwrap_or(-1),
+                "stdout": cap(&o.stdout),
+                "stderr": cap(&o.stderr),
+            })).into_response()
+        }
+        Ok(Err(e)) => err(StatusCode::BAD_GATEWAY, format!("执行失败：{e}")).into_response(),
+        Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "执行超时（20s）").into_response(),
+    }
 }
