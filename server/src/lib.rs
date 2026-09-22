@@ -22,6 +22,7 @@ use axum::{Json, Router};
 use kernel_core::{Kernel, Vault};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
 pub struct AppState {
@@ -141,6 +142,8 @@ self.addEventListener('fetch', e => {
         .route("/desktop/info", get(desktop_info))
         .route("/desktop/import", post(desktop_import))
         .route("/desktop/terminal", post(desktop_terminal))
+        .route("/desktop/scan", get(desktop_scan))
+        .route("/desktop/quarantine", post(desktop_quarantine))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -3149,8 +3152,100 @@ fn count_vault_files(root: &std::path::Path) -> (usize, u64) {
     (n, bytes)
 }
 
-/// 导入本机目录到库：md/txt/html 复制进 Notes/Imported/，其余格式仅计入待转码。
-/// body: { path: "/abs/dir", mode: "copy"|"index" }
+// ── 转码工具（抽取层可插拔 + 溯源 + 去重）─────────────────────────────
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
+fn now_iso() -> String {
+    // 仅用于记录，不追求时区精确；用 UNIX 秒即可。
+    now_secs().to_string()
+}
+
+/// 读取导入溯源索引（sha256 → 记录）。
+fn read_import_index(root: &std::path::Path) -> serde_json::Map<String, Value> {
+    std::fs::read_to_string(root.join(".thirdc").join("import-index.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn write_import_index(root: &std::path::Path, map: &serde_json::Map<String, Value>) {
+    let dir = root.join(".thirdc");
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(s) = serde_json::to_string_pretty(&Value::Object(map.clone())) {
+        let _ = std::fs::write(dir.join("import-index.json"), s);
+    }
+}
+
+/// 外部抽取器（可插拔）：返回 (文本, 抽取器名)。没有可用工具时 None。
+/// macOS 自带 textutil；pdf 需 poppler 的 pdftotext；图片 OCR 需 tesseract。
+fn extract_text(path: &std::path::Path) -> Option<(String, String)> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    let run = |prog: &str, args: &[&str]| -> Option<String> {
+        std::process::Command::new(prog)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .filter(|t| !t.trim().is_empty())
+    };
+    let p = path.to_str()?;
+    match ext.as_str() {
+        "docx" | "doc" | "rtf" | "odt" | "wordml" | "html" | "htm" | "webarchive" => {
+            run("textutil", &["-convert", "txt", "-stdout", p]).map(|t| (t, "textutil".into()))
+        }
+        "pdf" => run("pdftotext", &["-layout", p, "-"]).map(|t| (t, "pdftotext".into())),
+        "png" | "jpg" | "jpeg" | "tiff" | "webp" => {
+            run("tesseract", &[p, "stdout", "-l", "chi_sim+eng"]).map(|t| (t, "tesseract".into()))
+        }
+        _ => None,
+    }
+}
+
+/// 纯文本 → 结构化 md：空行分段，短行且无结尾标点视为标题。
+fn plain_to_md(text: &str) -> String {
+    let mut out = String::new();
+    let paras: Vec<&str> = if text.contains("\n\n") {
+        text.split("\n\n").collect()
+    } else {
+        text.lines().collect()
+    };
+    for para in paras {
+        let t = para.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let nlines = t.lines().count();
+        let chars = t.chars().count();
+        let heading = nlines == 1
+            && chars <= 40
+            && !t.ends_with(['。', '．', '.', '！', '!', '？', '?', '：', ':', '；', ';', '，', ',']);
+        if heading {
+            out.push_str("## ");
+        }
+        out.push_str(&t.split_whitespace().collect::<Vec<_>>().join(" "));
+        out.push_str("\n\n");
+    }
+    out
+}
+
+/// 带 OKF 溯源 frontmatter 的文档。
+fn with_provenance(body_md: &str, src: &str, sha: &str, mtime: u64, extractor: &str) -> String {
+    format!(
+        "---\nsource: {src}\nsource_sha256: {sha}\nsource_mtime: {mtime}\nextractor: {extractor}\nextracted_at: {at}\n---\n\n{body_md}",
+        at = now_iso()
+    )
+}
+
+/// 导入本机目录到库：md/txt/html 直接入库；office/pdf/图片经抽取器转 md 入库；
+/// 其余格式计入待转码。用 sha256 去重并记录溯源。
+/// body: { path: "/abs/dir" }
 async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) { return e.into_response(); }
     if let Err(e) = desktop_guard(&st) { return e.into_response(); }
@@ -3162,9 +3257,10 @@ async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
     let root = { st.kernel.lock().unwrap().vault.root.clone() };
     let dest_root = root.join("Notes").join("Imported");
     let src = std::path::Path::new(&path);
-    let mut copied = 0usize;
-    let mut skipped = 0usize;
-    let mut pending = 0usize;
+    let mut index = read_import_index(&root);
+
+    let (mut copied, mut dup, mut extracted, mut pending, mut skipped) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut extraction = std::collections::BTreeMap::<String, usize>::new();
     let mut stack = vec![src.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
@@ -3175,28 +3271,251 @@ async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
             if p.is_dir() { stack.push(p); continue; }
             let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
             let rel = p.parent().unwrap().strip_prefix(src).unwrap_or(std::path::Path::new(""));
-            match ext.as_str() {
-                "md" | "markdown" | "txt" | "html" => {
-                    let dest = dest_root.join(rel);
-                    let _ = std::fs::create_dir_all(&dest);
-                    let target = dest.join(&name);
+            let Ok(bytes) = std::fs::read(&p) else { skipped += 1; continue };
+            let sha = sha256_hex(&bytes);
+            if index.contains_key(&sha) {
+                dup += 1;
+                continue; // 同内容已导入过（去重）
+            }
+            let mtime = std::fs::metadata(&p).ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs()).unwrap_or(0);
+
+            // 得到 (正文 md, 抽取器, 目标扩展名)
+            let got: Option<(String, String, &str)> = match ext.as_str() {
+                "md" | "markdown" => Some((String::from_utf8_lossy(&bytes).into_owned(), "native".into(), "md")),
+                "txt" => Some((plain_to_md(&String::from_utf8_lossy(&bytes)), "native".into(), "md")),
+                "html" | "htm" => match extract_text(&p) {
+                    Some((t, x)) => Some((plain_to_md(&t), x, "md")),
+                    None => Some((String::from_utf8_lossy(&bytes).into_owned(), "native".into(), "html")),
+                },
+                _ => extract_text(&p).map(|(t, x)| (plain_to_md(&t), x, "md")),
+            };
+            match got {
+                Some((body, extractor, outext)) => {
+                    let dest_dir = dest_root.join(rel);
+                    let _ = std::fs::create_dir_all(&dest_dir);
+                    let stem = p.file_stem().and_then(|x| x.to_str()).unwrap_or("doc");
+                    let target = dest_dir.join(format!("{stem}.{outext}"));
                     if target.exists() {
-                        skipped += 1;
-                    } else if std::fs::copy(&p, &target).is_ok() {
+                        dup += 1;
+                        continue;
+                    }
+                    let content = if outext == "md" {
+                        with_provenance(&body, &p.display().to_string(), &sha, mtime, &extractor)
+                    } else {
+                        body
+                    };
+                    if std::fs::write(&target, content).is_ok() {
                         copied += 1;
+                        if extractor != "native" {
+                            extracted += 1;
+                            *extraction.entry(extractor.clone()).or_insert(0) += 1;
+                        }
+                        let rel_out = target.strip_prefix(&root).unwrap_or(&target).display().to_string();
+                        index.insert(sha.clone(), json!({
+                            "source": p.display().to_string(),
+                            "dest": rel_out,
+                            "mtime": mtime,
+                            "extractor": extractor,
+                            "imported_at": now_iso(),
+                        }));
                     }
                 }
-                "docx" | "pptx" | "xlsx" | "pdf" | "epub" | "rtf" => pending += 1,
-                _ => skipped += 1,
+                None => {
+                    if matches!(ext.as_str(), "docx"|"pptx"|"xlsx"|"pdf"|"epub"|"rtf"|"odt"|"doc") {
+                        pending += 1;
+                    } else {
+                        skipped += 1;
+                    }
+                }
             }
         }
     }
+    write_import_index(&root, &index);
     if copied > 0 {
         let mut k = st.kernel.lock().unwrap();
         let _ = k.sync_all();
     }
-    audit_log(&root.join(".thirdc"), "desktop-import", &json!({"path": path, "copied": copied, "pending": pending}));
-    Json(json!({"copied": copied, "skipped": skipped, "pending_transcode": pending})).into_response()
+    audit_log(&root.join(".thirdc"), "desktop-import", &json!({
+        "path": path, "copied": copied, "dup": dup, "extracted": extracted, "pending": pending
+    }));
+    Json(json!({
+        "copied": copied, "dup": dup, "extracted": extracted,
+        "pending_transcode": pending, "skipped": skipped,
+        "by_extractor": extraction,
+    })).into_response()
+}
+
+// ── 去噪扫描（严苛标准，只报告/隔离，不删除）──────────────────────────
+
+fn normalize_for_hash(text: &str) -> String {
+    let mut s = text;
+    if let Some(rest) = s.strip_prefix("---") {
+        if let Some(i) = rest.find("\n---") {
+            s = &rest[i + 4..];
+        }
+    }
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+fn simhash64(tokens: &[&str]) -> u64 {
+    let mut v = [0i32; 64];
+    for t in tokens {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(t, &mut hasher);
+        let hv = std::hash::Hasher::finish(&hasher);
+        for (i, slot) in v.iter_mut().enumerate() {
+            if (hv >> i) & 1 == 1 { *slot += 1 } else { *slot -= 1 }
+        }
+    }
+    let mut out = 0u64;
+    for (i, val) in v.iter().enumerate() {
+        if *val > 0 { out |= 1u64 << i }
+    }
+    out
+}
+
+/// 扫描库内文档，给出「可能已无用」的候选清单（含命中的信号与理由）。
+async fn desktop_scan(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let notes = root.join("Notes");
+    let cutoff = now_secs().saturating_sub(180 * 86400);
+
+    #[derive(Clone)]
+    struct Rec { path: String, sha: String, sim: u64, ntok: usize, nchar: usize, uniq: usize, mtime: u64, stem: String }
+    let mut recs: Vec<Rec> = Vec::new();
+    let mut stack = vec![notes.clone()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            if p.is_dir() { if p.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(false) { continue; } stack.push(p); continue; }
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            if ext != "md" && ext != "txt" { continue; }
+            let Ok(raw) = std::fs::read_to_string(&p) else { continue };
+            let norm = normalize_for_hash(&raw);
+            let toks: Vec<&str> = norm.split_whitespace().collect();
+            let mut uniq = std::collections::HashSet::new();
+            for t in &toks { uniq.insert(*t); }
+            let mtime = std::fs::metadata(&p).ok().and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+            recs.push(Rec {
+                path: p.strip_prefix(&root).unwrap_or(&p).display().to_string(),
+                sha: sha256_hex(norm.as_bytes()),
+                sim: simhash64(&toks),
+                ntok: toks.len(),
+                nchar: norm.chars().count(),
+                uniq: uniq.len(),
+                mtime,
+                stem: p.file_stem().and_then(|x| x.to_str()).unwrap_or("").to_lowercase(),
+            });
+        }
+    }
+
+    // 引用图：谁被 [[stem]] 引用
+    let mut referenced = std::collections::HashSet::<String>::new();
+    for r in &recs {
+        // 从归一化文本找 [[...]]
+        let Ok(raw) = std::fs::read_to_string(root.join(&r.path)) else { continue };
+        let mut rest = raw.as_str();
+        while let Some(i) = rest.find("[[") {
+            let after = &rest[i + 2..];
+            let Some(j) = after.find("]]") else { break };
+            referenced.insert(after[..j].split('|').next().unwrap_or("").trim().to_lowercase());
+            rest = &after[j + 2..];
+        }
+    }
+
+    let mut items: Vec<Value> = Vec::new();
+    let mut seen_sha = std::collections::HashMap::<String, String>::new();
+    for (i, r) in recs.iter().enumerate() {
+        let mut sig: Vec<&str> = Vec::new();
+        if r.nchar < 40 { sig.push("empty"); }
+        else if r.ntok >= 20 && (r.uniq as f64 / r.ntok as f64) < 0.35 { sig.push("low-info"); }
+        if let Some(prev) = seen_sha.get(&r.sha) {
+            if prev.as_str() != r.path { sig.push("exact-dup"); }
+        } else {
+            seen_sha.insert(r.sha.clone(), r.path.clone());
+        }
+        // 近重复（限规模，避免 O(n²) 过大）
+        if recs.len() <= 3000 && r.ntok >= 20 {
+            for o in recs.iter().skip(i + 1) {
+                if o.ntok < 20 { continue; }
+                if (r.sim ^ o.sim).count_ones() <= 3 {
+                    sig.push("near-dup");
+                    break;
+                }
+            }
+        }
+        if r.mtime > 0 && r.mtime < cutoff && !referenced.contains(&r.stem) {
+            sig.push("orphan-stale");
+        }
+        // 被同族更新的版本取代
+        for o in &recs {
+            if o.path != r.path && o.stem == r.stem && o.mtime > r.mtime {
+                sig.push("superseded");
+                break;
+            }
+        }
+        if !sig.is_empty() {
+            items.push(json!({
+                "path": r.path, "signals": sig, "chars": r.nchar, "tokens": r.ntok,
+                "mtime": r.mtime, "size": "—"
+            }));
+        }
+    }
+    // 严重度：信号越多越严重；exact-dup/empty 加权
+    let sev = |sigs: &[Value]| -> i32 {
+        sigs.iter().filter_map(|s| s.as_str()).map(|s| match s {
+            "exact-dup" | "empty" => 3,
+            "near-dup" | "superseded" => 2,
+            "low-info" | "orphan-stale" => 1,
+            _ => 0,
+        }).sum()
+    };
+    items.sort_by_key(|it| -sev(it.get("signals").and_then(|s| s.as_array()).map(|a| a.as_slice()).unwrap_or(&[])));
+    let candidates = items.len();
+    Json(json!({
+        "scanned": recs.len(),
+        "candidates": candidates,
+        "items": items,
+    })).into_response()
+}
+
+/// 把文档移入隔离区（可逆，不删除）。body: { paths: ["Notes/x.md", ...] }
+async fn desktop_quarantine(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let paths: Vec<String> = req.get("paths").and_then(|p| p.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let qdir = root.join(".thirdc").join("quarantine");
+    let mut moved: Vec<String> = Vec::new();
+    for rel in &paths {
+        if !rel.starts_with("Notes/") || rel.contains("..") {
+            continue;
+        }
+        let from = root.join(rel);
+        if !from.is_file() { continue; }
+        let to = qdir.join(rel);
+        if let Some(parent) = to.parent() { let _ = std::fs::create_dir_all(parent); }
+        if std::fs::rename(&from, &to).is_ok() || std::fs::copy(&from, &to).is_ok() {
+            let _ = std::fs::remove_file(&from);
+            moved.push(rel.clone());
+        }
+    }
+    if !moved.is_empty() {
+        let mut k = st.kernel.lock().unwrap();
+        let _ = k.sync_all();
+    }
+    audit_log(&root.join(".thirdc"), "desktop-quarantine", &json!({"moved": moved}));
+    Json(json!({"moved": moved, "quarantine": ".thirdc/quarantine/"})).into_response()
 }
 
 /// 客户端内部命令行：白名单只读命令 + thirdc 子命令，cwd 固定为库根。

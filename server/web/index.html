@@ -782,6 +782,11 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
       <button class="act" id="set-import" style="flex:1;border-style:dashed">导入目录</button>
       <button class="act" id="set-term" style="flex:1">终端</button>
     </div>
+    <button class="act" id="set-scan" style="width:100%;margin-top:6px">扫描无用文档</button>
+    <div id="set-scan-out" style="display:none;margin-top:8px;font-size:12.5px;line-height:1.7;color:var(--muted)">
+      <div id="set-scan-list" style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px"></div>
+      <button class="act" id="set-quarantine" style="width:100%;border-color:var(--danger);color:var(--danger)">隔离以上候选（移入 .thirdc/quarantine，可还原）</button>
+    </div>
   </div>
   <div style="margin-bottom:16px">
     <div style="font-size:12px;color:var(--faint);margin-bottom:6px">远程同步</div>
@@ -3030,6 +3035,32 @@ $('set-import').addEventListener('click',async()=>{
     toast(`导入 ${r.copied} 篇${r.pending_transcode?`，${r.pending_transcode} 篇待转码`:''}`+(r.skipped?`（跳过 ${r.skipped}）`:''),'ok');
   }catch(e){toast('导入失败：'+e.message,'err')}
   b.textContent='导入目录';b.disabled=false;
+});
+let SCAN_ITEMS=[];
+$('set-scan').addEventListener('click',async()=>{
+  const b=$('set-scan'); b.textContent='扫描中…'; b.disabled=true;
+  try{
+    const r=await api('/desktop/scan');
+    SCAN_ITEMS=(r.items||[]).map(i=>i.path);
+    const box=$('set-scan-out'), list=$('set-scan-list');
+    box.style.display='block';
+    if(!SCAN_ITEMS.length){list.innerHTML='<span style="color:var(--ok)">没有发现无用文档 ✓</span>';$('set-quarantine').style.display='none';}
+    else{
+      $('set-quarantine').style.display='block';
+      list.innerHTML=`共扫描 ${r.scanned} 篇，${r.candidates} 篇候选：<br>`+r.items.map(i=>
+        `· ${i.path} <span style="color:var(--faint)">[${(i.signals||[]).join(', ')}]</span>`).join('<br>');
+    }
+  }catch(e){toast('扫描失败：'+e.message,'err')}
+  b.textContent='扫描无用文档'; b.disabled=false;
+});
+$('set-quarantine').addEventListener('click',async()=>{
+  if(!SCAN_ITEMS.length)return;
+  if(!confirm(`确认隔离 ${SCAN_ITEMS.length} 篇？文件会移入 .thirdc/quarantine，可手动还原。`))return;
+  try{
+    const r=await api('/desktop/quarantine',{method:'POST',json:{paths:SCAN_ITEMS}});
+    toast(`已隔离 ${r.moved.length} 篇 → ${r.quarantine}`,'ok');
+    $('set-scan-out').style.display='none';
+  }catch(e){toast('隔离失败：'+e.message,'err')}
 });
 $('set-term').addEventListener('click',()=>{
   document.getElementById('settings-ov').style.display='none';
