@@ -22,6 +22,7 @@ use axum::{Json, Router};
 use kernel_core::{Kernel, Vault};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
@@ -144,6 +145,7 @@ self.addEventListener('fetch', e => {
         .route("/desktop/terminal", post(desktop_terminal))
         .route("/desktop/scan", get(desktop_scan))
         .route("/desktop/quarantine", post(desktop_quarantine))
+        .route("/desktop/pull", post(desktop_pull))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -3584,4 +3586,97 @@ async fn desktop_terminal(State(st): State<Arc<AppState>>, h: HeaderMap, body: B
         Ok(Err(e)) => err(StatusCode::BAD_GATEWAY, format!("执行失败：{e}")).into_response(),
         Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "执行超时（20s）").into_response(),
     }
+}
+
+/// 登录远端账号后，把远端知识库拉到本地库（幂等：内容相同跳过）。
+/// body: { server: "https://kb.nownexts.com", token: "<远端 token>" }
+async fn desktop_pull(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let server = req.get("server").and_then(|v| v.as_str()).unwrap_or("").trim_end_matches('/').to_string();
+    let mut rtoken = req.get("token").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if !server.starts_with("http") {
+        return err(StatusCode::BAD_REQUEST, "服务器地址需以 http(s):// 开头").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    // ⓪ 没有 token 时用账号密码在本机侧登录（避免浏览器跨域）
+    if rtoken.is_empty() {
+        let user = req.get("user").and_then(|v| v.as_str()).unwrap_or("");
+        let pass = req.get("pass").and_then(|v| v.as_str()).unwrap_or("");
+        if user.is_empty() || pass.is_empty() {
+            return err(StatusCode::BAD_REQUEST, "需要账号密码或 token").into_response();
+        }
+        let resp = client.post(format!("{server}/auth/login"))
+            .json(&json!({"username": user, "password": pass})).send().await;
+        let j: Value = match resp {
+            Ok(r) => match r.json().await {
+                Ok(v) => v,
+                Err(e) => return err(StatusCode::BAD_GATEWAY, format!("解析登录响应失败：{e}")).into_response(),
+            },
+            Err(e) => return err(StatusCode::BAD_GATEWAY, format!("连接登录接口失败：{e}")).into_response(),
+        };
+        match j.get("token").and_then(|t| t.as_str()) {
+            Some(t) if !t.is_empty() => rtoken = t.to_string(),
+            _ => {
+                let msg = j.get("error").and_then(|e| e.as_str()).unwrap_or("账号或密码错误");
+                return err(StatusCode::UNAUTHORIZED, format!("登录失败：{msg}")).into_response();
+            }
+        }
+    }
+    // ① 拉文档列表
+    let list = match client.get(format!("{server}/docs")).bearer_auth(&rtoken).send().await {
+        Ok(r) => match r.error_for_status() { Ok(r) => r, Err(e) => return err(StatusCode::BAD_GATEWAY, format!("远端拒绝：{e}")).into_response() },
+        Err(e) => return err(StatusCode::BAD_GATEWAY, format!("连接失败：{e}")).into_response(),
+    };
+    let data: Value = match list.json().await {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_GATEWAY, format!("解析列表失败：{e}")).into_response(),
+    };
+    let docs: Vec<String> = data.get("docs").and_then(|d| d.as_array())
+        .map(|a| a.iter().filter_map(|d| d.get("path").and_then(|p| p.as_str()).map(String::from)).collect())
+        .unwrap_or_default();
+    let total = docs.len();
+    let cap = total.min(20000);
+    // ② 并发拉正文并写入本地（内容相同则跳过）
+    let results: Vec<(bool, bool)> = futures_util::stream::iter(
+        docs.into_iter().take(cap).map(|path| {
+            let client = client.clone();
+            let root = root.clone();
+            let server = server.clone();
+            let rtoken = rtoken.clone();
+            async move {
+                if !path.starts_with("Notes/") { return (false, false); }
+                let resp = client.get(format!("{server}/doc"))
+                    .query(&[("path", path.as_str())])
+                    .bearer_auth(&rtoken).send().await;
+                let Ok(resp) = resp else { return (false, true) };
+                let Ok(j) = resp.json::<Value>().await else { return (false, true) };
+                let src = j.get("source").and_then(|s| s.as_str()).unwrap_or("");
+                if src.is_empty() { return (false, true); }
+                let dest = root.join(&path);
+                if let Ok(existing) = std::fs::read_to_string(&dest) {
+                    if existing == src { return (false, false); }
+                }
+                if let Some(parent) = dest.parent() { let _ = std::fs::create_dir_all(parent); }
+                match std::fs::write(&dest, src) { Ok(_) => (true, false), Err(_) => (false, true) }
+            }
+        }),
+    ).buffer_unordered(8).collect().await;
+    let pulled = results.iter().filter(|(p, _)| *p).count();
+    let failed = results.iter().filter(|(_, f)| *f).count();
+    let skipped = cap.saturating_sub(pulled + failed);
+    if pulled > 0 {
+        let mut k = st.kernel.lock().unwrap();
+        let _ = k.sync_all();
+    }
+    audit_log(&root.join(".thirdc"), "desktop-pull", &json!({"server": server, "pulled": pulled}));
+    Json(json!({
+        "pulled": pulled, "skipped": skipped, "failed": failed,
+        "total": total, "truncated": total > cap,
+    })).into_response()
 }

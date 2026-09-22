@@ -771,7 +771,11 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:14px">设置</div>
   <div style="margin-bottom:16px">
     <div style="font-size:12px;color:var(--faint);margin-bottom:6px">账号</div>
-    <button class="act" id="set-logout" style="border-color:var(--danger);color:var(--danger);width:100%">退出登录</button>
+    <div id="set-acct-info" style="font-size:12.5px;line-height:1.8;color:var(--muted);margin-bottom:6px"></div>
+    <div style="display:flex;gap:6px">
+      <button class="act" id="set-login" style="flex:1;background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">登录 / 同步账号</button>
+      <button class="act" id="set-logout" style="flex:1;border-color:var(--danger);color:var(--danger)">退出登录</button>
+    </div>
   </div>
   <div id="desk-block" style="display:none;margin-bottom:16px">
     <div style="font-size:12px;color:var(--faint);margin-bottom:6px">本机能力</div>
@@ -794,6 +798,17 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button class="act" id="set-push" style="margin-top:6px;width:100%">推送</button>
   </div>
   <button class="act" onclick="document.getElementById('settings-ov').style.display='none'" style="margin-top:10px;width:100%">关闭</button>
+</div></div>
+<div id="acct-ov" style="position:fixed;inset:0;z-index:215;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
+<div style="width:min(400px,92vw);padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
+  <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">登录 / 同步账号</div>
+  <div style="color:var(--faint);font-size:12px;margin-bottom:14px">登录后把远端知识库拉到本地（内容相同自动跳过，不覆盖本地改动以外的部分请谨慎）</div>
+  <input class="inp" id="acct-server" placeholder="服务器地址" value="https://kb.nownexts.com" style="margin-bottom:6px">
+  <input class="inp" id="acct-user" placeholder="用户名" autocomplete="username" style="margin-bottom:6px">
+  <input class="inp" id="acct-pass" type="password" placeholder="密码" autocomplete="current-password" style="margin-bottom:10px">
+  <button class="act" id="acct-go" style="width:100%;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">登录并拉取到本地</button>
+  <div id="acct-msg" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;text-align:center"></div>
+  <button class="act" onclick="document.getElementById('acct-ov').style.display='none'" style="width:100%;margin-top:8px">关闭</button>
 </div></div>
 <div id="term-ov" style="position:fixed;inset:0;z-index:210;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
 <div style="width:min(680px,94vw);padding:20px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
@@ -1208,11 +1223,14 @@ function setCanvasState(kind,info={}){
   if(kind==='loading'){
     el.innerHTML=`<div class="spinner"></div><h3>正在打开 ${info.name||browsePath}</h3><p>加载子文件夹与高频文档…</p>`;
   }else if(kind==='empty'){
-    el.innerHTML=`<h3>这个文件夹是空的</h3><p>${browsePath}<br>没有子文件夹，也没有文档。</p>
+    const atRoot=(browsePath==='Notes'||!browsePath);
+    el.innerHTML=`<h3>${atRoot?'空库，三个起点':'这个文件夹是空的'}</h3>
+      <p>${browsePath}<br>${atRoot?'建一篇、导入本机目录，或登录账号把远端知识库拉到本地。':'没有子文件夹，也没有文档。'}</p>
       <div class="row">
         <button class="act" data-a="new">＋ 新建文档</button>
-        <button class="act" data-a="topic">⚡ 采集主题</button>
-        <button class="act" data-a="up">↑ 返回上层</button>
+        <button class="act" data-a="import" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">📥 导入本机目录</button>
+        <button class="act" data-a="login">🔑 登录 / 同步账号</button>
+        ${atRoot?'':'<button class="act" data-a="up">↑ 返回上层</button>'}
       </div>`;
   }else if(kind==='error'){
     el.innerHTML=`<h3>加载失败</h3><p>${info.msg||'未知错误'}</p>
@@ -1222,8 +1240,10 @@ function setCanvasState(kind,info={}){
   el.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{
     const a=b.dataset.a;
     if(a==='new')newDoc();
-    if(a==='topic')$('e-topic')?$('e-topic').click():openPalette();
-    if(a==='up'){browsePath=browsePath.split('/').slice(0,-1).join('/')||'Notes';loadGraph();}
+    if(a==='topic')openPalette();
+    if(a==='import')openSettings();
+    if(a==='login')openAccount();
+    if(a==='up'){const up=browsePath.split('/').slice(0,-1).join('/');browsePath=(up&&up!=='Notes')?up:'Notes';loadGraph();}
     if(a==='retry')loadGraph();
     if(a==='home'){browsePath='Notes';loadGraph();}
   });
@@ -1291,57 +1311,11 @@ async function loadRail(){
   setTimeout(()=>loadDocsFull(),1800);
 }
 function maybeEmptyVault(t){
-  const empty=document.getElementById('empty');
-  const has=(t.count||0)>0||(t.files||0)>0;
-  if(has){ if(empty)empty.remove(); return; }
-  if(empty)return;
-  const d=document.createElement('div');d.className='empty';d.id='empty';
-  d.innerHTML=`<h2>空库，三个起点</h2><p>这里什么都没有——建一篇，或让 agent 帮你采进来。</p>
-    <div class="row"><button class="act" id="e-new">＋ 新建文档</button><button class="act" id="e-topic" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">⚡ 一键采集主题</button><button class="act" id="e-pal">⌘K 命令</button></div>
-    <div id="topic-form" style="display:none;margin-top:14px">
-      <input class="inp" id="topic-input" placeholder="输入主题，如：大语言模型 / CRDT / 知识图谱">
-      <div style="display:flex;gap:8px;justify-content:center">
-        <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="wikipedia" checked> Wikipedia</label>
-        <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="hackernews" checked> Hacker News</label>
-        <label style="font-size:12px;color:var(--muted)"><input type="checkbox" class="src-cb" value="arxiv"> arXiv</label>
-        <button class="act" id="topic-go">采集</button>
-      </div>
-    </div>`;
-  document.body.appendChild(d);
-  d.querySelector('#e-new').onclick=newDoc;
-  d.querySelector('#e-pal').onclick=openPalette;
-  d.querySelector('#e-topic').onclick=()=>{const f=d.querySelector('#topic-form');f.style.display=f.style.display==='none'?'block':'none';d.querySelector('#topic-input').focus()};
-  d.querySelector('#topic-go').onclick=async()=>{
-    const topic=d.querySelector('#topic-input').value.trim();if(!topic)return;
-    const srcs=[...d.querySelectorAll('.src-cb:checked')].map(x=>x.value);
-    d.querySelector('#topic-go').textContent='采集中…';d.querySelector('#topic-go').disabled=true;
-    try{
-      const r=await api('/ingest/topic',{method:'POST',json:{topic,sources:srcs,limit:5}});
-      toast(`已采集 ${r.imported.length} 篇「${topic}」`,'ok');
-      d.remove();await refreshAll();fit();
-    }catch(e){toast('采集失败：'+e.message,'err')}
-    const b2=d.querySelector('#topic-go');if(b2){b2.textContent='采集';b2.disabled=false}
-  };
-}
-async function loadStatus(){
-  const s=await api('/status');
-  cacheSet('status',s);
-  vaultName=s.vault;$('v-name').textContent=s.vault;$('v-docs').textContent=s.docs;$('v-idx').textContent=s.indexed;$('v-assets').textContent=s.assets;
-  $('sb-stats').textContent=`${s.docs} docs · ${s.indexed} indexed · ${s.assets} assets`;
-  $('sb-conn').textContent='connected';
-  if(currentUser)$('sb-user').textContent='👤 '+currentUser;
-}
-async function loadMeta(){
-  try{const m=await api('/connections');
-    $('sb-mode').textContent=(m.ai&&m.ai.configured?`AI ${m.ai.model}`:`命令模式 · ${(m.connections||[]).length} 连接`)+` · ${view==='canvas'?'画布':view==='timeline'?'时间线':'看板'}`;
-  }catch{}
-}
-async function refreshAll(){
-  window.__docsFetchedAt=0; // 全量刷新时绕过 /docs 时间缓存
-  await Promise.all([loadGraph(true),loadRail(),loadStatus(),loadMeta()]);
+  // 空库引导统一由画布状态（setCanvasState 'empty'）承担；
+  // 这里只清理历史遗留的浮层，避免两个浮层重叠挡住按钮。
+  const empty=document.getElementById('empty'); if(empty)empty.remove();
 }
 
-/* ───────── 侧栏树 ───────── */
 function tagColor(t){let h=0;for(const c of t)h=(h*31+c.codePointAt(0))%360;const dark=document.documentElement.dataset.theme==='dark';return `oklch(${dark?'72%':'52%'} .14 ${h})`}
 let treeState=JSON.parse(localStorage.getItem('thirdc_tree')||'{}');
 /* 用 /tree 的结构渲染（无文件标题）：文件夹秒开，文件展开时按需加载 */
@@ -3006,6 +2980,7 @@ async function sendMemoText(text){
 $('settings-btn').addEventListener('click',()=>{openSettings()});
 async function openSettings(){
   document.getElementById('settings-ov').style.display='grid';
+  renderAcctInfo();
   try{
     const info=await api('/desktop/info');
     document.getElementById('desk-block').style.display='block';
@@ -3020,6 +2995,37 @@ async function openSettings(){
       document.getElementById('set-vault-path').value=v.root;
   }catch(e){toast('读取本机能力失败：'+e.message,'err')}
 }
+function renderAcctInfo(){
+  const el=document.getElementById('set-acct-info'); if(!el)return;
+  let rem={}; try{rem=JSON.parse(localStorage.getItem('thirdc_remote')||'{}')}catch{}
+  el.innerHTML=rem.server?`已连接：<b>${rem.user||''}</b> @ ${rem.server}`:'本机（未登录账号）';
+}
+function openAccount(){
+  const ov=document.getElementById('acct-ov'); if(!ov)return;
+  let rem={}; try{rem=JSON.parse(localStorage.getItem('thirdc_remote')||'{}')}catch{}
+  if(rem.server)document.getElementById('acct-server').value=rem.server;
+  if(rem.user)document.getElementById('acct-user').value=rem.user;
+  ov.style.display='grid';
+  document.getElementById('acct-user').focus();
+}
+$('set-login').addEventListener('click',openAccount);
+$('acct-go').addEventListener('click',async()=>{
+  const server=document.getElementById('acct-server').value.trim().replace(/\/+$/,'');
+  const user=document.getElementById('acct-user').value.trim();
+  const pass=document.getElementById('acct-pass').value;
+  const msg=document.getElementById('acct-msg');
+  if(!server||!user||!pass){msg.textContent='请填写服务器、用户名、密码';return}
+  const b=$('acct-go'); b.textContent='登录中…'; b.disabled=true; msg.textContent='';
+  try{
+    const r=await api('/desktop/pull',{method:'POST',json:{server,user,pass}});
+    localStorage.setItem('thirdc_remote',JSON.stringify({server,user}));
+    msg.textContent=`完成：拉取 ${r.pulled} 篇，跳过 ${r.skipped}${r.failed?`，失败 ${r.failed}`:''}（远端共 ${r.total}）`;
+    toast(`已同步 ${r.pulled} 篇到本地`,'ok');
+    b.textContent='再次拉取';
+  }catch(e){msg.textContent='失败：'+e.message;b.textContent='登录并拉取到本地'}
+  b.disabled=false;
+  renderAcctInfo();
+});
 $('set-logout').addEventListener('click',()=>{
   localStorage.removeItem('thirdc_token');
   localStorage.removeItem('thirdc_user');
