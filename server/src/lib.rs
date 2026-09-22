@@ -3045,3 +3045,46 @@ async fn tree(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespons
     }))
     .into_response()
 }
+
+/// 从 Obsidian 库导入（设置面板用，与 CLI import-obsidian 等价）。
+async fn ingest_obsidian(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let path = req.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+    if path.is_empty() || !path.starts_with('/') {
+        return err(StatusCode::BAD_REQUEST, "需要绝对路径").into_response();
+    }
+    let src = std::path::Path::new(&path);
+    if !src.is_dir() {
+        return err(StatusCode::NOT_FOUND, format!("路径不存在：{path}")).into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let notes = root.join("Notes");
+    let mut copied = 0usize;
+    let mut stack = vec![src.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == ".obsidian" || name == ".git" || name == ".trash" { continue; }
+            if p.is_dir() { stack.push(p); continue; }
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            if ext == "md" || ext == "html" {
+                let rel_dir = p.parent().unwrap().strip_prefix(src).unwrap_or(std::path::Path::new(""));
+                let dest_dir = notes.join(rel_dir);
+                let _ = std::fs::create_dir_all(&dest_dir);
+                let dest = dest_dir.join(&name);
+                if !dest.exists() && std::fs::copy(&p, &dest).is_ok() { copied += 1; }
+            }
+        }
+    }
+    if copied > 0 {
+        let mut k = st.kernel.lock().unwrap();
+        let _ = k.sync_all();
+    }
+    audit_log(&root.join(".thirdc"), "import-obsidian", &json!({"path": path, "copied": copied}));
+    Json(json!({ "copied": copied })).into_response()
+}
