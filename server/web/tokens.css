@@ -38,7 +38,7 @@
   --shadow: 0 22px 56px -26px oklch(38% .05 80/.30);
   --shadow-sm: 0 10px 26px -14px oklch(38% .05 80/.22);
   --r-lg: 26px; --r-md: 18px; --r-sm: 12px;
-  --chrome-h: 56px; --titlebar: 0px; --sb-w: 248px; --container: 1120px;
+  --chrome-h: 56px; --titlebar: 46px; --sb-w: 248px; --container: 1120px;
   --font-display: "Space Grotesk","PingFang SC","HarmonyOS Sans SC","MiSans","Segoe UI",system-ui,sans-serif;
   --font-body: "Space Grotesk",-apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","MiSans","Segoe UI",system-ui,sans-serif;
   --font-mono: "JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;

@@ -30,15 +30,17 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:99px;border:2px solid transparent;background-clip:content-box}
 
 /* ── 外壳 ── */
-#chrome{position:fixed;top:calc(10px + var(--titlebar));left:10px;right:10px;height:var(--chrome-h);z-index:60;display:flex;align-items:center;gap:10px;padding:0 12px;
+#titlebar-strip{position:fixed;top:0;left:0;right:0;height:var(--titlebar);z-index:59;display:flex;align-items:center;gap:10px;padding:0 12px;-webkit-app-region:drag}
+html.desktop #titlebar-strip{padding-left:84px}
+#titlebar-strip .brand{cursor:pointer;-webkit-app-region:no-drag}
+#titlebar-strip button,#titlebar-strip input,#titlebar-strip .search-pill{-webkit-app-region:no-drag}
+#titlebar-strip .search-pill{flex:1;max-width:460px;margin:0 8px 0 auto}
+#chrome{position:fixed;top:calc(8px + var(--titlebar));left:10px;right:10px;height:var(--chrome-h);z-index:60;display:flex;align-items:center;gap:10px;padding:0 12px;
   border-radius:var(--r-md);border:1px solid var(--border);background:color-mix(in oklab,var(--bg) 84%,transparent);
   -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);
   box-shadow:inset 0 1px 0 color-mix(in oklab,var(--surface-strong),transparent 40%),var(--shadow-sm)}
-html.desktop{--titlebar:34px}
-#titlebar-strip{display:none;position:fixed;top:0;left:0;right:0;height:calc(10px + var(--titlebar));z-index:59}
-html.desktop #titlebar-strip{display:block;-webkit-app-region:drag}
 html.desktop #chrome{padding-left:12px;-webkit-app-region:drag}
-html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome .search-pill,html.desktop #chrome .tabs,html.desktop #chrome nav{-webkit-app-region:no-drag}
+html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome .search-pill,html.desktop #chrome .tabs,html.desktop #chrome nav,html.desktop #chrome .doc-tabs{-webkit-app-region:no-drag}
 html.desktop .lights{display:none}
 .lights{display:flex;gap:7px;margin-right:2px}
 .light{width:12px;height:12px;border-radius:50%}
@@ -46,6 +48,14 @@ html.desktop .lights{display:none}
 .brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:700}
 .brand .mark{width:26px;height:26px;border-radius:9px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-size:12px}
 .tabs{display:flex;gap:2px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:4px}
+.doc-tabs{display:flex;align-items:center;gap:3px;margin-left:2px;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+.doc-tabs::-webkit-scrollbar{display:none}
+.doc-tab{display:inline-flex;align-items:center;gap:7px;height:30px;max-width:190px;padding:0 10px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);font:500 12px var(--font-body);cursor:pointer;white-space:nowrap;flex:0 0 auto;transition:all .18s var(--ease-spring)}
+.doc-tab:hover{background:var(--glass);color:var(--fg)}
+.doc-tab.on{background:var(--surface-strong);color:var(--fg);border-color:var(--border)}
+.doc-tab .nm{overflow:hidden;text-overflow:ellipsis}
+.doc-tab .x{opacity:.45;font-size:12px;line-height:1}
+.doc-tab .x:hover{opacity:1;color:var(--danger)}
 .tab-pill{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 14px;border-radius:11px;font-size:13px;font-weight:500;color:var(--muted);
   border:1px solid transparent;background:transparent;cursor:pointer;transition:background .22s,color .22s,border-color .22s;font-family:inherit}
 .tab-pill:hover{background:var(--glass);color:var(--fg)}
@@ -65,7 +75,6 @@ html.desktop .lights{display:none}
   font:500 13px var(--font-body);text-align:left;cursor:pointer;transition:background .15s,color .15s}
 .mm-item:hover{background:var(--hover);color:var(--fg)}
 .mm-sep{height:1px;margin:5px 8px;background:var(--border)}
-#chrome #fit{margin-left:auto}
 .search-pill{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:11px;border:1px solid var(--border);background:var(--surface);min-width:230px;cursor:text}
 .search-pill kbd{font-family:var(--font-mono);font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:6px;padding:1px 5px}
 .search-pill span{flex:1;color:var(--faint);font-size:13px}
@@ -195,6 +204,11 @@ html.desktop .lights{display:none}
 #preview{flex:1;border:none;background:oklch(100% 0 0);border-left:1px solid var(--border)}
 .drawer-body.view #editor{display:none}
 .drawer-body.edit #preview{display:none}
+/* 铺开：覆盖画布区域（盖在画布之上，不是嵌进画布），左编辑右实时预览 */
+#drawer.wide{left:282px;width:auto;top:calc(var(--chrome-h) + var(--titlebar) + 20px)}
+#drawer.wide #editor,#drawer.wide #preview{display:block;flex:1}
+#drawer.wide #preview{flex:1.15}
+@media (max-width:900px){#drawer.wide{left:10px}}
 
 .overlay{position:fixed;inset:0;z-index:100;display:none;align-items:flex-start;justify-content:center;padding-top:14vh;
   background:color-mix(in oklab,var(--bg) 55%,transparent);backdrop-filter:blur(6px)}
@@ -324,6 +338,20 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .rail-vault.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
 .rail-lens{display:flex;gap:4px;flex-wrap:wrap;padding:0 10px 8px}
 .rail-lens .tab-pill{height:26px;padding:0 9px;font-size:11.5px;border-radius:8px}
+.rail-memo{margin:2px 10px 8px;padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--surface)}
+.rm-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.rm-head b{font-family:var(--font-display);color:var(--fg);font-size:13px}
+.rm-total{color:var(--faint);font-family:var(--font-mono);font-size:10.5px}
+.rm-full{margin-left:auto;border:none;background:transparent;color:var(--accent);font:500 11px var(--font-body);cursor:pointer}
+.rm-heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,9px);grid-auto-columns:9px;gap:3px;margin:9px 0 8px;cursor:pointer}
+.rm-tags{display:flex;gap:5px;flex-wrap:wrap;min-height:16px}
+.rm-tag{font:600 10px var(--font-mono);color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:2px 7px;cursor:pointer}
+.rm-tag:hover{background:var(--accent);color:var(--on-accent)}
+.rm-empty{color:var(--faint);font-size:10.5px}
+.rm-add{display:flex;gap:6px;margin-top:9px}
+.rm-add input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--fg);font:12px var(--font-body);outline:none}
+.rm-add input:focus{border-color:var(--accent)}
+.rm-send{width:28px;height:28px;flex:0 0 auto;border-radius:8px;border:none;background:var(--accent);color:var(--on-accent);cursor:pointer;font-size:15px;line-height:1}
 .rail-actions{padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;flex:0 0 auto}
 .rail-act{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--surface);
   color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-spring)}
@@ -549,7 +577,17 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 </style>
 </head>
 <body>
-<div id="titlebar-strip" data-tauri-drag-region></div>
+<div id="titlebar-strip" data-tauri-drag-region>
+  <div class="brand" id="brand" title="点击切换知识库"><span class="mark">3C</span><span>ThirdC</span></div>
+  <div class="search-pill" id="open-palette">
+    <svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:var(--faint);stroke-width:1.8;fill:none"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span>检索 / 命令</span><kbd>⌘K</kbd>
+  </div>
+  <button class="icon-btn" id="fit" title="适配视图 (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+  <button class="icon-btn" id="tidy" title="整理布局 (T)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
+  <button class="icon-btn" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
+  <button class="icon-btn" id="more-btn" title="更多">⋯</button>
+</div>
 <div id="grid"></div>
 <div id="aura"></div>
 <div id="crumb"></div>
@@ -584,22 +622,13 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div><div id="peers"></div></div></div>
 
 <header id="chrome" data-tauri-drag-region>
-  <div class="lights"><i class="light r"></i><i class="light y"></i><i class="light g"></i></div>
-  <div class="brand"><span class="mark">3C</span><span>ThirdC</span></div>
   <nav id="view-seg" title="视图（快捷键 1/2/3）">
     <button data-view="canvas" class="on">画布</button>
     <button data-view="timeline">时间线</button>
     <button data-view="kanban">看板</button>
   </nav>
   <button id="board-pill" title="切换画布"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-  <div class="search-pill" id="open-palette">
-    <svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:var(--faint);stroke-width:1.8;fill:none"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <span>检索 / 命令</span><kbd>⌘K</kbd>
-  </div>
-  <button class="icon-btn" id="fit" title="适配视图 (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-  <button class="icon-btn" id="tidy" title="整理布局 (T)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
-  <button class="icon-btn" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
-  <button class="icon-btn" id="more-btn" title="更多">⋯</button>
+  <nav class="doc-tabs" id="doc-tabs"></nav>
 </header>
 <div id="more-menu">
   <button class="mm-item" id="studio-mode-btn">🏠 Studio 模式</button>
@@ -607,6 +636,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <button class="mm-item" id="present-btn">🖼 展示模式</button>
   <button class="mm-item" id="organize-mode-btn">✨ 整理模式</button>
   <button class="mm-item" id="learn-mode-btn">📖 学习模式</button>
+  <button class="mm-item" id="rag-mode-btn">🔎 RAG 检索</button>
   <div class="mm-sep"></div>
   <button class="mm-item" id="pub-btn">⬆ 发布 / 线上</button>
   <button class="mm-item" id="design-btn">🎨 设计规范</button>
@@ -618,8 +648,12 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 </div>
 
 <aside id="rail">
-  <div class="rail-head"><span class="kicker">Knowledge</span><span class="kicker" id="rail-count" style="color:var(--faint)">0</span></div>
-  <div id="rail-vaults"></div>
+  <div class="rail-memo" id="rail-memo-w">
+    <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
+    <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
+    <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
+    <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
+  </div>
   <nav class="rail-lens" id="rail-lens">
     <button class="tab-pill on" data-lens="all">全部</button>
     <button class="tab-pill" data-lens="doc">文档</button>
@@ -635,12 +669,10 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button class="act danger" id="b-del">删除</button>
     <button class="act" id="b-clear">取消</button>
   </div>
-  <button class="rail-new" id="rail-new">＋ 新建文档 <kbd style="font-family:var(--font-mono);font-size:10px;color:var(--faint)">N</kbd></button>
-  <button class="rail-new" id="organize-btn" style="border-style:solid">✨ 一键整理 <kbd style="font-family:var(--font-mono);font-size:10px;color:var(--faint)">M</kbd></button>
   <div class="rail-list" id="rail-list"></div>
   <div class="rail-actions">
-    <button class="rail-act accent" id="rail-memo" title="Memo：热力图 / 标签 / 日期快查">🗒 Memo</button>
-    <button class="rail-act" id="rail-rag" title="RAG：检索 / 命令">🔎 RAG</button>
+    <button class="rail-act accent" id="rail-new" title="新建文档">＋ 新建 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">N</kbd></button>
+    <button class="rail-act" id="organize-btn" title="一键整理">✨ 整理 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">M</kbd></button>
   </div>
   <div class="rail-foot">
     <div>库 <b id="v-name">—</b></div>
@@ -692,6 +724,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <input type="file" id="d-file" style="display:none" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.docx,.doc,.md,.html,.txt,.csv,.json">
     <button class="icon-btn" id="d-pub" title="发布"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     <button class="icon-btn" id="d-mode" title="编辑 / 预览"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    <button class="icon-btn" id="d-expand" title="铺开：编辑 + 实时预览"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
     <button class="icon-btn" id="d-save" title="保存 ⌘S"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg></button>
     <button class="icon-btn" id="d-close" title="关闭 Esc"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
   </div>
@@ -1358,7 +1391,7 @@ async function loadRail(){
     const t=await api('/tree');
     cacheSet('tree',t);
     renderTreeFromTree(t);
-    $('rail-count').textContent=t.count;
+    const rc=$('rail-count');if(rc)rc.textContent=t.count;
     maybeEmptyVault(t);
   }catch(e){ if(!cachedTree) railSkeleton(4); }
   setTimeout(()=>loadDocsFull(),1800);
@@ -1443,7 +1476,7 @@ async function loadDocsFull(){
     window.__docsFetchedAt=Date.now();
     cacheSet('docs',r.docs);
     if(!($('rail-search').value||'').trim())renderTreeFromTree(cacheGet('tree')||{dirs:[]});
-    $('rail-count').textContent=r.docs.length;
+    const rc2=$('rail-count');if(rc2)rc2.textContent=r.docs.length;
   }catch{}
 }
 function renderTree(docs){
@@ -1554,6 +1587,27 @@ function renderTree(docs){
 }
 
 /* ───────── 抽屉 ───────── */
+/* ───────── 文档多标签 ───────── */
+let docTabs=[];try{docTabs=JSON.parse(localStorage.getItem('thirdc_doc_tabs')||'[]')||[]}catch{docTabs=[]}
+let activeTab='';
+function saveDocTabs(){try{localStorage.setItem('thirdc_doc_tabs',JSON.stringify(docTabs.slice(-12)))}catch{}}
+function addDocTab(path){
+  activeTab=path;
+  if(!docTabs.includes(path)){docTabs.push(path);if(docTabs.length>12)docTabs.shift();saveDocTabs();}
+  renderDocTabs();
+}
+function renderDocTabs(){
+  const box=$('doc-tabs');if(!box)return;box.innerHTML='';
+  docTabs.forEach(p=>{
+    const b=document.createElement('button');b.className='doc-tab'+(p===activeTab?' on':'');b.title=p;
+    const nm=document.createElement('span');nm.className='nm';nm.textContent=p.split('/').pop().replace(/\.(md|html)$/i,'');
+    const x=document.createElement('span');x.className='x';x.textContent='✕';x.title='关闭标签';
+    b.append(nm,x);
+    b.onclick=()=>{if(p!==current)openDoc(p);};
+    x.onclick=ev=>{ev.stopPropagation();docTabs=docTabs.filter(t=>t!==p);if(activeTab===p)activeTab='';saveDocTabs();renderDocTabs();};
+    box.appendChild(b);
+  });
+}
 async function openDoc(path){
   const dr=$('drawer');
   try{
@@ -1567,6 +1621,8 @@ async function openDoc(path){
     applyLearnStyle();
     buildToc(d.markdown);
     dr.classList.add('open');selectNode('doc:'+path);
+    if(!dr.classList.contains('wide')){const body=$('d-body');body.classList.remove('edit');body.classList.add('view');}
+    addDocTab(path);
   }catch(e){toast('打开失败：'+e.message,'err');}
   finally{dr.classList.remove('loading');$('d-body').style.opacity='';}
 }
@@ -1587,7 +1643,20 @@ async function newDoc(){
   }catch(e){toast('创建失败：'+e.message,'err');}
 }
 $b('d-save').onclick=saveDoc;$b('d-close').onclick=()=>{$('drawer').classList.remove('open');$('toc').classList.remove('open');$('toc-line').classList.remove('on')};
-$b('d-mode').onclick=()=>$('d-body').classList.toggle('view');
+/* 预览/编辑切换（窄）：view → 预览；edit → 编辑。铺开时两者并存 */
+$b('d-mode').onclick=()=>{
+  const b=$('d-body');
+  if(b.classList.contains('view')){b.classList.remove('view');b.classList.add('edit');}
+  else{b.classList.add('view');b.classList.remove('edit');}
+};
+/* 铺开：盖在画布区域之上（非嵌入），左编辑右实时预览 */
+$b('d-expand').onclick=()=>{
+  const dr=$('drawer'),b=$('d-body');
+  const wide=dr.classList.toggle('wide');
+  if(wide){b.classList.remove('view','edit');}
+  else{b.classList.remove('edit');b.classList.add('view');}
+  toast(wide?'已铺开：左侧编辑 · 右侧实时预览':'已收起为预览','ok');
+};
 
 /* ───────── 本地上传（图片/PDF/DOCX/HTML）───────── */
 $b('d-upload').onclick=()=>$('d-file').click();
@@ -1630,6 +1699,19 @@ $('d-file').addEventListener('change',async e=>{
 
 $b('d-pub').onclick=()=>current?doPublish(current):toast('先打开一篇文档','err');
 $('editor').addEventListener('input',()=>dirty=true);
+/* 铺开时：打字即防抖写入并刷新预览（实时修改 + 预览） */
+let liveTimer=null;
+$('editor').addEventListener('input',()=>{
+  if(!$('drawer').classList.contains('wide'))return;
+  clearTimeout(liveTimer);
+  liveTimer=setTimeout(async()=>{
+    if(!current)return;
+    try{
+      const d=await api('/doc?path='+encodeURIComponent(current),{method:'PUT',body:$('editor').value,headers:{'content-type':'text/markdown'}});
+      $('preview').srcdoc=d.html;dirty=false;
+    }catch{}
+  },600);
+});
 /* 光标离开即渲染：不覆盖底层源码，只刷新预览 */
 $('editor').addEventListener('blur',async()=>{
   if(!current||!dirty)return;
@@ -2543,14 +2625,15 @@ document.querySelectorAll('#mode-seg button').forEach(b=>b.onclick=()=>setMode(b
 $('more-btn')&&$('more-btn').addEventListener('click',e=>{e.stopPropagation();$('more-menu').classList.toggle('open');});
 document.addEventListener('click',e=>{const m=$('more-menu');if(m&&m.classList.contains('open')&&!m.contains(e.target))m.classList.remove('open');});
 $('more-menu')&&$('more-menu').addEventListener('click',()=>$('more-menu').classList.remove('open'));
-/* 模式入口迁出顶栏：展示/整理/学习进 ⋯，Memo/RAG 进左栏，Agent 在对话框 */
+/* 模式入口迁出顶栏：展示/整理/学习/RAG 进 ⋯，Memo 进左栏 widget，Agent 在对话框 */
 $('studio-mode-btn')&&($('studio-mode-btn').onclick=()=>setMode('studio'));
 $('present-btn')&&($('present-btn').onclick=()=>setMode('present'));
 $('organize-mode-btn')&&($('organize-mode-btn').onclick=()=>setMode('organize'));
 $('learn-mode-btn')&&($('learn-mode-btn').onclick=()=>setMode('learn'));
-$('rail-memo')&&($('rail-memo').onclick=()=>{setMode('memo');});
-$('rail-rag')&&($('rail-rag').onclick=()=>{setMode('rag');});
+$('rag-mode-btn')&&($('rag-mode-btn').onclick=()=>setMode('rag'));
 $('agent-toggle')&&($('agent-toggle').onclick=()=>setMode(mode==='agent'?'studio':'agent'));
+/* 点左上角 logo / ThirdC → 切换知识库 */
+$('brand')&&($('brand').onclick=()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();});
 setMode(localStorage.getItem('thirdc_mode')||'studio');
 
 /* ───────── Memo 模式：热力图 + 日期/标签快查 ───────── */
@@ -2565,6 +2648,54 @@ function memoDate(ts){
   const d=new Date(ts*1000);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
+/* 左栏 Memo 小挂件：热力图（点击进全功能）+ 标签 + 快速记录 */
+async function renderRailMemo(){
+  const heat=$('rm-heat'); if(!heat)return;
+  let data;
+  try{ data=await loadMemo(); }catch{ return; }
+  const byDate={};
+  (data?.docs||[]).forEach(d=>{const k=memoDate(d.mtime);byDate[k]=(byDate[k]||0)+1;});
+  const end=new Date();end.setHours(0,0,0,0);
+  const weeks=13, days=[];
+  for(let i=weeks*7-1;i>=0;i--){const d=new Date(end);d.setDate(end.getDate()-i);days.push(d);}
+  heat.innerHTML='';
+  days.forEach(d=>{
+    const c=document.createElement('i');
+    let bg='var(--hover)', n=0;
+    if(d){const k=memoDate(d.getTime()/1000);n=byDate[k]||0;
+      if(n>=10)bg='var(--accent)';else if(n>=5)bg='color-mix(in oklab,var(--accent) 58%,transparent)';else if(n>=2)bg='var(--accent-soft)';
+      c.title=`${k} · ${n} 篇`;
+    }
+    c.style.cssText=`width:9px;height:9px;border-radius:2px;background:${bg}`;
+    heat.appendChild(c);
+  });
+  const total=$('rm-total'); if(total)total.textContent=(data?.total||0)+' 篇';
+  const cnt={};
+  (data?.docs||[]).forEach(d=>(d.tags||[]).forEach(t=>{if(t.length<=20)cnt[t]=(cnt[t]||0)+1;}));
+  const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const tags=$('rm-tags');
+  if(tags){
+    tags.innerHTML=top.map(([t,n])=>`<span class="rm-tag" data-tag="${t}">${t} ${n}</span>`).join('')||'<span class="rm-empty">暂无标签</span>';
+    tags.querySelectorAll('.rm-tag').forEach(el=>el.onclick=()=>{
+      memoFilter={date:null,tag:el.dataset.tag,q:''};
+      const pick=$('memo-pick'); if(pick)pick.textContent='标签 '+el.dataset.tag;
+      openMemo();
+    });
+  }
+  heat.onclick=()=>{memoFilter={date:null,tag:null,q:''};const pick=$('memo-pick');if(pick)pick.textContent='';openMemo();};
+  const full=$('rm-full'); if(full)full.onclick=()=>{memoFilter={date:null,tag:null,q:''};openMemo();};
+}
+async function railMemoAdd(){
+  const inp=$('rm-input'); if(!inp)return;
+  const t=inp.value.trim(); if(!t)return;
+  inp.value='';
+  await sendMemoText(t);
+  memoData=null;
+  toast('已记录','ok');
+  renderRailMemo();
+}
+$('rm-send')&&($('rm-send').onclick=railMemoAdd);
+$('rm-input')&&$('rm-input').addEventListener('keydown',e=>{if(e.key==='Enter')railMemoAdd();});
 async function openMemo(){
   openOverlay('memo-ov');
   if(!memoData)$('memo-total').textContent='载入中…';
@@ -3389,6 +3520,7 @@ async function loadMeta(){
 async function refreshAll(){
   window.__docsFetchedAt=0;
   await Promise.all([loadGraph(true),loadRail(),loadStatus(),loadMeta()]);
+  renderRailMemo();
 }
 function renderBrowseCached(b){
   const nodes=[];
@@ -3413,6 +3545,7 @@ function bootDone(){
   renderAcctInfo();
   if(!localStorage.getItem('thirdc_last_ws'))localStorage.setItem('thirdc_last_ws',location.origin);
   renderRailVaults();
+  renderDocTabs();
   maybeSwitchToLastWs();
   const cs=cacheGet('status'); if(cs)applyStatus(cs);
   const raw=cacheGet('browse');
@@ -3432,7 +3565,7 @@ function bootDone(){
 
   loadRail().catch(()=>{});
   loadGraph().then(()=>{ bootStep(82,'画布就绪'); dismiss(); }).catch(()=>dismiss());
-  Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]).then(()=>renderRailVaults());
+  Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]).then(()=>{renderRailVaults();renderRailMemo();});
   applyVP();
   setTimeout(()=>initPresence(),1400);
   setTimeout(()=>maybeOnboard(),700);
