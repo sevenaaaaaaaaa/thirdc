@@ -30,11 +30,14 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:99px;border:2px solid transparent;background-clip:content-box}
 
 /* ── 外壳 ── */
-#chrome{position:fixed;top:10px;left:10px;right:10px;height:var(--chrome-h);z-index:60;display:flex;align-items:center;gap:10px;padding:0 12px;
+#chrome{position:fixed;top:calc(10px + var(--titlebar));left:10px;right:10px;height:var(--chrome-h);z-index:60;display:flex;align-items:center;gap:10px;padding:0 12px;
   border-radius:var(--r-md);border:1px solid var(--border);background:color-mix(in oklab,var(--bg) 84%,transparent);
   -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);
   box-shadow:inset 0 1px 0 color-mix(in oklab,var(--surface-strong),transparent 40%),var(--shadow-sm)}
-html.desktop #chrome{padding-left:78px;-webkit-app-region:drag}
+html.desktop{--titlebar:34px}
+#titlebar-strip{display:none;position:fixed;top:0;left:0;right:0;height:calc(10px + var(--titlebar));z-index:59}
+html.desktop #titlebar-strip{display:block;-webkit-app-region:drag}
+html.desktop #chrome{padding-left:12px;-webkit-app-region:drag}
 html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome .search-pill,html.desktop #chrome .tabs,html.desktop #chrome nav{-webkit-app-region:no-drag}
 html.desktop .lights{display:none}
 .lights{display:flex;gap:7px;margin-right:2px}
@@ -54,12 +57,21 @@ html.desktop .lights{display:none}
 #acct-btn{position:relative}
 #acct-btn .on{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--ok);display:none;border:1px solid var(--surface)}
 #acct-btn.linked .on{display:block}
+#more-btn{font-size:17px;font-weight:700;line-height:1}
+#more-menu{position:fixed;top:calc(10px + var(--titlebar) + var(--chrome-h) + 8px);right:12px;z-index:120;display:none;flex-direction:column;min-width:196px;padding:6px;border-radius:14px;
+  border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+#more-menu.open{display:flex;animation:nodeIn .18s var(--ease-out) both}
+.mm-item{display:flex;align-items:center;gap:9px;height:34px;padding:0 11px;border-radius:9px;border:none;background:transparent;color:var(--muted);
+  font:500 13px var(--font-body);text-align:left;cursor:pointer;transition:background .15s,color .15s}
+.mm-item:hover{background:var(--hover);color:var(--fg)}
+.mm-sep{height:1px;margin:5px 8px;background:var(--border)}
+#chrome #fit{margin-left:auto}
 .search-pill{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:11px;border:1px solid var(--border);background:var(--surface);min-width:230px;cursor:text}
 .search-pill kbd{font-family:var(--font-mono);font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:6px;padding:1px 5px}
 .search-pill span{flex:1;color:var(--faint);font-size:13px}
 
 /* ── 侧栏 ── */
-#rail{position:fixed;top:calc(var(--chrome-h) + 20px);left:10px;bottom:34px;width:250px;z-index:30;display:flex;flex-direction:column;
+#rail{position:fixed;top:calc(var(--chrome-h) + var(--titlebar) + 20px);left:10px;bottom:34px;width:250px;z-index:30;display:flex;flex-direction:column;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(16px) saturate(150%);box-shadow:var(--shadow-sm);
   overflow:hidden;transition:transform .45s var(--ease-spring),opacity .3s}
 #rail.closed{transform:translateX(calc(-100% - 16px));opacity:0;pointer-events:none}
@@ -124,7 +136,7 @@ html.desktop .lights{display:none}
 .tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:10px;font-family:var(--font-mono);background:var(--hover);color:var(--faint)}
 
 /* ── 检查器 ── */
-#inspector{position:fixed;top:calc(var(--chrome-h) + 20px);right:10px;bottom:34px;width:272px;z-index:35;display:flex;flex-direction:column;gap:10px;
+#inspector{position:fixed;top:calc(var(--chrome-h) + var(--titlebar) + 20px);right:10px;bottom:34px;width:272px;z-index:35;display:flex;flex-direction:column;gap:10px;
   padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(16px) saturate(150%);
   box-shadow:var(--shadow-sm);overflow:auto;transition:transform .45s var(--ease-spring),opacity .3s}
 #inspector.closed{transform:translateX(calc(100% + 16px));opacity:0;pointer-events:none}
@@ -172,7 +184,7 @@ html.desktop .lights{display:none}
 .quick button:hover{color:var(--fg);border-color:var(--border-strong)}
 
 /* ── 抽屉 / 面板 / 调色板 ── */
-#drawer{position:fixed;top:calc(var(--chrome-h) + 20px);right:10px;bottom:34px;width:min(600px,44vw);z-index:80;display:flex;flex-direction:column;
+#drawer{position:fixed;top:calc(var(--chrome-h) + var(--titlebar) + 20px);right:10px;bottom:34px;width:min(600px,44vw);z-index:80;display:flex;flex-direction:column;
   background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden;
   transform:translateX(calc(100% + 20px));transition:transform .45s var(--ease-spring)}
 #drawer.open{transform:none}
@@ -305,6 +317,22 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .tagchip{display:inline-flex;align-items:center;height:15px;padding:0 6px;border-radius:999px;font:600 9px var(--font-mono);color:var(--on-accent);flex:0 0 auto}
 #rail-search{margin:2px 10px 6px;width:calc(100% - 20px);height:30px;padding:0 10px;border-radius:9px;border:1px solid var(--border);background:var(--bg3);color:var(--fg);font:12.5px var(--font-body);outline:none;box-sizing:border-box}
 #rail-search:focus{border-color:var(--accent)}
+#rail-vaults{display:flex;gap:6px;flex-wrap:wrap;padding:2px 10px 8px}
+.rail-vault{height:26px;max-width:100%;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font:500 11.5px var(--font-body);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:all .2s var(--ease-spring)}
+.rail-vault:hover{color:var(--fg);border-color:var(--border-strong)}
+.rail-vault.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+.rail-lens{display:flex;gap:4px;flex-wrap:wrap;padding:0 10px 8px}
+.rail-lens .tab-pill{height:26px;padding:0 9px;font-size:11.5px;border-radius:8px}
+.rail-actions{padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;flex:0 0 auto}
+.rail-act{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--surface);
+  color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-spring)}
+.rail-act:hover{color:var(--fg);border-color:var(--border-strong);transform:translateY(-1px)}
+.rail-act.accent{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+#agent-toggle{height:38px;padding:0 11px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--muted);
+  font:600 12.5px var(--font-body);cursor:pointer;display:flex;align-items:center;gap:6px;flex:0 0 auto;transition:all .2s var(--ease-spring)}
+#agent-toggle:hover{color:var(--fg);border-color:var(--border-strong)}
+#agent-toggle.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .bg3{background:var(--bg-soft)}
 
 /* ── 展示模式 ── */
@@ -324,7 +352,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 #gitpanel input{flex:1;min-width:0;height:30px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12px var(--font-body);outline:none}
 #gitpanel .log{max-height:150px;overflow:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted);line-height:1.8}
 /* ── TOC ── */
-#toc{position:fixed;left:270px;top:calc(var(--chrome-h) + 72px);bottom:60px;width:180px;z-index:25;
+#toc{position:fixed;left:270px;top:calc(var(--chrome-h) + var(--titlebar) + 72px);bottom:60px;width:180px;z-index:25;
   overflow-y:auto;padding:10px 8px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);
   backdrop-filter:blur(12px);font-size:11.5px;display:none;transition:opacity .3s}
 #toc.open{display:block}
@@ -339,7 +367,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .toc-line.on{opacity:1}
 
 /* ── Memo 模式 ── */
-#memo-bar{position:fixed;top:calc(var(--chrome-h) + 12px);left:50%;transform:translateX(-50%);z-index:80;
+#memo-bar{position:fixed;top:calc(var(--chrome-h) + var(--titlebar) + 12px);left:50%;transform:translateX(-50%);z-index:80;
   width:min(600px,80vw);display:none;align-items:center;gap:8px;padding:8px 14px;
   border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);backdrop-filter:blur(20px) saturate(160%);box-shadow:var(--shadow)}
 #memo-bar.open{display:flex;animation:nodeIn .35s var(--ease-spring) both}
@@ -375,7 +403,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .share-card input{width:100%;padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:13px var(--font-mono);outline:none;margin:10px 0}
 .share-card .link{font-family:var(--font-mono);font-size:11.5px;color:var(--accent);word-break:break-all;padding:10px;background:var(--hover);border-radius:10px;cursor:pointer}
 .share-card .hint{font-size:11px;color:var(--faint);margin-top:8px}
-#ws-panel{position:fixed;top:calc(var(--chrome-h)+20px);left:270px;right:290px;z-index:85;display:none;
+#ws-panel{position:fixed;top:calc(var(--chrome-h) + var(--titlebar) + 20px);left:270px;right:290px;z-index:85;display:none;
   background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
 #ws-panel.open{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 .ws-chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:11px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font:500 13px var(--font-body);transition:all .2s}
@@ -393,7 +421,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .cal-cell .dot-n.cap{background:var(--type-capture)}
 .cal-cell .dot-n.memo{background:var(--type-asset)}
 .cal-empty{color:var(--faint);text-align:center;padding:60px;font-size:14px}
-#crumb{position:fixed;top:calc(var(--chrome-h) + 16px);left:50%;transform:translateX(-50%);z-index:56;
+#crumb{position:fixed;top:calc(var(--chrome-h) + var(--titlebar) + 16px);left:50%;transform:translateX(-50%);z-index:56;
   display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;border:1px solid var(--border);
   background:var(--surface-strong);backdrop-filter:blur(14px);font:500 12.5px var(--font-body);box-shadow:var(--shadow-sm);max-width:70vw;overflow:auto}
 .node.k-folder{border-color:var(--border-strong);background:color-mix(in oklab,var(--accent) 7%,var(--node-bg))}
@@ -521,6 +549,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 </style>
 </head>
 <body>
+<div id="titlebar-strip" data-tauri-drag-region></div>
 <div id="grid"></div>
 <div id="aura"></div>
 <div id="crumb"></div>
@@ -557,46 +586,46 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <header id="chrome" data-tauri-drag-region>
   <div class="lights"><i class="light r"></i><i class="light y"></i><i class="light g"></i></div>
   <div class="brand"><span class="mark">3C</span><span>ThirdC</span></div>
-  <nav id="mode-seg">
-    <button data-mode="studio" class="on">Studio</button>
-    <button data-mode="organize">整理</button>
-    <button data-mode="learn">学习</button>
-    <button data-mode="memo">Memo</button>
-    <button data-mode="present">展示</button>
-    <button data-mode="rag">RAG</button>
-    <button data-mode="online">线上</button>
-    <button data-mode="agent">Agent</button>
-  </nav>
   <nav id="view-seg" title="视图（快捷键 1/2/3）">
     <button data-view="canvas" class="on">画布</button>
     <button data-view="timeline">时间线</button>
     <button data-view="kanban">看板</button>
   </nav>
   <button id="board-pill" title="切换画布"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-  <nav class="tabs">
-    <button class="tab-pill on" data-lens="all">全部</button>
-    <button class="tab-pill" data-lens="doc">文档</button>
-    <button class="tab-pill" data-lens="capture">采集</button>
-    <button class="tab-pill" data-lens="asset">附件</button>
-  </nav>
   <div class="search-pill" id="open-palette">
     <svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:var(--faint);stroke-width:1.8;fill:none"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <span>检索 / 命令</span><kbd>⌘K</kbd>
   </div>
   <button class="icon-btn" id="fit" title="适配视图 (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
   <button class="icon-btn" id="tidy" title="整理布局 (T)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
-  <button class="icon-btn" id="pub-btn" title="发布面板"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
-  <button class="icon-btn" id="design-btn" title="设计规范"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="14.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="15.5" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20"/></svg></button>
-  <button class="icon-btn" id="road-btn" title="路线图"><svg viewBox="0 0 24 24"><path d="M4 20V8l6-4 4 3 6-3v12l-6 3-4-3-6 3Z"/></svg></button>
   <button class="icon-btn" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
-  <button class="icon-btn" id="settings-btn" title="设置">⚙</button>
-    <button class="icon-btn" id="theme" title="明暗切换"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button>
-  <button class="icon-btn" id="force-refresh" title="强制刷新（清缓存+全量同步）"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/><path d="M3 12a9 9 0 0 0 2.6 6.4M3 20v-5h5" opacity=".5"/></svg></button>
-  <button class="icon-btn" id="sync" title="同步外部改动"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg></button>
+  <button class="icon-btn" id="more-btn" title="更多">⋯</button>
 </header>
+<div id="more-menu">
+  <button class="mm-item" id="studio-mode-btn">🏠 Studio 模式</button>
+  <div class="mm-sep"></div>
+  <button class="mm-item" id="present-btn">🖼 展示模式</button>
+  <button class="mm-item" id="organize-mode-btn">✨ 整理模式</button>
+  <button class="mm-item" id="learn-mode-btn">📖 学习模式</button>
+  <div class="mm-sep"></div>
+  <button class="mm-item" id="pub-btn">⬆ 发布 / 线上</button>
+  <button class="mm-item" id="design-btn">🎨 设计规范</button>
+  <button class="mm-item" id="road-btn">🗺 路线图</button>
+  <button class="mm-item" id="theme">🌓 明暗切换</button>
+  <button class="mm-item" id="sync">🔄 同步外部改动</button>
+  <button class="mm-item" id="force-refresh">⟲ 强制刷新</button>
+  <button class="mm-item" id="settings-btn">⚙ 设置</button>
+</div>
 
 <aside id="rail">
   <div class="rail-head"><span class="kicker">Knowledge</span><span class="kicker" id="rail-count" style="color:var(--faint)">0</span></div>
+  <div id="rail-vaults"></div>
+  <nav class="rail-lens" id="rail-lens">
+    <button class="tab-pill on" data-lens="all">全部</button>
+    <button class="tab-pill" data-lens="doc">文档</button>
+    <button class="tab-pill" data-lens="capture">采集</button>
+    <button class="tab-pill" data-lens="asset">附件</button>
+  </nav>
   <input id="rail-search" placeholder="过滤文档…">
   <div id="lasso"></div>
   <div id="batchbar">
@@ -609,6 +638,10 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <button class="rail-new" id="rail-new">＋ 新建文档 <kbd style="font-family:var(--font-mono);font-size:10px;color:var(--faint)">N</kbd></button>
   <button class="rail-new" id="organize-btn" style="border-style:solid">✨ 一键整理 <kbd style="font-family:var(--font-mono);font-size:10px;color:var(--faint)">M</kbd></button>
   <div class="rail-list" id="rail-list"></div>
+  <div class="rail-actions">
+    <button class="rail-act accent" id="rail-memo" title="Memo：热力图 / 标签 / 日期快查">🗒 Memo</button>
+    <button class="rail-act" id="rail-rag" title="RAG：检索 / 命令">🔎 RAG</button>
+  </div>
   <div class="rail-foot">
     <div>库 <b id="v-name">—</b></div>
     <div>文档 <b id="v-docs">0</b> · 索引 <b id="v-idx">0</b> · 附件 <b id="v-assets">0</b></div>
@@ -644,6 +677,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <button id="a2ui-demo">A2UI 示例</button>
   </div>
   <div class="dockbar">
+    <button id="agent-toggle" title="切到 Agent 模式（对话优先）">🤖 Agent</button>
     <input id="say" placeholder="和知识库对话…「搜索 CRDT」「列出」">
     <button class="send" id="send"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
   </div>
@@ -2384,21 +2418,53 @@ $('share-pass')?.addEventListener('keydown',e=>{if(e.key==='Enter')shareEncrypte
 
 /* ───────── 多库工作区 ───────── */
 function loadWorkspaces(){return JSON.parse(localStorage.getItem('thirdc_workspaces')||'[]')}
+function wsEnsureCurrent(){
+  const list=loadWorkspaces();
+  const cur=list.find(w=>w.url===location.origin);
+  if(!cur){
+    list.unshift({name:vaultName||'当前库',url:location.origin,token});
+    localStorage.setItem('thirdc_workspaces',JSON.stringify(list));
+  }else if(vaultName&&cur.name!==vaultName){
+    cur.name=vaultName;localStorage.setItem('thirdc_workspaces',JSON.stringify(list));
+  }
+  return list;
+}
+function openWorkspace(w){
+  if(!w||w.url===location.origin)return;
+  localStorage.setItem('thirdc_token',w.token||token);
+  localStorage.setItem('thirdc_last_ws',w.url);
+  location.href=w.url+'/?token='+w.token;
+}
 function renderWorkspaces(){
-  const list=loadWorkspaces();const box=$('ws-list');box.innerHTML='';
-  if(!list.find(w=>w.url===location.origin)){list.unshift({name:vaultName||'当前库',url:location.origin,token:token});localStorage.setItem('thirdc_workspaces',JSON.stringify(list))}
-  list.forEach((w,i)=>{
+  const list=wsEnsureCurrent();const box=$('ws-list');box.innerHTML='';
+  list.forEach(w=>{
     const b=document.createElement('button');b.className='ws-chip'+(w.url===location.origin?' on':'');b.textContent=w.name;
-    b.onclick=()=>{if(w.url!==location.origin){localStorage.setItem('thirdc_token',w.token||token);location.href=w.url+'/?token='+w.token}};
+    b.onclick=()=>openWorkspace(w);
     box.appendChild(b);
   });
+}
+/* 左栏知识库切换：默认选中「有使用记录」的库（最近使用） */
+function renderRailVaults(){
+  const list=wsEnsureCurrent();const box=$('rail-vaults');if(!box)return;box.innerHTML='';
+  list.forEach(w=>{
+    const b=document.createElement('button');b.className='rail-vault'+(w.url===location.origin?' on':'');b.textContent=w.name;b.title=w.url;
+    b.onclick=()=>openWorkspace(w);box.appendChild(b);
+  });
+}
+/* 启动时若记录过别的库，默认打开它（只在一次会话里跳一次，避免来回跳） */
+function maybeSwitchToLastWs(){
+  const last=localStorage.getItem('thirdc_last_ws');
+  if(!last||last===location.origin)return;
+  if(sessionStorage.getItem('thirdc_ws_redirected')==='1')return;
+  const w=loadWorkspaces().find(x=>x.url===last);
+  if(w){sessionStorage.setItem('thirdc_ws_redirected','1');openWorkspace(w);}
 }
 $b('ws-add').onclick=async()=>{
   const url=prompt('另一个 ThirdC 的 URL','http://127.0.0.1:7700');if(!url)return;
   const t2=prompt('Token','');if(!t2)return;
   const name=prompt('显示名','新工作区')||url;
   const list=loadWorkspaces();list.push({name,url:url.replace(/\/+$/,''),token:t2});
-  localStorage.setItem('thirdc_workspaces',JSON.stringify(list));renderWorkspaces();
+  localStorage.setItem('thirdc_workspaces',JSON.stringify(list));renderWorkspaces();renderRailVaults();
 };
 $b('ws-close').onclick=()=>$('ws-panel').classList.remove('open');
 let vaultName='';
@@ -2468,10 +2534,23 @@ function setMode(m){
   mode=m;localStorage.setItem('thirdc_mode',m);
   document.body.dataset.mode=m;
   document.querySelectorAll('#mode-seg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+  const at=$('agent-toggle'); if(at)at.classList.toggle('on',m==='agent');
   const def=MODES[m];
   if(def&&def.enter)def.enter();
 }
 document.querySelectorAll('#mode-seg button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+/* 顶部「⋯」菜单：低频动作归类 */
+$('more-btn')&&$('more-btn').addEventListener('click',e=>{e.stopPropagation();$('more-menu').classList.toggle('open');});
+document.addEventListener('click',e=>{const m=$('more-menu');if(m&&m.classList.contains('open')&&!m.contains(e.target))m.classList.remove('open');});
+$('more-menu')&&$('more-menu').addEventListener('click',()=>$('more-menu').classList.remove('open'));
+/* 模式入口迁出顶栏：展示/整理/学习进 ⋯，Memo/RAG 进左栏，Agent 在对话框 */
+$('studio-mode-btn')&&($('studio-mode-btn').onclick=()=>setMode('studio'));
+$('present-btn')&&($('present-btn').onclick=()=>setMode('present'));
+$('organize-mode-btn')&&($('organize-mode-btn').onclick=()=>setMode('organize'));
+$('learn-mode-btn')&&($('learn-mode-btn').onclick=()=>setMode('learn'));
+$('rail-memo')&&($('rail-memo').onclick=()=>{setMode('memo');});
+$('rail-rag')&&($('rail-rag').onclick=()=>{setMode('rag');});
+$('agent-toggle')&&($('agent-toggle').onclick=()=>setMode(mode==='agent'?'studio':'agent'));
 setMode(localStorage.getItem('thirdc_mode')||'studio');
 
 /* ───────── Memo 模式：热力图 + 日期/标签快查 ───────── */
@@ -3290,6 +3369,7 @@ function maybeOnboard(){
 function applyStatus(s){
   const m=$('sb-stats'); if(m)m.textContent=`${s.docs} docs · ${s.indexed} indexed · ${s.assets} assets`;
   const n=$('v-name'); if(n&&s.vault)n.textContent=s.vault;
+  if(s.vault)vaultName=s.vault;
   const d=$('v-docs'); if(d)d.textContent=s.docs;
   const i=$('v-idx'); if(i)i.textContent=s.indexed;
   const a=$('v-assets'); if(a)a.textContent=s.assets;
@@ -3331,6 +3411,9 @@ function bootDone(){
   applyThemePreset();
   if(window.__TAURI_INTERNALS__||window.__TAURI__) document.documentElement.classList.add('desktop');
   renderAcctInfo();
+  if(!localStorage.getItem('thirdc_last_ws'))localStorage.setItem('thirdc_last_ws',location.origin);
+  renderRailVaults();
+  maybeSwitchToLastWs();
   const cs=cacheGet('status'); if(cs)applyStatus(cs);
   const raw=cacheGet('browse');
   const cachedBrowse=(raw&&raw.data)?((!raw.path||raw.path==='Notes')?raw.data:null):(raw&&raw.folders?raw:null);
@@ -3349,7 +3432,7 @@ function bootDone(){
 
   loadRail().catch(()=>{});
   loadGraph().then(()=>{ bootStep(82,'画布就绪'); dismiss(); }).catch(()=>dismiss());
-  Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]);
+  Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]).then(()=>renderRailVaults());
   applyVP();
   setTimeout(()=>initPresence(),1400);
   setTimeout(()=>maybeOnboard(),700);
