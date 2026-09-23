@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v10';
+const SHELL = 'thirdc-shell-v11';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -205,6 +205,7 @@ self.addEventListener('fetch', e => {
         .route("/a2ui/action", post(a2ui_action))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
+        .route("/agent/apply", post(agent_apply))
         .route("/publish", get(publish_list).post(publish))
         .route("/publish/targets", get(publish_targets))
         .route("/publish/site", post(publish_site))
@@ -512,6 +513,203 @@ async fn chat(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> imp
         .map(|s| json!({ "tool": s.tool, "ok": s.ok, "summary": s.summary, "args": s.args }))
         .collect();
     Json(json!({ "mode": outcome.mode, "reply": outcome.reply, "steps": steps })).into_response()
+}
+
+/// 划选即指令：对当前选区执行一个动词（规则优先，AI 可选）。
+/// body: { op, text, path? } → { op, mode: rule|ai, placement, markdown, path? }
+async fn agent_apply(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let op = req.get("op").and_then(|v| v.as_str()).unwrap_or("");
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    if text.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "选区为空").into_response();
+    }
+    let ai = st.kernel.lock().unwrap().vault.config.ai.clone();
+    let ai_ready = ai.as_ref().map(|c| !c.base_url.is_empty()).unwrap_or(false);
+
+    // 规则动词：离线可用，确定性
+    match op {
+        "condense" => {
+            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":ab_condense(text)})).into_response();
+        }
+        "summarize" => {
+            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":ab_summarize(text)})).into_response();
+        }
+        "extract-node" => {
+            let title = ab_first_line_title(text);
+            let slug = ab_slug(&title);
+            let root = { st.kernel.lock().unwrap().vault.root.clone() };
+            let mut path = format!("Notes/{slug}.md");
+            let mut n = 2;
+            while root.join(&path).exists() && n < 100 {
+                path = format!("Notes/{slug}-{n}.md");
+                n += 1;
+            }
+            let content = format!("# {title}\n\n{}\n", text.trim());
+            {
+                let mut k = st.kernel.lock().unwrap();
+                if let Err(e) = k.put_doc(&path, &content) {
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+                }
+                let _ = k.sync_all();
+            }
+            return Json(json!({
+                "op": op, "mode": "rule", "placement": "replace",
+                "markdown": format!("[[{title}]]"), "path": path
+            })).into_response();
+        }
+        "rewrite" | "expand" | "translate" => {
+            if !ai_ready {
+                return err(StatusCode::NOT_IMPLEMENTED, "该动作需要先在「设置 → 连接」配置模型；离线可用：总结 / 精简 / 提取为节点").into_response();
+            }
+        }
+        _ => return err(StatusCode::BAD_REQUEST, format!("未知动作：{op}")).into_response(),
+    }
+
+    // AI 动词
+    let cfg = match ai { Some(c) => c, None => return err(StatusCode::NOT_IMPLEMENTED, "未配置模型").into_response() };
+    let server = st.mcp.clone();
+    let verb = match op {
+        "rewrite" => "改写（保持原意，表达更清晰）",
+        "expand" => "扩写（补充细节与例子，但不改变事实）",
+        _ => "翻译成英文",
+    };
+    let prompt = format!("你是文本编辑。请对下面的文字执行：{verb}。只输出结果本身，不要解释、不要 Markdown 代码围栏。\n\n{text}");
+    let outcome = match thirdc_mcp::agent::run_ai(&server, &cfg, &prompt).await {
+        Ok(o) => o,
+        Err(e) => return err(StatusCode::BAD_GATEWAY, format!("模型调用失败：{e}")).into_response(),
+    };
+    let mut out = outcome.reply.trim().to_string();
+    if out.starts_with("```") {
+        let t = out.trim_start_matches("```");
+        let t = t.trim_end_matches("```").trim();
+        let t = match t.find('\n') {
+            Some(nl) if t[..nl].chars().all(|c| c.is_ascii_alphanumeric()) => t[nl + 1..].trim(),
+            _ => t,
+        };
+        out = t.to_string();
+    }
+    Json(json!({"op":op,"mode":"ai","placement":"replace","markdown":out})).into_response()
+}
+
+/// 规则动词：精简（去空行/多余空白/连续重复行）。
+fn ab_condense(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut prev_blank = false;
+    for raw in text.lines() {
+        let t = raw.trim();
+        if t.is_empty() {
+            if !prev_blank && !out.is_empty() {
+                out.push(String::new());
+                prev_blank = true;
+            }
+            continue;
+        }
+        let mut s = String::new();
+        let mut sp = 0usize;
+        for ch in t.chars() {
+            if ch == ' ' || ch == '\t' {
+                sp += 1;
+                if sp <= 1 {
+                    s.push(' ');
+                }
+            } else {
+                sp = 0;
+                s.push(ch);
+            }
+        }
+        if out.last().map(|l| l == &s).unwrap_or(false) {
+            continue;
+        }
+        out.push(s);
+        prev_blank = false;
+    }
+    while out.last().map(|l| l.is_empty()).unwrap_or(false) {
+        out.pop();
+    }
+    out.join("\n")
+}
+
+fn ab_first_sentence(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.trim().chars() {
+        out.push(ch);
+        if "。！？!?".contains(ch) {
+            break;
+        }
+        if out.chars().count() >= 90 {
+            break;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// 规则动词：总结（标题 + 每段首句，最多 12 条）。
+fn ab_summarize(text: &str) -> String {
+    let mut bullets: Vec<String> = Vec::new();
+    for para in text.split("\n\n") {
+        let p = para.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if let Some(rest) = p.strip_prefix('#') {
+            let h = rest.trim_start_matches('#').trim();
+            if !h.is_empty() {
+                bullets.push(format!("- **{h}**"));
+            }
+            continue;
+        }
+        let fs = ab_first_sentence(p);
+        if !fs.is_empty() {
+            bullets.push(format!("- {fs}"));
+        }
+        if bullets.len() >= 12 {
+            break;
+        }
+    }
+    if bullets.is_empty() {
+        "-（无内容）".to_string()
+    } else {
+        bullets.join("\n")
+    }
+}
+
+fn ab_first_line_title(text: &str) -> String {
+    for l in text.lines() {
+        let t = l.trim().trim_start_matches('#').trim();
+        let t = t
+            .trim_end_matches(|c: char| "。！？!?，,.;；:：、".contains(c))
+            .trim();
+        if !t.is_empty() {
+            return t.chars().take(40).collect();
+        }
+    }
+    "提取片段".to_string()
+}
+
+fn ab_slug(title: &str) -> String {
+    let mut s = String::new();
+    for ch in title.chars() {
+        if ch.is_alphanumeric() {
+            for lc in ch.to_lowercase() {
+                s.push(lc);
+            }
+        } else {
+            s.push('-');
+        }
+    }
+    let s = s.trim_matches('-').to_string();
+    if s.is_empty() {
+        format!("note-{}", now_secs())
+    } else {
+        s
+    }
 }
 
 async fn list_docs_api(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
@@ -1049,6 +1247,61 @@ mod tests {
         );
         let folders = v["folders"].as_array().unwrap();
         assert!(folders.iter().any(|f| f["name"] == "Topic" && f["count"] == 1));
+    }
+
+    #[test]
+    fn rule_verbs_condense_and_summarize() {
+        // 精简：去空行、折叠空白、去连续重复行
+        assert_eq!(ab_condense("A   B\n\nC\nC\n\n\nD   "), "A B\n\nC\n\nD");
+        // 总结：标题 + 每段首句
+        let s = ab_summarize("# 标题\n\n第一句。第二句。\n\n## 小节\n\n第三句。");
+        assert!(s.contains("- **标题**"), "{s}");
+        assert!(s.contains("- 第一句。"), "{s}");
+        assert!(s.contains("- **小节**"), "{s}");
+        assert!(s.contains("- 第三句。"), "{s}");
+        // slug：中文保留，符号转连字符
+        assert_eq!(ab_slug("Hello 世界!"), "hello-世界");
+        assert_eq!(ab_first_line_title("# 我的片段\n\n正文"), "我的片段");
+    }
+
+    #[tokio::test]
+    async fn agent_apply_rules_offline() {
+        let (app, token, _dir) = test_router();
+        let auth = format!("Bearer {token}");
+        // 规则动词：精简（无模型也能用）
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agent/apply")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"op":"condense","text":"a   b\n\n\nb"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!(v["mode"], "rule");
+        assert_eq!(v["placement"], "replace");
+        assert_eq!(v["markdown"], "a b\n\nb");
+
+        // 需要模型的动作：离线时明确拒绝（501）
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agent/apply")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"op":"rewrite","text":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
     }
 
     #[tokio::test]

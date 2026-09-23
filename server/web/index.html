@@ -75,6 +75,19 @@ html.desktop .lights{display:none}
   font:500 13px var(--font-body);text-align:left;cursor:pointer;transition:background .15s,color .15s}
 .mm-item:hover{background:var(--hover);color:var(--fg)}
 .mm-sep{height:1px;margin:5px 8px;background:var(--border)}
+/* 划选即指令：动作栏 */
+#actionbar{position:fixed;z-index:130;display:none;flex-direction:column;width:min(460px,82vw);background:var(--surface-strong);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);overflow:hidden}
+#actionbar.on{display:flex;animation:nodeIn .16s var(--ease-out) both}
+#ab-q{height:40px;border:none;border-bottom:1px solid var(--border);background:transparent;color:var(--fg);padding:0 12px;font:13px var(--font-body);outline:none}
+#ab-list{display:flex;flex-wrap:wrap;gap:6px;padding:8px}
+.ab-verb{height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font:500 12px var(--font-body);cursor:pointer;transition:all .15s}
+.ab-verb:hover{color:var(--fg);border-color:var(--border-strong)}
+.ab-verb.ai{color:var(--accent)}
+.ab-verb:disabled{opacity:.5;cursor:default}
+#ab-preview{border-top:1px solid var(--border);padding:10px}
+.ab-pv-head{font:600 11px var(--font-mono);color:var(--faint);margin-bottom:6px;display:flex;gap:8px}
+.ab-pv-body{max-height:36vh;overflow:auto;white-space:pre-wrap;font:12.5px/1.7 var(--font-body);color:var(--fg);background:var(--bg3);border-radius:8px;padding:10px;margin:0}
+.ab-pv-actions{display:flex;gap:6px;margin-top:8px}
 .search-pill{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:11px;border:1px solid var(--border);background:var(--surface);min-width:230px;cursor:text}
 .search-pill kbd{font-family:var(--font-mono);font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:6px;padding:1px 5px}
 .search-pill span{flex:1;color:var(--faint);font-size:13px}
@@ -901,6 +914,15 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <pre id="term-out" style="margin:10px 0 0;padding:12px;border-radius:12px;background:oklch(50% 0 0/.08);border:1px solid var(--border);font-family:var(--font-mono);font-size:12.5px;white-space:pre-wrap;max-height:48vh;overflow:auto;min-height:80px"></pre>
   <button class="act" onclick="document.getElementById('term-ov').style.display='none'" style="margin-top:10px;width:100%">关闭</button>
 </div></div>
+<div id="actionbar">
+  <input id="ab-q" placeholder="对选中内容…（回车执行 · Esc 取消）" autocomplete="off">
+  <div id="ab-list"></div>
+  <div id="ab-preview" style="display:none">
+    <div class="ab-pv-head">预览 <span id="ab-pv-mode"></span></div>
+    <div class="ab-pv-body" id="ab-pv-body"></div>
+    <div class="ab-pv-actions"><button class="act" id="ab-apply" style="background:var(--accent);color:var(--on-accent);border-color:var(--accent)">接受</button><button class="act" id="ab-retry">重试</button><button class="act" id="ab-cancel">取消</button></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <div id="present-ov">
@@ -1267,6 +1289,11 @@ $('nodes').addEventListener('dblclick',e=>{
 });
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette();return;}
+  if((e.metaKey||e.ctrlKey)&&e.key==='.'){e.preventDefault();abShow();return;}
+  if(e.key==='Escape'&&$('actionbar')&&$('actionbar').classList.contains('on')){abHide();return;}
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='z'&&abUndoStack.length){
+    e.preventDefault();abUndo();return;
+  }
   const tag=(e.target.tagName||'').toLowerCase();
   if(tag==='input'||tag==='textarea')return;
   if(e.key==='f'){fit();}if(e.key==='t'){tidy();}if(e.key==='n'){newDoc();}
@@ -3205,6 +3232,114 @@ async function sendMemoText(text){
   }catch(e){}
 }
 
+/* ───────── 划选即指令：动作栏（离线规则优先，AI 可选） ───────── */
+let abSel=null, abLastOp='', abLastPointer={x:80,y:120};
+const abUndoStack=[];
+window.addEventListener('pointerup',e=>{abLastPointer={x:e.clientX,y:e.clientY};},{passive:true});
+const AB_VERBS=[
+  {id:'summarize',label:'总结',rule:true},
+  {id:'condense',label:'精简',rule:true},
+  {id:'extract-node',label:'提取为节点',rule:true},
+  {id:'rewrite',label:'改写',ai:true},
+  {id:'expand',label:'扩写',ai:true},
+  {id:'translate',label:'翻译',ai:true},
+];
+function abAiReady(){return !!window.__aiConfigured;}
+function abCaptureSelection(){
+  if(current===null)return null;
+  const ed=$('editor'); if(!ed)return null;
+  if($('d-body')&&$('d-body').classList.contains('view'))return null;
+  const s=ed.selectionStart,e=ed.selectionEnd;
+  if(s==null||e==null||e<=s)return null;
+  const text=ed.value.slice(s,e);
+  if(!text.trim())return null;
+  return {s,e,text};
+}
+function abRenderList(q){
+  const box=$('ab-list'); if(!box)return; box.innerHTML='';
+  const ql=(q||'').trim().toLowerCase();
+  AB_VERBS.filter(v=>abAiReady()||v.rule)
+    .filter(v=>!ql||v.label.toLowerCase().includes(ql)||v.id.includes(ql))
+    .forEach(v=>{
+      const b=document.createElement('button');b.className='ab-verb'+(v.ai?' ai':'');b.textContent=v.label+(v.ai?' ✦':'');
+      b.onclick=()=>abRun(v.id);box.appendChild(b);
+    });
+  if(!box.children.length)box.innerHTML='<span class="rm-empty">无匹配动作</span>';
+}
+function abShow(){
+  const sel=abCaptureSelection();
+  if(!sel){
+    if($('d-body')&&$('d-body').classList.contains('view'))toast('先在编辑模式划选文字（点 👁 切到编辑）','err');
+    else toast('先在正文里划选一段文字','err');
+    return;
+  }
+  abSel=sel;
+  const bar=$('actionbar'); if(!bar)return;
+  bar.classList.add('on');
+  $('ab-preview').style.display='none';
+  const q=$('ab-q'); q.value=''; q.placeholder='对选中内容…（回车执行 · Esc 取消）';
+  abRenderList('');
+  const w=bar.offsetWidth||380,h=bar.offsetHeight||120;
+  let x=Math.min(abLastPointer.x,innerWidth-w-12), y=Math.min(abLastPointer.y+12,innerHeight-h-12);
+  bar.style.left=Math.max(12,x)+'px'; bar.style.top=Math.max(12,y)+'px';
+  q.focus();
+}
+function abHide(){$('actionbar')&&$('actionbar').classList.remove('on');}
+async function abRun(op){
+  if(!abSel)return;
+  abLastOp=op;
+  const q=$('ab-q'); const prev=q.placeholder; q.placeholder='处理中…';
+  $('ab-list').querySelectorAll('.ab-verb').forEach(b=>b.disabled=true);
+  try{
+    const r=await api('/agent/apply',{method:'POST',json:{op,text:abSel.text,path:current}});
+    q.placeholder=prev;
+    if(op==='extract-node'){
+      abApplyReplace(r.markdown);
+      if(r.path)await refreshAll();
+      toast('已提取为节点 '+r.path,'ok');
+      abHide();
+      return;
+    }
+    $('ab-preview').style.display='block';
+    $('ab-pv-mode').textContent=(r.mode==='ai'?'· AI':'· 规则')+(r.placement==='replace'?' · 替换选区':'');
+    $('ab-pv-body').textContent=r.markdown||'';
+    $('ab-preview').dataset.markdown=r.markdown||'';
+    const bar=$('actionbar'); const h=bar.offsetHeight||200;
+    bar.style.top=Math.max(12,Math.min(parseFloat(bar.style.top)||120,innerHeight-h-12))+'px';
+  }catch(e){ q.placeholder=prev; toast('动作失败：'+e.message,'err'); }
+  $('ab-list').querySelectorAll('.ab-verb').forEach(b=>b.disabled=false);
+}
+function abApplyReplace(md){
+  if(!abSel)return;
+  const ed=$('editor');
+  abUndoStack.push({value:ed.value,s:abSel.s,e:abSel.e});
+  ed.setRangeText(md,abSel.s,abSel.e,'end');
+  dirty=true;
+  saveDoc();
+}
+function abUndo(){
+  const u=abUndoStack.pop(); if(!u)return;
+  const ed=$('editor'); if(!ed)return;
+  ed.value=u.value; dirty=true;
+  $('drawer').classList.add('open');
+  saveDoc();
+  toast('已撤销上一次动作','ok');
+}
+$('ab-q')&&$('ab-q').addEventListener('input',e=>abRenderList(e.target.value));
+$('ab-q')&&$('ab-q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();const f=$('ab-list').querySelector('.ab-verb');if(f)f.click();}
+  if(e.key==='Escape'){e.preventDefault();abHide();}
+});
+$('ab-apply')&&($('ab-apply').onclick=()=>{const md=$('ab-preview').dataset.markdown||'';abApplyReplace(md);abHide();toast('已应用','ok');});
+$('ab-cancel')&&($('ab-cancel').onclick=()=>abHide());
+$('ab-retry')&&($('ab-retry').onclick=()=>{if(abSel&&abLastOp)abRun(abLastOp);});
+/* 在正文里划选即浮现动作栏（非侵入：短小、可点外部/Esc 关闭） */
+$('editor')&&$('editor').addEventListener('mouseup',()=>{setTimeout(()=>{if(abCaptureSelection())abShow();},0);});
+document.addEventListener('pointerdown',e=>{
+  const bar=$('actionbar');
+  if(bar&&bar.classList.contains('on')&&!bar.contains(e.target)&&e.target!==$('editor'))abHide();
+},true);
+
 /* 设置面板 */
 $('settings-btn').addEventListener('click',()=>{openSettings()});
 async function openSettings(){
@@ -3514,6 +3649,7 @@ async function loadStatus(){
 }
 async function loadMeta(){
   try{const m=await api('/connections');
+    window.__aiConfigured=!!(m.ai&&m.ai.configured);
     $('sb-mode').textContent=(m.ai&&m.ai.configured?`AI ${m.ai.model}`:`命令模式 · ${(m.connections||[]).length} 连接`)+` · ${view==='canvas'?'画布':view==='timeline'?'时间线':'看板'}`;
   }catch{}
 }
