@@ -2869,7 +2869,8 @@ async fn backup_vault(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
     audit_log(&k.vault.sidecar(), "backup", &json!({ "file": fname, "bytes": size, "encrypted": true }));
     Json(json!({
         "file": fname, "bytes": size, "encrypted": true,
-        "message": "备份已加密存储（丢失密码=丢失备份）；可用 WebDAV 推送到网盘"
+        "cipher": "AES-256-GCM", "kdf": "PBKDF2-HMAC-SHA256(600k)", "signed": "Ed25519",
+        "message": "备份已加密（AES-256-GCM）+ 设备签名；网盘方看不到原始数据，改动可被发现（丢失密码=丢失备份）"
     })).into_response()
 }
 

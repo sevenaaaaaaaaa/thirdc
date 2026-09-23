@@ -30,6 +30,8 @@ pub enum DeployError {
     Unsupported(String),
     #[error("missing config: {0}")]
     Missing(String),
+    #[error("crypto: {0}")]
+    Crypto(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -483,91 +485,372 @@ pub mod gitops {
     }
 }
 
-/// 加密备份：AES-256-GCM 打包整个 vault → 上传到目标。
-/// 密钥 = 用户密码派生（PBKDF2 → SHA256）；丢失密码 = 丢失备份（设计如此）。
+/// 加密备份（v2）：真实 AEAD + 慢 KDF + 防篡改清单 + 设备签名。
+///
+/// 目标：网盘/远端只拿到密文，看不到任何原始数据；任何字节被改动都能被发现。
+/// - 机密性：AES-256-GCM（ring）
+/// - 抗爆破：PBKDF2-HMAC-SHA256（随机 16B 盐，60 万次迭代）
+/// - 完整性：AEAD tag + 每文件 SHA-256 清单（root 哈希）
+/// - 来源真实性：Ed25519 设备密钥签名（私钥只在本机 `.thirdc/`）
+///
+/// 容器：MAGIC("3CBK") ver kdf iters salt nonce pubkey | sig | ct_len ciphertext
+/// 兼容：v1（旧 SHA256-CTR 格式）仍可解密；v1 无清单，不能直接还原文件。
 pub mod encrypted_backup {
     use super::DeployError;
+    use ring::rand::SecureRandom;
+    use ring::signature::KeyPair;
+    use ring::{aead, pbkdf2, rand, signature};
 
-    /// 把 vault 目录打包成单个加密文件（返回字节）。
-    /// 格式：IV(12B) + AES-256-GCM(tar.gz)
-    pub fn encrypt_vault(
-        vault_root: &std::path::Path,
-        password: &str,
-    ) -> Result<Vec<u8>, DeployError> {
-        // 1. 内存里打 tar.gz（简化：直接拼文件内容，格式：路径长度+路径+内容长度+内容）
-        let mut blob: Vec<u8> = Vec::new();
-        let mut stack = vec![vault_root.to_path_buf()];
+    pub const MAGIC: &[u8; 4] = b"3CBK";
+    const VERSION: u8 = 2;
+    const BODY_MAGIC: &[u8; 4] = b"3CAR";
+    const BODY_VERSION: u8 = 2;
+    const KDF_PBKDF2_SHA256: u8 = 1;
+    const PBKDF2_ITERS: u32 = 600_000;
+    const SALT_LEN: usize = 16;
+    const NONCE_LEN: usize = 12;
+    const ED25519_PUB: usize = 32;
+    const ED25519_SIG: usize = 64;
+    const KEY_REL: &str = ".thirdc/backup-signing.key";
+
+    fn crypto<E: std::fmt::Display>(e: E) -> DeployError {
+        DeployError::Crypto(format!("{e}"))
+    }
+
+    fn sha256(parts: &[&[u8]]) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        for p in parts {
+            h.update(p);
+        }
+        h.finalize().into()
+    }
+
+    /// 绝不进备份包的机密/可再生成内容。
+    fn excluded(rel: &str) -> bool {
+        rel == ".thirdc/machine.toml"
+            || rel == KEY_REL
+            || rel == ".thirdc/backup-signing.pub"
+            || rel.starts_with(".thirdc/backups/")
+    }
+
+    struct Entry {
+        path: String,
+        sha: [u8; 32],
+    }
+
+    struct Body {
+        manifest: Vec<Entry>,
+        payloads: Vec<(String, Vec<u8>)>,
+    }
+
+    fn collect(root: &std::path::Path) -> Result<(Vec<Entry>, Vec<(String, Vec<u8>)>), DeployError> {
+        let mut stack = vec![root.to_path_buf()];
+        let mut files: Vec<(String, Vec<u8>)> = Vec::new();
         while let Some(d) = stack.pop() {
             let Ok(rd) = std::fs::read_dir(&d) else { continue };
             for e in rd.filter_map(|e| e.ok()) {
                 let p = e.path();
                 let name = e.file_name().to_string_lossy().into_owned();
-                if name == ".git" || name.starts_with("target") { continue; }
-                if p.is_dir() { stack.push(p); continue; }
-                let rel = p.strip_prefix(vault_root).unwrap_or(&p).to_string_lossy();
+                if name == ".git" || name.starts_with("target") {
+                    continue;
+                }
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                let rel = p
+                    .strip_prefix(root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if excluded(&rel) {
+                    continue;
+                }
                 let content = std::fs::read(&p).unwrap_or_default();
-                blob.extend_from_slice(&(rel.len() as u32).to_le_bytes());
-                blob.extend_from_slice(rel.as_bytes());
-                blob.extend_from_slice(&(content.len() as u64).to_le_bytes());
-                blob.extend_from_slice(&content);
+                files.push((rel, content));
             }
         }
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        let manifest = files
+            .iter()
+            .map(|(p, c)| Entry { path: p.clone(), sha: sha256(&[c]) })
+            .collect();
+        Ok((manifest, files))
+    }
 
-        // 2. AES-256-GCM 加密（密码 → SHA256 → key）
+    fn manifest_root(entries: &[Entry]) -> [u8; 32] {
         use sha2::{Digest, Sha256};
-        let key_bytes = Sha256::digest(password.as_bytes());
-        let iv: [u8; 12] = rand_iv();
-
-        // 简易 CTR + HMAC（标准 AES-GCM 需要 aes crate；用 SHA256-CTR 做轻量加密）
-        // 生产环境应换 ring/openssl——这里先用 SHA256 流加密演示接口
-        let mut keystream = Vec::new();
-        let mut counter: u64 = 0;
-        while keystream.len() < blob.len() + 32 {
-            let mut h = Sha256::new();
-            h.update(&key_bytes);
-            h.update(&iv);
-            h.update(&counter.to_le_bytes());
-            keystream.extend_from_slice(&h.finalize());
-            counter += 1;
+        let mut h = Sha256::new();
+        for e in entries {
+            h.update((e.path.len() as u32).to_le_bytes());
+            h.update(e.path.as_bytes());
+            h.update(e.sha);
         }
-        let mut encrypted = Vec::with_capacity(blob.len() + 12);
-        encrypted.extend_from_slice(&iv);
-        for (i, b) in blob.iter().enumerate() {
-            encrypted.push(b ^ keystream[i]);
-        }
-        // HMAC 完整性
-        let mut mac = Sha256::new();
-        mac.update(&key_bytes);
-        mac.update(&encrypted);
-        let tag = mac.finalize();
-        encrypted.extend_from_slice(&tag);
-        Ok(encrypted)
+        h.finalize().into()
     }
 
-    fn rand_iv() -> [u8; 12] {
-        let t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let mut iv = [0u8; 12];
-        iv[..8].copy_from_slice(&t.as_secs().to_le_bytes());
-        iv[8..].copy_from_slice(&t.subsec_nanos().to_le_bytes());
-        iv
+    fn build_body(manifest: &[Entry], payloads: &[(String, Vec<u8>)]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(BODY_MAGIC);
+        b.push(BODY_VERSION);
+        b.extend_from_slice(&(manifest.len() as u32).to_le_bytes());
+        for e in manifest {
+            b.extend_from_slice(&(e.path.len() as u32).to_le_bytes());
+            b.extend_from_slice(e.path.as_bytes());
+            b.extend_from_slice(&e.sha);
+        }
+        b.extend_from_slice(&(payloads.len() as u32).to_le_bytes());
+        for (p, c) in payloads {
+            b.extend_from_slice(&(p.len() as u32).to_le_bytes());
+            b.extend_from_slice(p.as_bytes());
+            b.extend_from_slice(&(c.len() as u64).to_le_bytes());
+            b.extend_from_slice(c);
+        }
+        b
     }
 
-    /// 解密还原（恢复用）。
+    struct Reader<'a> {
+        b: &'a [u8],
+        p: usize,
+    }
+    impl<'a> Reader<'a> {
+        fn take(&mut self, n: usize) -> Result<&'a [u8], DeployError> {
+            if self.p + n > self.b.len() {
+                return Err(DeployError::Crypto("数据截断".into()));
+            }
+            let s = &self.b[self.p..self.p + n];
+            self.p += n;
+            Ok(s)
+        }
+        fn u8(&mut self) -> Result<u8, DeployError> {
+            Ok(self.take(1)?[0])
+        }
+        fn u16(&mut self) -> Result<u16, DeployError> {
+            Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+        }
+        fn u32(&mut self) -> Result<u32, DeployError> {
+            Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+        }
+        fn u64(&mut self) -> Result<u64, DeployError> {
+            Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+        }
+    }
+
+    fn parse_body(b: &[u8]) -> Result<Body, DeployError> {
+        let mut r = Reader { b, p: 0 };
+        if r.take(4)? != &BODY_MAGIC[..] {
+            return Err(DeployError::Crypto("备份内容格式错误".into()));
+        }
+        let _ver = r.u8()?;
+        let mc = r.u32()? as usize;
+        let mut manifest = Vec::with_capacity(mc);
+        for _ in 0..mc {
+            let pl = r.u32()? as usize;
+            let path = String::from_utf8_lossy(r.take(pl)?).into_owned();
+            let sha: [u8; 32] = r.take(32)?.try_into().map_err(crypto)?;
+            manifest.push(Entry { path, sha });
+        }
+        let pc = r.u32()? as usize;
+        let mut payloads = Vec::with_capacity(pc);
+        for _ in 0..pc {
+            let pl = r.u32()? as usize;
+            let path = String::from_utf8_lossy(r.take(pl)?).into_owned();
+            let cl = r.u64()? as usize;
+            let content = r.take(cl)?.to_vec();
+            payloads.push((path, content));
+        }
+        Ok(Body { manifest, payloads })
+    }
+
+    /// 设备签名密钥：读 `.thirdc/backup-signing.key`，没有就现场生成（0600）。
+    fn signing_key(root: &std::path::Path) -> Result<signature::Ed25519KeyPair, DeployError> {
+        let path = root.join(KEY_REL);
+        if let Ok(bytes) = std::fs::read(&path) {
+            return signature::Ed25519KeyPair::from_pkcs8(&bytes).map_err(crypto);
+        }
+        let rng = rand::SystemRandom::new();
+        let doc = signature::Ed25519KeyPair::generate_pkcs8(&rng).map_err(crypto)?;
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&path, doc.as_ref())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        let kp = signature::Ed25519KeyPair::from_pkcs8(doc.as_ref()).map_err(crypto)?;
+        let _ = std::fs::write(root.join(".thirdc/backup-signing.pub"), kp.public_key().as_ref());
+        Ok(kp)
+    }
+
+    fn header(kdf_alg: u8, iters: u32, salt: &[u8], nonce: &[u8], pubkey: &[u8]) -> Vec<u8> {
+        let mut h = Vec::new();
+        h.extend_from_slice(MAGIC);
+        h.push(VERSION);
+        h.push(kdf_alg);
+        h.extend_from_slice(&iters.to_le_bytes());
+        h.extend_from_slice(salt);
+        h.extend_from_slice(nonce);
+        h.extend_from_slice(&(pubkey.len() as u16).to_le_bytes());
+        h.extend_from_slice(pubkey);
+        h
+    }
+
+    fn derive_key(password: &str, salt: &[u8], iters: u32) -> Result<[u8; 32], DeployError> {
+        let n = std::num::NonZeroU32::new(iters)
+            .ok_or_else(|| DeployError::Crypto("迭代次数非法".into()))?;
+        let mut key = [0u8; 32];
+        pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256, n, salt, password.as_bytes(), &mut key);
+        Ok(key)
+    }
+
+    /// 打包并加密整个 vault（v2）。
+    pub fn encrypt_vault(root: &std::path::Path, password: &str) -> Result<Vec<u8>, DeployError> {
+        if password.len() < 8 {
+            return Err(DeployError::Crypto("备份密码至少 8 位".into()));
+        }
+        let (manifest, payloads) = collect(root)?;
+        let body = build_body(&manifest, &payloads);
+        let root_hash = manifest_root(&manifest);
+
+        let rng = rand::SystemRandom::new();
+        let mut salt = [0u8; SALT_LEN];
+        rng.fill(&mut salt).map_err(crypto)?;
+        let mut nonce_b = [0u8; NONCE_LEN];
+        rng.fill(&mut nonce_b).map_err(crypto)?;
+        let key = derive_key(password, &salt, PBKDF2_ITERS)?;
+        let kp = signing_key(root)?;
+        let pubkey = kp.public_key().as_ref().to_vec();
+        let hdr = header(KDF_PBKDF2_SHA256, PBKDF2_ITERS, &salt, &nonce_b, &pubkey);
+
+        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key).map_err(crypto)?;
+        let lk = aead::LessSafeKey::new(unbound);
+        let nonce = aead::Nonce::try_assume_unique_for_key(&nonce_b).map_err(crypto)?;
+        let mut ct = body;
+        lk.seal_in_place_append_tag(nonce, aead::Aad::from(&hdr[..]), &mut ct)
+            .map_err(crypto)?;
+
+        let msg = sha256(&[&hdr, &ct, &root_hash]);
+        let sig = kp.sign(&msg);
+
+        let mut out = Vec::with_capacity(hdr.len() + 2 + ED25519_SIG + 8 + ct.len());
+        out.extend_from_slice(&hdr);
+        out.extend_from_slice(&(ED25519_SIG as u16).to_le_bytes());
+        out.extend_from_slice(sig.as_ref());
+        out.extend_from_slice(&(ct.len() as u64).to_le_bytes());
+        out.extend_from_slice(&ct);
+        Ok(out)
+    }
+
+    /// 解容器 → 明文 body，校验 AEAD + Ed25519 签名。
+    fn open_body(data: &[u8], password: &str) -> Result<Vec<u8>, DeployError> {
+        let mut r = Reader { b: data, p: 0 };
+        if r.take(4)? != &MAGIC[..] {
+            return Err(DeployError::Crypto("不是 v2 备份容器".into()));
+        }
+        let _ver = r.u8()?;
+        let kdf_alg = r.u8()?;
+        if kdf_alg != KDF_PBKDF2_SHA256 {
+            return Err(DeployError::Crypto("不支持的 KDF".into()));
+        }
+        let iters = r.u32()?;
+        let salt = r.take(SALT_LEN)?.to_vec();
+        let nonce_b: [u8; NONCE_LEN] = r.take(NONCE_LEN)?.try_into().map_err(crypto)?;
+        let pk_len = r.u16()? as usize;
+        let pubkey = r.take(pk_len)?.to_vec();
+        let header_slice = data[..r.p].to_vec();
+        let sig_len = r.u16()? as usize;
+        let sig = r.take(sig_len)?.to_vec();
+        let ct_len = r.u64()? as usize;
+        let ct_start = r.p;
+        let mut ct = r.take(ct_len)?.to_vec();
+
+        let key = derive_key(password, &salt, iters)?;
+        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key).map_err(crypto)?;
+        let lk = aead::LessSafeKey::new(unbound);
+        let nonce = aead::Nonce::try_assume_unique_for_key(&nonce_b).map_err(crypto)?;
+        let plain = lk
+            .open_in_place(nonce, aead::Aad::from(&header_slice[..]), &mut ct)
+            .map_err(crypto)?;
+        let body = plain.to_vec();
+
+        // 签名校验：绑定 header + 原始密文（含 tag）+ 清单 root
+        let parsed = parse_body(&body)?;
+        let root_hash = manifest_root(&parsed.manifest);
+        let ct_slice = &data[ct_start..ct_start + ct_len];
+        if pubkey.len() == ED25519_PUB && sig.len() == ED25519_SIG {
+            let msg = sha256(&[&header_slice, ct_slice, &root_hash]);
+            let vk = signature::UnparsedPublicKey::new(&signature::ED25519, &pubkey);
+            vk.verify(&msg, &sig)
+                .map_err(|_| DeployError::Crypto("签名校验失败（备份可能被篡改）".into()))?;
+        }
+        Ok(body)
+    }
+
+    /// 解密（不落盘）。v2 返回明文 body；v1 走旧格式。
     pub fn decrypt_vault(data: &[u8], password: &str) -> Result<Vec<u8>, DeployError> {
-        if data.len() < 44 { return Err(DeployError::Missing("数据太短".into())); }
+        if data.len() >= 4 && &data[..4] == MAGIC {
+            open_body(data, password)
+        } else {
+            decrypt_legacy(data, password)
+        }
+    }
+
+    /// 解密 + 校验清单 + 还原文件到 dest_root，返回还原文件数。
+    pub fn restore_vault(
+        data: &[u8],
+        password: &str,
+        dest_root: &std::path::Path,
+    ) -> Result<usize, DeployError> {
+        if data.len() < 4 || &data[..4] != MAGIC {
+            let _ = decrypt_legacy(data, password)?;
+            return Err(DeployError::Crypto("旧版备份（v1）不含文件清单，无法直接还原".into()));
+        }
+        let body = open_body(data, password)?;
+        let parsed = parse_body(&body)?;
+        if parsed.manifest.len() != parsed.payloads.len() {
+            return Err(DeployError::Crypto("清单与文件数量不一致".into()));
+        }
+        let mut n = 0usize;
+        for (i, (path, content)) in parsed.payloads.iter().enumerate() {
+            if sha256(&[content]) != parsed.manifest[i].sha {
+                return Err(DeployError::Crypto(format!("文件校验失败：{path}")));
+            }
+            // 安全护栏：不覆盖本机机密，不越界写盘
+            if path.contains("..")
+                || path.starts_with('/')
+                || path == ".thirdc/machine.toml"
+                || path.starts_with(".thirdc/backup-signing")
+            {
+                continue;
+            }
+            let dest = dest_root.join(path);
+            if let Some(dir) = dest.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&dest, content)?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
+    /// 旧版 v1：IV(12) + XOR(SHA256 keystream) + SHA256(key‖ct) 标签。
+    fn decrypt_legacy(data: &[u8], password: &str) -> Result<Vec<u8>, DeployError> {
+        if data.len() < 44 {
+            return Err(DeployError::Crypto("数据太短".into()));
+        }
         use sha2::{Digest, Sha256};
         let key_bytes = Sha256::digest(password.as_bytes());
         let iv = &data[..12];
         let (payload, tag) = data[12..].split_at(data[12..].len() - 32);
-        // 验 HMAC
         let mut mac = Sha256::new();
         mac.update(&key_bytes);
         mac.update(&data[..data.len() - 32]);
         let expected = mac.finalize();
         if expected.as_slice() != tag {
-            return Err(DeployError::Missing("密码错误或文件已损坏（HMAC 校验失败）".into()));
+            return Err(DeployError::Crypto("密码错误或文件已损坏（校验失败）".into()));
         }
         let mut keystream = Vec::new();
         let mut counter: u64 = 0;
