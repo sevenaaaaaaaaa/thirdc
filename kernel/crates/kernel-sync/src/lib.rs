@@ -26,6 +26,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 const K_TITLE: &str = "t";
+/// frontmatter（Document.meta）整体序列化为 JSON 存一个字段：文件即真相，元数据不能丢。
+const K_META: &str = "meta";
 const P_BLOCK: &str = "d:";
 const P_ORDER: &str = "o:";
 
@@ -118,8 +120,10 @@ impl OpLog {
         let old_blocks = read_keyed(doc, P_BLOCK)?;
         let old_orders = read_keyed(doc, P_ORDER)?;
         let old_title = read_scalar(doc, K_TITLE).unwrap_or_default();
+        let old_meta = read_scalar(doc, K_META).unwrap_or_default();
 
         let new_title = model.title.clone().unwrap_or_default();
+        let new_meta = serde_json::to_string(&model.meta).unwrap_or_default();
         let new_json: BTreeMap<String, String> = model
             .blocks
             .iter()
@@ -150,7 +154,7 @@ impl OpLog {
 
         let blocks_changed = old_blocks != new_json;
         let orders_changed = old_orders != new_orders;
-        if !blocks_changed && !orders_changed && old_title == new_title {
+        if !blocks_changed && !orders_changed && old_title == new_title && old_meta == new_meta {
             return Ok(()); // 无变化不写 op
         }
 
@@ -158,6 +162,9 @@ impl OpLog {
         let mut tx = entry.doc.transaction();
         if old_title != new_title {
             tx.put(automerge::ROOT, K_TITLE, new_title.as_str()).map_err(ae)?;
+        }
+        if old_meta != new_meta {
+            tx.put(automerge::ROOT, K_META, new_meta.as_str()).map_err(ae)?;
         }
         for (id, json) in &new_json {
             if old_blocks.get(id) != Some(json) {
@@ -318,6 +325,9 @@ fn read_keyed(doc: &automerge::Automerge, prefix: &str) -> Result<BTreeMap<Strin
 /// 从 Automerge doc 物化块模型：按 (顺序键, 块 ID) 排序派生文档顺序。
 fn materialize(doc: &automerge::Automerge) -> DocModel {
     let title = read_scalar(doc, K_TITLE).filter(|s| !s.is_empty());
+    let meta = read_scalar(doc, K_META)
+        .and_then(|s| serde_json::from_str::<std::collections::BTreeMap<String, String>>(&s).ok())
+        .unwrap_or_default();
     let orders = match read_keyed(doc, P_ORDER) {
         Ok(m) => m,
         Err(_) => HashMap::new().into_iter().collect(),
@@ -337,7 +347,7 @@ fn materialize(doc: &automerge::Automerge) -> DocModel {
     DocModel {
         title,
         blocks: entries.into_iter().map(|(_, b)| b).collect(),
-        meta: Default::default(),
+        meta,
         anchors: Vec::new(),
     }
 }

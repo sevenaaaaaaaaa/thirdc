@@ -502,7 +502,7 @@ impl Kernel {
             }
         }
 
-        // 过滤：tag:xxx / text:xxx / kind:xxx
+        // 过滤：tag:xxx / text:xxx / kind:xxx / key=value（frontmatter 属性）
         if let Some(f) = &spec.filter {
             let f = f.trim();
             if let Some(t) = f.strip_prefix("tag:") {
@@ -512,16 +512,41 @@ impl Kernel {
                 rows.retain(|r| r.title.to_lowercase().contains(&t));
             } else if let Some(t) = f.strip_prefix("kind:") {
                 rows.retain(|r| r.kind == t.trim());
+            } else if let Some((k, v)) = f.split_once('=') {
+                let k = k.trim().to_lowercase();
+                let v = v.trim().to_lowercase();
+                rows.retain(|r| {
+                    r.props
+                        .get(&k)
+                        .map(|x| x.to_lowercase() == v)
+                        .unwrap_or(false)
+                });
             } else {
                 let t = f.to_lowercase();
                 rows.retain(|r| r.title.to_lowercase().contains(&t));
             }
         }
-        // 排序
+        // 排序：updated_asc/title/… 或 <prop>:asc|<prop>:desc（数值优先）
         match spec.sort.as_deref().unwrap_or("updated_desc") {
             "updated_asc" => rows.sort_by_key(|r| r.mtime),
             "title_asc" | "title" => rows.sort_by(|a, b| a.title.cmp(&b.title)),
-            _ => rows.sort_by(|a, b| b.mtime.cmp(&a.mtime)),
+            s => {
+                if let Some((key, dir)) = s.rsplit_once(':') {
+                    let key = key.trim().to_lowercase();
+                    let asc = dir.trim().eq_ignore_ascii_case("asc");
+                    rows.sort_by(|a, b| {
+                        let av = a.props.get(&key).cloned().unwrap_or_default();
+                        let bv = b.props.get(&key).cloned().unwrap_or_default();
+                        let ord = match (av.parse::<f64>(), bv.parse::<f64>()) {
+                            (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
+                            _ => av.to_lowercase().cmp(&bv.to_lowercase()),
+                        };
+                        if asc { ord } else { ord.reverse() }
+                    });
+                } else {
+                    rows.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+                }
+            }
         }
         rows.truncate(if spec.limit == 0 { 30 } else { spec.limit });
         Ok(rows)
@@ -733,7 +758,70 @@ fn make_view_row(root: &std::path::Path, path: &str, model: &DocModel, md: &str)
     let kind = if path.contains("/Agent/") { "agent".to_string() }
         else if path.contains("/Sources/") { "capture".to_string() }
         else { "doc".to_string() };
-    views::ViewRow { path: path.to_string(), title, tags, mtime, collection, kind }
+    let props = std::fs::read_to_string(root.join(path))
+        .map(|raw| parse_frontmatter_props(&raw))
+        .unwrap_or_default();
+    views::ViewRow { path: path.to_string(), title, tags, mtime, collection, kind, props }
+}
+
+/// 解析 frontmatter 顶层属性（标量 + 行内/缩进列表），用于「文件即数据库」的列。
+fn parse_frontmatter_props(md: &str) -> std::collections::BTreeMap<String, String> {
+    use std::collections::BTreeMap;
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    let mut lines = md.lines();
+    if lines.next().map(|l| l.trim()) != Some("---") {
+        return out;
+    }
+    let mut list_key: Option<String> = None;
+    let mut list_vals: Vec<String> = Vec::new();
+    let flush = |out: &mut BTreeMap<String, String>, k: Option<String>, vals: &mut Vec<String>| {
+        if let Some(k) = k {
+            if !vals.is_empty() {
+                out.insert(k, std::mem::take(vals).join(", "));
+            }
+        }
+    };
+    for raw in lines {
+        let line = raw.trim_end();
+        if line.trim() == "---" {
+            break;
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("- ") {
+            if list_key.is_some() {
+                let v = trimmed
+                    .trim_start_matches("- ")
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if !v.is_empty() {
+                    list_vals.push(v.to_string());
+                }
+            }
+            continue;
+        }
+        flush(&mut out, list_key.take(), &mut list_vals);
+        let Some((k, v)) = line.split_once(':') else { continue };
+        let k = k.trim().to_lowercase();
+        if k.is_empty() {
+            continue;
+        }
+        let v = v.trim();
+        if v.is_empty() {
+            list_key = Some(k); // 后面可能是缩进列表
+            continue;
+        }
+        let v = v.trim_start_matches('[').trim_end_matches(']');
+        let v = v
+            .split([',', '，'])
+            .map(|x| x.trim().trim_matches('"').trim_matches('\''))
+            .filter(|x| !x.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.insert(k, v);
+    }
+    flush(&mut out, list_key.take(), &mut list_vals);
+    out
 }
 
 fn now_date() -> String {
@@ -836,6 +924,47 @@ mod tests {
         std::fs::remove_file(k.vault.root.join("Notes/x.md")).unwrap();
         k.sync_all().unwrap();
         assert_eq!(k.indexed_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn views_expose_frontmatter_props_as_columns() {
+        let dir = tempdir().unwrap();
+        let vault = Vault::init(dir.path(), "k").unwrap();
+        let mut k = Kernel::open(vault).unwrap();
+        k.put_doc(
+            "Notes/a.md",
+            "---\nstatus: doing\npriority: 2\ntags: [x, y]\nowner: 我\n---\n# A\n\n正文\n",
+        )
+        .unwrap();
+        k.put_doc("Notes/b.md", "---\nstatus: done\npriority: 10\n---\n# B\n\n正文\n")
+            .unwrap();
+        k.put_doc("Notes/c.md", "# C\n\n无 frontmatter\n").unwrap();
+
+        // frontmatter 必须落盘（文件即真相：CRDT 往返不能丢元数据）
+        let raw_a = std::fs::read_to_string(dir.path().join("Notes/a.md")).unwrap();
+        assert!(raw_a.contains("status: doing"), "frontmatter 应回写：{raw_a:?}");
+
+        let spec = crate::views::ViewSpec::from_yamlish(
+            "type: table\nsource: folder:Notes\nfields: title, status, priority, owner\nfilter: status=doing\nsort: priority:desc\nlimit: 50",
+        );
+        let rows = k.resolve_view(&spec, None).unwrap();
+        assert_eq!(rows.len(), 1, "只有 a.md 满足 status=doing");
+        assert_eq!(rows[0].props.get("status").map(|s| s.as_str()), Some("doing"));
+        assert_eq!(rows[0].props.get("priority").map(|s| s.as_str()), Some("2"));
+        assert_eq!(rows[0].props.get("tags").map(|s| s.as_str()), Some("x, y"));
+
+        // 按 frontmatter 数值属性排序
+        let spec2 = crate::views::ViewSpec::from_yamlish(
+            "type: table\nsource: folder:Notes\nfields: title, priority\nsort: priority:desc\nlimit: 50",
+        );
+        let rows2 = k.resolve_view(&spec2, None).unwrap();
+        assert_eq!(
+            rows2[0].props.get("priority").map(|s| s.as_str()),
+            Some("10"),
+            "priority:desc → b.md 在前"
+        );
+        let html = crate::views::render_html(&spec2, &rows2);
+        assert!(html.contains(">10<"), "属性应渲染成表格列：{html}");
     }
 
     #[test]
@@ -1482,6 +1611,9 @@ pub mod views {
         pub mtime: u64,
         pub collection: String,
         pub kind: String,
+        /// frontmatter 顶层属性（文件即数据库：任意 key 都能当列）
+        #[serde(default)]
+        pub props: std::collections::BTreeMap<String, String>,
     }
 
     /// 渲染视图为静态 HTML（发布/预览用；行可点击，由客户端桥接打开文档）。
@@ -1552,7 +1684,7 @@ pub mod views {
                             "updated" | "更新时间" => fmt_day(r.mtime),
                             "collection" | "集合" => esc(&r.collection),
                             "path" | "路径" => format!("<code>{}</code>", esc(&r.path)),
-                            _ => String::new(),
+                            other => esc(r.props.get(&other.to_lowercase()).map(|s| s.as_str()).unwrap_or("")),
                         };
                         out.push_str(&format!("<td>{cell}</td>"));
                     }
