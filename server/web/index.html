@@ -679,6 +679,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <b id="batch-n">0</b>
     <button class="act" id="b-move">移动到…</button>
     <button class="act" id="b-tag">打标签</button>
+    <button class="act" id="b-act">✨ 动作</button>
     <button class="act danger" id="b-del">删除</button>
     <button class="act" id="b-clear">取消</button>
   </div>
@@ -2938,6 +2939,7 @@ document.getElementById('canvas').addEventListener('contextmenu',e=>{
     selected=id;selectNode(id);
     openCtx(e.clientX,e.clientY,[
       {label:'📝 打开编辑',fn:()=>openDoc(n.path)},
+      {label:'✨ 动作',fn:()=>{selected=id;selectNode(id);abLastPointer={x:e.clientX,y:e.clientY};abShow();}},
       {label:'🎯 聚焦此节点',fn:()=>$b('ins-focus').click()},
       {label:'🚀 发布为 AI-HTML',fn:()=>$b('ins-pub').click()},
       {label:'📋 复制路径',fn:()=>{navigator.clipboard.writeText(n.path);toast('已复制 '+n.path,'ok');}},
@@ -3088,6 +3090,7 @@ $b('b-tag').onclick=async()=>{
   }
   clearSel();toast(`已为 ${ok} 篇打上 #${t}`,'ok');await refreshAll();
 };
+$b('b-act').onclick=()=>{abLastPointer={x:innerWidth/2,y:Math.max(140,innerHeight-160)};abShow();};
 
 /* ───────── 一键整理（魔法特效） ───────── */
 function sparkle(n){
@@ -3232,11 +3235,11 @@ async function sendMemoText(text){
   }catch(e){}
 }
 
-/* ───────── 划选即指令：动作栏（离线规则优先，AI 可选） ───────── */
+/* ───────── 划选即指令：动作栏（文本 + 节点/批量；离线规则优先） ───────── */
 let abSel=null, abLastOp='', abLastPointer={x:80,y:120};
 const abUndoStack=[];
 window.addEventListener('pointerup',e=>{abLastPointer={x:e.clientX,y:e.clientY};},{passive:true});
-const AB_VERBS=[
+const AB_TEXT_VERBS=[
   {id:'summarize',label:'总结',rule:true},
   {id:'condense',label:'精简',rule:true},
   {id:'extract-node',label:'提取为节点',rule:true},
@@ -3244,21 +3247,44 @@ const AB_VERBS=[
   {id:'expand',label:'扩写',ai:true},
   {id:'translate',label:'翻译',ai:true},
 ];
+const AB_NODE_VERBS=[
+  {id:'summarize-node',label:'总结为新节点',rule:true},
+  {id:'connect',label:'连到…',rule:true},
+  {id:'tag',label:'打标签',rule:true},
+  {id:'expand-node',label:'扩写',ai:true},
+];
+const AB_MULTI_VERBS=[
+  {id:'merge',label:'合并',rule:true},
+  {id:'outline',label:'生成结构',rule:true},
+  {id:'tag',label:'打标签',rule:true},
+];
 function abAiReady(){return !!window.__aiConfigured;}
-function abCaptureSelection(){
-  if(current===null)return null;
-  const ed=$('editor'); if(!ed)return null;
-  if($('d-body')&&$('d-body').classList.contains('view'))return null;
-  const s=ed.selectionStart,e=ed.selectionEnd;
-  if(s==null||e==null||e<=s)return null;
-  const text=ed.value.slice(s,e);
-  if(!text.trim())return null;
-  return {s,e,text};
+function abNodePaths(){
+  const ids=[...multiSel];
+  const one=(selected&&String(selected).startsWith('doc:'))?[selected]:[];
+  const use=ids.length?ids:one;
+  return use.map(id=>{const n=graph.nodes.find(x=>x.id===id);return n&&(n.kind==='doc'||n.kind==='capture')?n.path:null}).filter(Boolean);
+}
+function abCaptureContext(){
+  const ed=$('editor');
+  if(current!==null&&ed&&!($('d-body')&&$('d-body').classList.contains('view'))){
+    const s=ed.selectionStart,e=ed.selectionEnd;
+    if(s!=null&&e!=null&&e>s){const text=ed.value.slice(s,e);if(text.trim())return {kind:'text',s,e,text};}
+  }
+  const paths=abNodePaths();
+  if(paths.length)return {kind:paths.length>1?'multi':'node',paths,path:paths[0]};
+  return null;
+}
+function abVerbsFor(ctx){
+  if(!ctx)return [];
+  if(ctx.kind==='text')return AB_TEXT_VERBS;
+  if(ctx.kind==='multi')return AB_MULTI_VERBS;
+  return AB_NODE_VERBS;
 }
 function abRenderList(q){
   const box=$('ab-list'); if(!box)return; box.innerHTML='';
   const ql=(q||'').trim().toLowerCase();
-  AB_VERBS.filter(v=>abAiReady()||v.rule)
+  abVerbsFor(abSel).filter(v=>abAiReady()||v.rule)
     .filter(v=>!ql||v.label.toLowerCase().includes(ql)||v.id.includes(ql))
     .forEach(v=>{
       const b=document.createElement('button');b.className='ab-verb'+(v.ai?' ai':'');b.textContent=v.label+(v.ai?' ✦':'');
@@ -3267,17 +3293,19 @@ function abRenderList(q){
   if(!box.children.length)box.innerHTML='<span class="rm-empty">无匹配动作</span>';
 }
 function abShow(){
-  const sel=abCaptureSelection();
-  if(!sel){
-    if($('d-body')&&$('d-body').classList.contains('view'))toast('先在编辑模式划选文字（点 👁 切到编辑）','err');
-    else toast('先在正文里划选一段文字','err');
+  const ctx=abCaptureContext();
+  if(!ctx){
+    if($('d-body')&&$('d-body').classList.contains('view'))toast('先在编辑模式划选文字，或选中画布节点','err');
+    else toast('先划选文字，或选中画布节点','err');
     return;
   }
-  abSel=sel;
+  abSel=ctx;
   const bar=$('actionbar'); if(!bar)return;
   bar.classList.add('on');
   $('ab-preview').style.display='none';
-  const q=$('ab-q'); q.value=''; q.placeholder='对选中内容…（回车执行 · Esc 取消）';
+  const q=$('ab-q');
+  q.value='';
+  q.placeholder=(ctx.kind==='text'?'对选中文字…':ctx.kind==='multi'?`对选中 ${ctx.paths.length} 个节点…`:'对该节点…')+'（回车执行 · Esc 取消）';
   abRenderList('');
   const w=bar.offsetWidth||380,h=bar.offsetHeight||120;
   let x=Math.min(abLastPointer.x,innerWidth-w-12), y=Math.min(abLastPointer.y+12,innerHeight-h-12);
@@ -3291,26 +3319,55 @@ async function abRun(op){
   const q=$('ab-q'); const prev=q.placeholder; q.placeholder='处理中…';
   $('ab-list').querySelectorAll('.ab-verb').forEach(b=>b.disabled=true);
   try{
-    const r=await api('/agent/apply',{method:'POST',json:{op,text:abSel.text,path:current}});
-    q.placeholder=prev;
-    if(op==='extract-node'){
-      abApplyReplace(r.markdown);
-      if(r.path)await refreshAll();
-      toast('已提取为节点 '+r.path,'ok');
-      abHide();
-      return;
-    }
-    $('ab-preview').style.display='block';
-    $('ab-pv-mode').textContent=(r.mode==='ai'?'· AI':'· 规则')+(r.placement==='replace'?' · 替换选区':'');
-    $('ab-pv-body').textContent=r.markdown||'';
-    $('ab-preview').dataset.markdown=r.markdown||'';
-    const bar=$('actionbar'); const h=bar.offsetHeight||200;
-    bar.style.top=Math.max(12,Math.min(parseFloat(bar.style.top)||120,innerHeight-h-12))+'px';
-  }catch(e){ q.placeholder=prev; toast('动作失败：'+e.message,'err'); }
+    if(abSel.kind==='text'){await abRunText(op);}else{await abRunNode(op);}
+  }catch(e){toast('动作失败：'+e.message,'err');}
+  q.placeholder=prev;
   $('ab-list').querySelectorAll('.ab-verb').forEach(b=>b.disabled=false);
 }
+async function abRunText(op){
+  const r=await api('/agent/apply',{method:'POST',json:{op,text:abSel.text,path:current}});
+  if(op==='extract-node'){
+    abApplyReplace(r.markdown);
+    if(r.path)await refreshAll();
+    toast('已提取为节点 '+r.path,'ok');
+    abHide();return;
+  }
+  $('ab-preview').style.display='block';
+  $('ab-pv-mode').textContent=(r.mode==='ai'?'· AI':'· 规则')+(r.placement==='replace'?' · 替换选区':'');
+  $('ab-pv-body').textContent=r.markdown||'';
+  $('ab-preview').dataset.markdown=r.markdown||'';
+  const bar=$('actionbar'); const h=bar.offsetHeight||200;
+  bar.style.top=Math.max(12,Math.min(parseFloat(bar.style.top)||120,innerHeight-h-12))+'px';
+}
+async function abRunNode(op){
+  const paths=abSel.paths||[];
+  if(op==='summarize-node'||op==='expand-node'){
+    const r=await api('/agent/apply',{method:'POST',json:{op,path:abSel.path}});
+    toast(op==='expand-node'?'已扩写并写回':('已生成 '+r.path),'ok');
+    await refreshAll();abHide();return;
+  }
+  if(op==='connect'){
+    const to=prompt('连到哪篇？（标题，或 Notes/xxx.md）');
+    if(!to)return;
+    const r=await api('/agent/apply',{method:'POST',json:{op,path:abSel.path,target:to}});
+    toast(r.already?('已存在 '+r.link):('已添加 '+r.link),'ok');
+    await refreshAll();abHide();return;
+  }
+  if(op==='tag'){
+    const t=prompt('标签名（写入正文 #标签）');
+    if(!t)return;
+    const r=await api('/agent/apply',{method:'POST',json:{op,target:t,paths}});
+    toast(`已为 ${r.tagged} 篇打上 #${r.tag}`,'ok');
+    clearSel();await refreshAll();abHide();return;
+  }
+  if(op==='merge'||op==='outline'){
+    const r=await api('/agent/apply',{method:'POST',json:{op,paths}});
+    toast((op==='merge'?'已合并为 ':'已生成结构 ')+r.path,'ok');
+    clearSel();await refreshAll();abHide();return;
+  }
+}
 function abApplyReplace(md){
-  if(!abSel)return;
+  if(!abSel||abSel.kind!=='text')return;
   const ed=$('editor');
   abUndoStack.push({value:ed.value,s:abSel.s,e:abSel.e});
   ed.setRangeText(md,abSel.s,abSel.e,'end');
@@ -3333,8 +3390,7 @@ $('ab-q')&&$('ab-q').addEventListener('keydown',e=>{
 $('ab-apply')&&($('ab-apply').onclick=()=>{const md=$('ab-preview').dataset.markdown||'';abApplyReplace(md);abHide();toast('已应用','ok');});
 $('ab-cancel')&&($('ab-cancel').onclick=()=>abHide());
 $('ab-retry')&&($('ab-retry').onclick=()=>{if(abSel&&abLastOp)abRun(abLastOp);});
-/* 在正文里划选即浮现动作栏（非侵入：短小、可点外部/Esc 关闭） */
-$('editor')&&$('editor').addEventListener('mouseup',()=>{setTimeout(()=>{if(abCaptureSelection())abShow();},0);});
+$('editor')&&$('editor').addEventListener('mouseup',()=>{setTimeout(()=>{const c=abCaptureContext();if(c&&c.kind==='text')abShow();},0);});
 document.addEventListener('pointerdown',e=>{
   const bar=$('actionbar');
   if(bar&&bar.classList.contains('on')&&!bar.contains(e.target)&&e.target!==$('editor'))abHide();

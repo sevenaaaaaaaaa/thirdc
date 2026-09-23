@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v11';
+const SHELL = 'thirdc-shell-v12';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -525,77 +525,267 @@ async fn agent_apply(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
         Ok(v) => v,
         Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
     };
-    let op = req.get("op").and_then(|v| v.as_str()).unwrap_or("");
-    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    if text.trim().is_empty() {
-        return err(StatusCode::BAD_REQUEST, "选区为空").into_response();
-    }
+    let op = req.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let path = req.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let target = req.get("target").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let paths: Vec<String> = req
+        .get("paths")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
     let ai = st.kernel.lock().unwrap().vault.config.ai.clone();
     let ai_ready = ai.as_ref().map(|c| !c.base_url.is_empty()).unwrap_or(false);
 
-    // 规则动词：离线可用，确定性
-    match op {
+    // ── 节点 / 批量动词（规则，离线可用）──
+    match op.as_str() {
+        "summarize-node" => {
+            if !is_safe_doc_path(&path) {
+                return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+            }
+            return match ab_summarize_node(&st, &path) {
+                Ok(v) => Json(v).into_response(),
+                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            };
+        }
+        "connect" => {
+            if !is_safe_doc_path(&path) || target.trim().is_empty() {
+                return err(StatusCode::BAD_REQUEST, "需要 path 与 target").into_response();
+            }
+            return match ab_connect(&st, &path, &target) {
+                Ok(v) => Json(v).into_response(),
+                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            };
+        }
+        "tag" => {
+            let tag = target.trim().trim_start_matches('#').to_string();
+            if tag.is_empty() || paths.is_empty() {
+                return err(StatusCode::BAD_REQUEST, "需要 paths 与 target(标签)").into_response();
+            }
+            let n = ab_tag_paths(&st, &paths, &tag);
+            return Json(json!({"op":op,"mode":"rule","tag":tag,"tagged":n})).into_response();
+        }
+        "merge" => {
+            if paths.len() < 2 {
+                return err(StatusCode::BAD_REQUEST, "至少选 2 篇再合并").into_response();
+            }
+            return match ab_merge(&st, &paths) {
+                Ok(v) => Json(v).into_response(),
+                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            };
+        }
+        "outline" => {
+            if paths.is_empty() {
+                return err(StatusCode::BAD_REQUEST, "先选中若干节点").into_response();
+            }
+            return match ab_outline(&st, &paths) {
+                Ok(v) => Json(v).into_response(),
+                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            };
+        }
+        _ => {}
+    }
+
+    // ── 文本动词 ──
+    if text.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "选区为空").into_response();
+    }
+    match op.as_str() {
         "condense" => {
-            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":ab_condense(text)})).into_response();
+            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":ab_condense(&text)})).into_response();
         }
         "summarize" => {
-            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":ab_summarize(text)})).into_response();
+            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":ab_summarize(&text)})).into_response();
         }
         "extract-node" => {
-            let title = ab_first_line_title(text);
+            let title = ab_first_line_title(&text);
             let slug = ab_slug(&title);
             let root = { st.kernel.lock().unwrap().vault.root.clone() };
-            let mut path = format!("Notes/{slug}.md");
-            let mut n = 2;
-            while root.join(&path).exists() && n < 100 {
-                path = format!("Notes/{slug}-{n}.md");
-                n += 1;
-            }
+            let new_path = unique_path(&root, &slug);
             let content = format!("# {title}\n\n{}\n", text.trim());
-            {
-                let mut k = st.kernel.lock().unwrap();
-                if let Err(e) = k.put_doc(&path, &content) {
-                    return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
-                }
-                let _ = k.sync_all();
+            if let Err(e) = write_md(&st, &new_path, &content) {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
             }
-            return Json(json!({
-                "op": op, "mode": "rule", "placement": "replace",
-                "markdown": format!("[[{title}]]"), "path": path
-            })).into_response();
+            return Json(json!({"op":op,"mode":"rule","placement":"replace","markdown":format!("[[{title}]]"),"path":new_path})).into_response();
         }
-        "rewrite" | "expand" | "translate" => {
+        "rewrite" | "expand" | "translate" | "expand-node" => {
             if !ai_ready {
-                return err(StatusCode::NOT_IMPLEMENTED, "该动作需要先在「设置 → 连接」配置模型；离线可用：总结 / 精简 / 提取为节点").into_response();
+                return err(StatusCode::NOT_IMPLEMENTED, "该动作需要先在「设置 → 连接」配置模型；离线可用：总结 / 精简 / 提取为节点 / 合并 / 打标签 / 生成结构").into_response();
             }
         }
         _ => return err(StatusCode::BAD_REQUEST, format!("未知动作：{op}")).into_response(),
     }
 
-    // AI 动词
+    // ── AI 动词 ──
     let cfg = match ai { Some(c) => c, None => return err(StatusCode::NOT_IMPLEMENTED, "未配置模型").into_response() };
     let server = st.mcp.clone();
-    let verb = match op {
-        "rewrite" => "改写（保持原意，表达更清晰）",
-        "expand" => "扩写（补充细节与例子，但不改变事实）",
-        _ => "翻译成英文",
+    let (verb, subject) = match op.as_str() {
+        "rewrite" => ("改写（保持原意，表达更清晰）", text.clone()),
+        "expand" => ("扩写（补充细节与例子，但不改变事实）", text.clone()),
+        "translate" => ("翻译成英文", text.clone()),
+        "expand-node" => {
+            let md = match read_md(&st, &path) {
+                Ok(m) => m,
+                Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+            };
+            ("扩写（补充细节与例子，但不改变事实）", md)
+        }
+        _ => unreachable!(),
     };
-    let prompt = format!("你是文本编辑。请对下面的文字执行：{verb}。只输出结果本身，不要解释、不要 Markdown 代码围栏。\n\n{text}");
+    let prompt = format!("你是文本编辑。请对下面的文字执行：{verb}。只输出结果本身，不要解释、不要 Markdown 代码围栏。\n\n{subject}");
     let outcome = match thirdc_mcp::agent::run_ai(&server, &cfg, &prompt).await {
         Ok(o) => o,
         Err(e) => return err(StatusCode::BAD_GATEWAY, format!("模型调用失败：{e}")).into_response(),
     };
-    let mut out = outcome.reply.trim().to_string();
-    if out.starts_with("```") {
-        let t = out.trim_start_matches("```");
-        let t = t.trim_end_matches("```").trim();
-        let t = match t.find('\n') {
-            Some(nl) if t[..nl].chars().all(|c| c.is_ascii_alphanumeric()) => t[nl + 1..].trim(),
-            _ => t,
-        };
-        out = t.to_string();
+    let out = strip_fence(&outcome.reply);
+    if op == "expand-node" {
+        if let Err(e) = write_md(&st, &path, &out) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+        }
+        return Json(json!({"op":op,"mode":"ai","placement":"writeback","path":path})).into_response();
     }
     Json(json!({"op":op,"mode":"ai","placement":"replace","markdown":out})).into_response()
+}
+
+fn strip_fence(s: &str) -> String {
+    let t = s.trim();
+    if !t.starts_with("```") {
+        return t.to_string();
+    }
+    let t = t.trim_start_matches("```");
+    let t = t.trim_end_matches("```").trim();
+    match t.find('\n') {
+        Some(nl) if t[..nl].chars().all(|c| c.is_ascii_alphanumeric()) => t[nl + 1..].trim().to_string(),
+        _ => t.to_string(),
+    }
+}
+
+fn read_md(st: &Arc<AppState>, path: &str) -> Result<String, String> {
+    let mut k = st.kernel.lock().unwrap();
+    let _ = k.sync_throttled();
+    let model = k.get_doc(path).map_err(|e| e.to_string())?;
+    Ok(kernel_core::to_markdown(&model))
+}
+
+fn write_md(st: &Arc<AppState>, path: &str, md: &str) -> Result<(), String> {
+    let mut k = st.kernel.lock().unwrap();
+    k.put_doc(path, md).map_err(|e| e.to_string())?;
+    let _ = k.sync_all();
+    Ok(())
+}
+
+fn stem_of(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md").to_string()
+}
+
+fn unique_path(root: &std::path::Path, base: &str) -> String {
+    let mut p = format!("Notes/{base}.md");
+    let mut n = 2;
+    while root.join(&p).exists() && n < 1000 {
+        p = format!("Notes/{base}-{n}.md");
+        n += 1;
+    }
+    p
+}
+
+/// 总结节点 → 新节点（摘要），并在原文档追加反向链接。
+fn ab_summarize_node(st: &Arc<AppState>, path: &str) -> Result<Value, String> {
+    let md = read_md(st, path)?;
+    let stem = stem_of(path);
+    let summary = ab_summarize(&md);
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let new_path = unique_path(&root, &format!("{stem}-摘要"));
+    let new_stem = stem_of(&new_path);
+    let content = format!("# {stem} 摘要\n\n{summary}\n\n> 来源：[[{stem}]]\n");
+    write_md(st, &new_path, &content)?;
+    let link_line = format!("[[{new_stem}]]");
+    if !md.contains(&link_line) {
+        let mut src = md.trim_end().to_string();
+        src.push_str(&format!("\n\n> 摘要：{link_line}\n"));
+        write_md(st, path, &src)?;
+    }
+    Ok(json!({"op":"summarize-node","mode":"rule","placement":"new-node","path":new_path,"markdown":summary}))
+}
+
+/// 连到：把 `[[target]]` 追加到来源文档。
+fn ab_connect(st: &Arc<AppState>, from: &str, target: &str) -> Result<Value, String> {
+    let md = read_md(st, from)?;
+    let link = if target.starts_with("Notes/") && target.ends_with(".md") {
+        format!("[[{}]]", stem_of(target))
+    } else {
+        format!("[[{}]]", target.trim().trim_start_matches("[[").trim_end_matches("]]"))
+    };
+    if md.contains(&link) {
+        return Ok(json!({"op":"connect","mode":"rule","ok":true,"already":true,"link":link}));
+    }
+    let mut out = md.trim_end().to_string();
+    out.push_str(&format!("\n\n{link}\n"));
+    write_md(st, from, &out)?;
+    Ok(json!({"op":"connect","mode":"rule","ok":true,"link":link}))
+}
+
+/// 批量打标签（正文 #标签）。
+fn ab_tag_paths(st: &Arc<AppState>, paths: &[String], tag: &str) -> usize {
+    let mut n = 0;
+    for p in paths {
+        if !is_safe_doc_path(p) {
+            continue;
+        }
+        let Ok(md) = read_md(st, p) else { continue };
+        if md.contains(&format!("#{tag}")) {
+            continue;
+        }
+        let updated = match md.find("\n\n") {
+            Some(i) => format!("{}\n#{tag}\n{}", &md[..i], &md[i..]),
+            None => format!("{md}\n\n#{tag}\n"),
+        };
+        if write_md(st, p, &updated).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// 合并多篇 → 新文档（保留来源链接）。
+fn ab_merge(st: &Arc<AppState>, paths: &[String]) -> Result<Value, String> {
+    let mut body = format!("# 合并：{} 等 {} 篇\n\n", stem_of(&paths[0]), paths.len());
+    body.push_str("> 来源：");
+    body.push_str(&paths.iter().map(|p| format!("[[{}]]", stem_of(p))).collect::<Vec<_>>().join(" · "));
+    body.push('\n');
+    for p in paths {
+        let Ok(md) = read_md(st, p) else { continue };
+        body.push_str(&format!("\n## {}\n\n{}\n", stem_of(p), md.trim()));
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let new_path = unique_path(&root, "合并");
+    write_md(st, &new_path, &body)?;
+    Ok(json!({"op":"merge","mode":"rule","placement":"new-node","path":new_path,"files":paths.len()}))
+}
+
+/// 生成结构：按一级文件夹分组，产出一页带链接的目录。
+fn ab_outline(st: &Arc<AppState>, paths: &[String]) -> Result<Value, String> {
+    use std::collections::BTreeMap;
+    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for p in paths {
+        let rel = p.trim_start_matches("Notes/");
+        let group = if rel.contains('/') {
+            rel.split('/').next().unwrap_or("").to_string()
+        } else {
+            "（根）".to_string()
+        };
+        groups.entry(group).or_default().push(stem_of(p));
+    }
+    let mut body = String::from("# 结构\n\n");
+    for (g, items) in &groups {
+        body.push_str(&format!("- **{g}**\n"));
+        for it in items {
+            body.push_str(&format!("  - [[{it}]]\n"));
+        }
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let new_path = unique_path(&root, "结构");
+    write_md(st, &new_path, &body)?;
+    Ok(json!({"op":"outline","mode":"rule","placement":"new-node","path":new_path,"groups":groups.len()}))
 }
 
 /// 规则动词：精简（去空行/多余空白/连续重复行）。
@@ -1302,6 +1492,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn agent_apply_node_ops() {
+        let (app, token, dir) = test_router();
+        let auth = format!("Bearer {token}");
+        let put = |path: &str, md: &str| {
+            let app = app.clone();
+            let auth = auth.clone();
+            let uri = format!("/doc?path={path}");
+            let md = md.to_string();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(uri)
+                        .header("authorization", &auth)
+                        .header("content-type", "text/markdown")
+                        .body(Body::from(md))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            }
+        };
+        put("Notes/a.md", "# A\n\n第一句。第二句。\n\n## 子\n\n内容。").await;
+        put("Notes/Dir/b.md", "# B\n\n正文。").await;
+
+        let post = |body: &str| {
+            let app = app.clone();
+            let auth = auth.clone();
+            let body = body.to_string();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/agent/apply")
+                        .header("authorization", &auth)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        // 总结为新节点 + 原文档追加链接
+        let v = body_json(post(r#"{"op":"summarize-node","path":"Notes/a.md"}"#).await).await;
+        assert_eq!(v["placement"], "new-node");
+        let newp = v["path"].as_str().unwrap().to_string();
+        assert!(std::fs::read_to_string(dir.path().join(&newp)).unwrap().contains("摘要"));
+        assert!(std::fs::read_to_string(dir.path().join("Notes/a.md")).unwrap().contains("[["));
+
+        // 批量打标签
+        let v = body_json(post(r#"{"op":"tag","paths":["Notes/a.md","Notes/Dir/b.md"],"target":"idea"}"#).await).await;
+        assert_eq!(v["tagged"], 2);
+        assert!(std::fs::read_to_string(dir.path().join("Notes/Dir/b.md")).unwrap().contains("#idea"));
+
+        // 生成结构（按文件夹分组）
+        let v = body_json(post(r#"{"op":"outline","paths":["Notes/a.md","Notes/Dir/b.md"]}"#).await).await;
+        let body = std::fs::read_to_string(dir.path().join(v["path"].as_str().unwrap())).unwrap();
+        assert!(body.contains("- **Dir**"), "{body}");
+        assert!(body.contains("[[b]]"), "{body}");
+
+        // 合并
+        let v = body_json(post(r#"{"op":"merge","paths":["Notes/a.md","Notes/Dir/b.md"]}"#).await).await;
+        let body = std::fs::read_to_string(dir.path().join(v["path"].as_str().unwrap())).unwrap();
+        assert!(body.contains("来源") && body.contains("[[a]]") && body.contains("## b"), "{body}");
     }
 
     #[tokio::test]
