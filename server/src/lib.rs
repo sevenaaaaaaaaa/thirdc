@@ -37,6 +37,48 @@ pub struct AppState {
     memo_cache: Arc<Mutex<Option<(u64, axum::body::Bytes)>>>,
     /// 是否由桌面壳启动（THIRDC_DESKTOP=1）：控制 /desktop/* 独占端点的可用性。
     pub desktop: bool,
+    /// 远端拉取的后台任务状态：结构秒回，正文流式拉取，前端轮询进度。
+    pub pull: Arc<Mutex<PullJob>>,
+}
+
+/// 后台拉取任务的可观察状态。登录/建目录是同步阶段（快），正文在后台流式写入。
+#[derive(Default)]
+pub struct PullJob {
+    active: bool,
+    /// idle | content | done | error
+    phase: String,
+    server: String,
+    user: String,
+    total: usize,
+    dirs: usize,
+    done: usize,
+    pulled: usize,
+    skipped: usize,
+    failed: usize,
+    bytes: u64,
+    error: String,
+    started: u64,
+    finished: u64,
+}
+
+fn pull_json(j: &PullJob) -> Value {
+    json!({
+        "active": j.active,
+        "phase": j.phase,
+        "server": j.server,
+        "user": j.user,
+        "total": j.total,
+        "folders": j.dirs,
+        "done": j.done,
+        "pulled": j.pulled,
+        "skipped": j.skipped,
+        "failed": j.failed,
+        "bytes": j.bytes,
+        "error": j.error,
+        "started": j.started,
+        "finished": j.finished,
+        "pct": if j.total == 0 { 100 } else { (j.done * 100 / j.total).min(100) },
+    })
 }
 
 fn err(code: StatusCode, msg: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
@@ -66,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v8';
+const SHELL = 'thirdc-shell-v9';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -146,6 +188,7 @@ self.addEventListener('fetch', e => {
         .route("/desktop/scan", get(desktop_scan))
         .route("/desktop/quarantine", post(desktop_quarantine))
         .route("/desktop/pull", post(desktop_pull))
+        .route("/desktop/pull/status", get(desktop_pull_status))
         .route("/organize/plan", post(organize_plan))
         .route("/organize/apply", post(organize_apply))
         .route("/git/status", get(git_status))
@@ -900,6 +943,7 @@ pub fn build_state(vault: Vault) -> anyhow::Result<Arc<AppState>> {
         token: machine.token,
         memo_cache: Arc::new(Mutex::new(None)),
         desktop: std::env::var("THIRDC_DESKTOP").map(|v| v == "1").unwrap_or(false),
+        pull: Arc::new(Mutex::new(PullJob::default())),
     }))
 }
 
@@ -3588,25 +3632,128 @@ async fn desktop_terminal(State(st): State<Arc<AppState>>, h: HeaderMap, body: B
     }
 }
 
-/// 登录远端账号后，把远端知识库拉到本地库（幂等：内容相同跳过）。
-/// body: { server: "https://kb.nownexts.com", token: "<远端 token>" }
+/// 读取并解析 JSON 响应体，失败时给出可诊断的上下文（状态/类型/编码/长度/开头片段）。
+/// reqwest 的 `.json()` 只会抛「error decoding response body」，把真实原因藏起来。
+async fn read_json(resp: reqwest::Response, what: &str) -> Result<Value, String> {
+    let status = resp.status();
+    let hdr = |n: &str| resp.headers().get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let ct = hdr("content-type");
+    let enc = hdr("content-encoding");
+    let cl = hdr("content-length");
+    let bytes = resp.bytes().await.map_err(|e| format!("读取{what}响应失败（HTTP {status}）：{e}"))?;
+    if bytes.is_empty() {
+        return Err(format!("{what}响应为空（HTTP {status}，content-type: {ct}）"));
+    }
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let n = bytes.len().min(200);
+            let snip = String::from_utf8_lossy(&bytes[..n]).replace('\n', " ");
+            Err(format!(
+                "{what}响应不是合法 JSON（HTTP {status}，content-type: {ct}，encoding: {enc}，content-length: {cl}，实收 {} 字节）：{e}；开头：{snip}",
+                bytes.len()
+            ))
+        }
+    }
+}
+
+/// 从任意形状的 JSON 里提取文档路径列表：`{docs:[...]}` / `{paths:[...]}` / `[...]`，
+/// 元素可以是字符串或 `{path:...}`。
+fn docs_from_value(v: &Value) -> Vec<String> {
+    let arr = v.get("docs").and_then(|d| d.as_array())
+        .or_else(|| v.get("paths").and_then(|d| d.as_array()))
+        .or_else(|| v.get("documents").and_then(|d| d.as_array()))
+        .or_else(|| v.as_array());
+    match arr {
+        Some(a) => a.iter().filter_map(|d| {
+            d.get("path").and_then(|p| p.as_str())
+                .or_else(|| d.get("rel").and_then(|p| p.as_str()))
+                .map(String::from)
+                .or_else(|| d.as_str().map(String::from))
+        }).collect(),
+        None => Vec::new(),
+    }
+}
+
+/// 拉取文档列表，兼容不同版本/代理的响应形态：
+/// JSON（对象或数组）、NDJSON、纯文本路径行。全部失败才报错并附可诊断信息。
+async fn read_docs_list(resp: reqwest::Response) -> Result<Vec<String>, String> {
+    let status = resp.status();
+    let hdr = |n: &str| resp.headers().get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let ct = hdr("content-type");
+    let enc = hdr("content-encoding");
+    let cl = hdr("content-length");
+    let bytes = resp.bytes().await.map_err(|e| format!("读取列表响应失败（HTTP {status}）：{e}"))?;
+    if bytes.is_empty() {
+        return Err(format!("列表响应为空（HTTP {status}，content-type: {ct}）"));
+    }
+    // ① 标准 JSON
+    if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+        let docs = docs_from_value(&v);
+        if !docs.is_empty() { return Ok(docs); }
+    }
+    // ② NDJSON / 纯路径行（兼容旧版或代理改造过的响应）
+    let mut out = Vec::new();
+    for line in String::from_utf8_lossy(&bytes).lines() {
+        let t = line.trim().trim_end_matches(',');
+        if t.is_empty() { continue; }
+        if let Ok(v) = serde_json::from_str::<Value>(t) {
+            if let Some(p) = v.get("path").and_then(|p| p.as_str()).or_else(|| v.as_str()) {
+                out.push(p.to_string());
+                continue;
+            }
+            let nested = docs_from_value(&v);
+            if !nested.is_empty() { out.extend(nested); }
+        } else if t.starts_with("Notes/") {
+            out.push(t.trim_matches('"').to_string());
+        }
+    }
+    if !out.is_empty() { return Ok(out); }
+    let n = bytes.len().min(200);
+    let snip = String::from_utf8_lossy(&bytes[..n]).replace('\n', " ");
+    Err(format!(
+        "列表响应无法识别（HTTP {status}，content-type: {ct}，encoding: {enc}，content-length: {cl}，实收 {} 字节）；开头：{snip}",
+        bytes.len()
+    ))
+}
+
+/// 登录远端并拉全量（幂等：内容相同跳过）：**结构优先、正文后台**。
+///
+/// body: `{ server, token }` 或 `{ server, user, pass }`（无 token 时本机侧登录）。
+/// 同步阶段只做三件快事：本机侧登录、拉 `/docs` 列表、建好目录骨架。
+/// 拿到这些立刻返回，前端可以马上进编辑区；正文在后台并发流式写入，
+/// 通过 `/desktop/pull/status` 轮询进度。
 async fn desktop_pull(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) { return e.into_response(); }
     if let Err(e) = desktop_guard(&st) { return e.into_response(); }
     let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
     let server = req.get("server").and_then(|v| v.as_str()).unwrap_or("").trim_end_matches('/').to_string();
     let mut rtoken = req.get("token").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut user = req.get("user").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if !server.starts_with("http") {
         return err(StatusCode::BAD_REQUEST, "服务器地址需以 http(s):// 开头").into_response();
     }
+    // 已有任务在跑：回报当前进度，避免并发重复写文件
+    {
+        let j = st.pull.lock().unwrap();
+        if j.active {
+            let snap = pull_json(&j);
+            let total = j.total;
+            return Json(json!({"ok": true, "already": true, "server": j.server, "user": j.user, "total": total, "job": snap})).into_response();
+        }
+    }
     let root = { st.kernel.lock().unwrap().vault.root.clone() };
-    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build() {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        // 带 UA/Accept：部分 WAF（宝塔等）会拦截无 UA 的请求并返回 HTML 挑战页
+        .user_agent("ThirdC/0.1 (+https://nownexts.com/thirdc)")
+        .build()
+    {
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     };
     // ⓪ 没有 token 时用账号密码在本机侧登录（避免浏览器跨域）
     if rtoken.is_empty() {
-        let user = req.get("user").and_then(|v| v.as_str()).unwrap_or("");
         let pass = req.get("pass").and_then(|v| v.as_str()).unwrap_or("");
         if user.is_empty() || pass.is_empty() {
             return err(StatusCode::BAD_REQUEST, "需要账号密码或 token").into_response();
@@ -3614,9 +3761,9 @@ async fn desktop_pull(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
         let resp = client.post(format!("{server}/auth/login"))
             .json(&json!({"username": user, "password": pass})).send().await;
         let j: Value = match resp {
-            Ok(r) => match r.json().await {
+            Ok(r) => match read_json(r, "登录").await {
                 Ok(v) => v,
-                Err(e) => return err(StatusCode::BAD_GATEWAY, format!("解析登录响应失败：{e}")).into_response(),
+                Err(e) => return err(StatusCode::BAD_GATEWAY, e).into_response(),
             },
             Err(e) => return err(StatusCode::BAD_GATEWAY, format!("连接登录接口失败：{e}")).into_response(),
         };
@@ -3628,55 +3775,170 @@ async fn desktop_pull(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
             }
         }
     }
-    // ① 拉文档列表
-    let list = match client.get(format!("{server}/docs")).bearer_auth(&rtoken).send().await {
+    // ① 拉文档列表（结构）
+    // 用 x-thirdc-token 而非 Authorization: Bearer——部分宝塔/WAF 会拦截带 Bearer 的请求
+    // 并返回 200 HTML 挑战页（表现为「解析列表失败」）。服务端两种头都认。
+    let list = match client.get(format!("{server}/docs"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header("x-thirdc-token", &rtoken).send().await
+    {
         Ok(r) => match r.error_for_status() { Ok(r) => r, Err(e) => return err(StatusCode::BAD_GATEWAY, format!("远端拒绝：{e}")).into_response() },
         Err(e) => return err(StatusCode::BAD_GATEWAY, format!("连接失败：{e}")).into_response(),
     };
-    let data: Value = match list.json().await {
+    let docs: Vec<String> = match read_docs_list(list).await {
         Ok(v) => v,
-        Err(e) => return err(StatusCode::BAD_GATEWAY, format!("解析列表失败：{e}")).into_response(),
+        Err(e) => return err(StatusCode::BAD_GATEWAY, e).into_response(),
     };
-    let docs: Vec<String> = data.get("docs").and_then(|d| d.as_array())
-        .map(|a| a.iter().filter_map(|d| d.get("path").and_then(|p| p.as_str()).map(String::from)).collect())
-        .unwrap_or_default();
-    let total = docs.len();
-    let cap = total.min(20000);
-    // ② 并发拉正文并写入本地（内容相同则跳过）
-    let results: Vec<(bool, bool)> = futures_util::stream::iter(
-        docs.into_iter().take(cap).map(|path| {
-            let client = client.clone();
-            let root = root.clone();
-            let server = server.clone();
-            let rtoken = rtoken.clone();
-            async move {
-                if !path.starts_with("Notes/") { return (false, false); }
-                let resp = client.get(format!("{server}/doc"))
-                    .query(&[("path", path.as_str())])
-                    .bearer_auth(&rtoken).send().await;
-                let Ok(resp) = resp else { return (false, true) };
-                let Ok(j) = resp.json::<Value>().await else { return (false, true) };
-                let src = j.get("source").and_then(|s| s.as_str()).unwrap_or("");
-                if src.is_empty() { return (false, true); }
-                let dest = root.join(&path);
-                if let Ok(existing) = std::fs::read_to_string(&dest) {
-                    if existing == src { return (false, false); }
-                }
-                if let Some(parent) = dest.parent() { let _ = std::fs::create_dir_all(parent); }
-                match std::fs::write(&dest, src) { Ok(_) => (true, false), Err(_) => (false, true) }
+    // 只有 Notes/ 下的文档会被拉取，进度分母与之一致
+    let total = docs.iter().filter(|p| p.starts_with("Notes/")).count();
+    // ② 结构落地：先把目录骨架建好，前端拿到就能渲染整棵树
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for p in &docs {
+        if let Some(parent) = std::path::Path::new(p).parent() {
+            let key = parent.to_string_lossy().into_owned();
+            if !parent.as_os_str().is_empty() && seen.insert(key) {
+                let _ = std::fs::create_dir_all(root.join(parent));
             }
-        }),
-    ).buffer_unordered(8).collect().await;
-    let pulled = results.iter().filter(|(p, _)| *p).count();
-    let failed = results.iter().filter(|(_, f)| *f).count();
-    let skipped = cap.saturating_sub(pulled + failed);
-    if pulled > 0 {
-        let mut k = st.kernel.lock().unwrap();
-        let _ = k.sync_all();
+        }
     }
-    audit_log(&root.join(".thirdc"), "desktop-pull", &json!({"server": server, "pulled": pulled}));
+    let dirs = seen.len();
+    // 记住账号/服务器，重开可续、设置面板可显示
+    let _ = std::fs::create_dir_all(root.join(".thirdc"));
+    if user.is_empty() { user = "token".into(); }
+    let _ = std::fs::write(
+        root.join(".thirdc/remote.json"),
+        serde_json::to_vec_pretty(&json!({"server": server, "user": user})).unwrap_or_default(),
+    );
+    // ③ 初始化任务并后台流式拉正文
+    {
+        let mut j = st.pull.lock().unwrap();
+        *j = PullJob {
+            active: true,
+            phase: "content".into(),
+            server: server.clone(),
+            user: user.clone(),
+            total,
+            dirs,
+            started: now_secs(),
+            ..Default::default()
+        };
+    }
+    let st2 = st.clone();
+    let server2 = server.clone();
+    let rtoken2 = rtoken.clone();
+    let root2 = root.clone();
+    tokio::spawn(async move { run_pull(st2, root2, client, server2, rtoken2, docs).await; });
+
+    let snap = pull_json(&st.pull.lock().unwrap());
     Json(json!({
-        "pulled": pulled, "skipped": skipped, "failed": failed,
-        "total": total, "truncated": total > cap,
+        "ok": true, "started": true,
+        "server": server, "user": user, "total": total, "folders": dirs,
+        "job": snap,
     })).into_response()
+}
+
+/// 查询后台拉取进度。
+async fn desktop_pull_status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    if let Err(e) = desktop_guard(&st) { return e.into_response(); }
+    let j = st.pull.lock().unwrap();
+    Json(pull_json(&j)).into_response()
+}
+
+/// 后台拉取正文：浅层优先、并发 8、单个失败重试一次，每 300 篇合入一次索引。
+async fn run_pull(
+    st: Arc<AppState>,
+    root: std::path::PathBuf,
+    client: reqwest::Client,
+    server: String,
+    rtoken: String,
+    docs: Vec<String>,
+) {
+    // 只处理 Notes/ 下的文档；浅层（根目录）优先，让编辑区先有内容
+    let mut ordered: Vec<String> = docs.into_iter().filter(|p| p.starts_with("Notes/")).collect();
+    ordered.sort_by(|a, b| {
+        a.matches('/').count().cmp(&b.matches('/').count()).then_with(|| a.cmp(b))
+    });
+
+    let mut stream = futures_util::stream::iter(ordered.into_iter().map(|path| {
+        let client = client.clone();
+        let server = server.clone();
+        let rtoken = rtoken.clone();
+        let root = root.clone();
+        async move { pull_one(&client, &server, &rtoken, &root, &path).await }
+    }))
+    .buffer_unordered(8);
+
+    let mut since_sync = 0usize;
+    while let Some((code, bytes)) = stream.next().await {
+        {
+            let mut j = st.pull.lock().unwrap();
+            j.done += 1;
+            match code {
+                1 => { j.pulled += 1; j.bytes += bytes; }
+                2 => j.failed += 1,
+                _ => j.skipped += 1,
+            }
+        }
+        since_sync += 1;
+        if since_sync >= 300 {
+            since_sync = 0;
+            sync_in_background(&st).await;
+        }
+    }
+    sync_in_background(&st).await;
+
+    let mut j = st.pull.lock().unwrap();
+    j.active = false;
+    j.phase = if j.pulled == 0 && j.failed > 0 { "error".into() } else { "done".into() };
+    j.finished = now_secs();
+    if j.error.is_empty() && j.failed > 0 {
+        j.error = format!("{} 篇未能拉取（可点同步重试）", j.failed);
+    }
+    let snap = pull_json(&j);
+    drop(j);
+    audit_log(&root.join(".thirdc"), "desktop-pull", &snap);
+}
+
+/// 单篇拉取：0=跳过(相同/非 Notes)，1=已写入，2=失败。失败重试一次。
+async fn pull_one(
+    client: &reqwest::Client,
+    server: &str,
+    rtoken: &str,
+    root: &std::path::Path,
+    path: &str,
+) -> (u8, u64) {
+    for attempt in 0..2u8 {
+        let resp = client.get(format!("{server}/doc"))
+            .query(&[("path", path)])
+            .header("x-thirdc-token", rtoken).send().await;
+        if let Ok(resp) = resp {
+            if let Ok(j) = read_json(resp, path).await {
+                if let Some(src) = j.get("source").and_then(|s| s.as_str()) {
+                    let dest = root.join(path);
+                    if let Ok(existing) = std::fs::read_to_string(&dest) {
+                        if existing == src { return (0, 0); }
+                    }
+                    if let Some(parent) = dest.parent() { let _ = std::fs::create_dir_all(parent); }
+                    if std::fs::write(&dest, src).is_ok() {
+                        return (1, src.len() as u64);
+                    }
+                }
+            }
+        }
+        if attempt == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+    (2, 0)
+}
+
+/// 后台把磁盘上的外部改动合入内核索引（不阻塞 async runtime）。
+async fn sync_in_background(st: &Arc<AppState>) {
+    let k = st.kernel.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Ok(mut g) = k.lock() {
+            let _ = g.sync_all();
+        }
+    }).await;
 }

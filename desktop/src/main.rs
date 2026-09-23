@@ -49,9 +49,14 @@ fn boot_kernel(vault_path: PathBuf) -> Result<(u16, String), String> {
                     let vault = open_or_init(&vault_path).map_err(|e| format!("打开库失败：{e}"))?;
                     let state = thirdc_server::build_state(vault)
                         .map_err(|e| format!("构建内核状态失败：{e}"))?;
-                    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                        .await
-                        .map_err(|e| format!("绑定本地端口失败：{e}"))?;
+                    // 优先用固定端口：origin 稳定，localStorage（账号/主题/引导）才能跨启动保留。
+                    // 端口被占（例如已开另一个实例）再退回随机端口。
+                    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 7717)).await {
+                        Ok(l) => l,
+                        Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0")
+                            .await
+                            .map_err(|e| format!("绑定本地端口失败：{e}"))?,
+                    };
                     let port = listener
                         .local_addr()
                         .map_err(|e| format!("读取端口失败：{e}"))?
@@ -119,7 +124,7 @@ ol{{margin:0;padding-left:20px;color:var(--muted)}} li{{margin:6px 0}}
 <ol>
 <li>确认该目录存在且当前用户可读写。</li>
 <li>换一个库：设 <code>THIRDC_VAULT=/你的/库路径</code> 后重开。</li>
-<li>端口被占时无需处理——桌面端用随机端口，不与 <code>thirdc serve</code> 冲突。</li>
+<li>端口被占时会自动换端口——通常无需处理。</li>
 <li>仍失败：命令行跑 <code>thirdc serve 该路径</code>，终端里能看到完整错误。</li>
 </ol>
 </div>"#,

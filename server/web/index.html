@@ -51,6 +51,9 @@ html.desktop .lights{display:none}
   color:var(--muted);cursor:pointer;transition:all .2s var(--ease-spring)}
 .icon-btn:hover{color:var(--fg);border-color:var(--border-strong);background:var(--surface-strong);transform:translateY(-1px)}
 .icon-btn svg{width:17px;height:17px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+#acct-btn{position:relative}
+#acct-btn .on{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--ok);display:none;border:1px solid var(--surface)}
+#acct-btn.linked .on{display:block}
 .search-pill{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:11px;border:1px solid var(--border);background:var(--surface);min-width:230px;cursor:text}
 .search-pill kbd{font-family:var(--font-mono);font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:6px;padding:1px 5px}
 .search-pill span{flex:1;color:var(--faint);font-size:13px}
@@ -425,6 +428,11 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .ob-item .d{color:var(--faint);font-size:11.5px;line-height:1.5}
 .ob-keys{display:flex;gap:14px;flex-wrap:wrap;color:var(--faint);font-size:11.5px;font-family:var(--font-mono)}
 .ob-keys kbd{border:1px solid var(--border);border-radius:6px;padding:1px 6px;color:var(--muted)}
+.ob-upd{margin-top:20px;border-top:1px solid var(--border);padding-top:16px}
+.ob-upd .uh{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--faint);font-family:var(--font-mono);margin-bottom:10px}
+.ob-upd .ver{border:1px solid var(--border);border-radius:6px;padding:1px 7px;color:var(--muted)}
+.ob-upd ul{margin:0;padding-left:18px;color:var(--muted);font-size:12.5px;line-height:1.9}
+.ob-upd li::marker{color:var(--accent)}
 /* ── 启动动效 ── */
 #boot .ring{width:64px;height:64px;border-radius:50%;margin:0 auto 18px;position:relative;
   background:conic-gradient(from 0deg, transparent 0deg, var(--accent) 120deg, transparent 240deg);
@@ -449,6 +457,9 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   font-family:var(--font-mono);font-size:11px;color:var(--faint);background:color-mix(in oklab,var(--bg) 80%,transparent);backdrop-filter:blur(10px);
   border-top:1px solid var(--border-soft)}
 #statusbar .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px}
+#sb-sync{cursor:pointer;font-variant-numeric:tabular-nums;transition:color .2s}
+#sb-sync.busy::before{content:'';display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;vertical-align:middle;animation:sb-spin .8s linear infinite}
+@keyframes sb-spin{to{transform:rotate(360deg)}}
 .empty{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;width:min(430px,86vw);padding:26px;border-radius:var(--r-lg);
   border:1px solid var(--border);background:var(--surface);backdrop-filter:blur(18px);box-shadow:var(--shadow);text-align:center}
 .empty h2{margin:0 0 6px;font-family:var(--font-display);font-size:20px}
@@ -539,6 +550,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
     <span><kbd>双击</kbd> 文件夹下钻</span>
     <span><kbd>拖空白</kbd> 平移</span>
   </div>
+  <div class="ob-upd" id="ob-upd"></div>
 </div></div>
 <div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div><div id="peers"></div></div></div>
 
@@ -576,6 +588,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <button class="icon-btn" id="pub-btn" title="发布面板"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
   <button class="icon-btn" id="design-btn" title="设计规范"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="14.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="15.5" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20"/></svg></button>
   <button class="icon-btn" id="road-btn" title="路线图"><svg viewBox="0 0 24 24"><path d="M4 20V8l6-4 4 3 6-3v12l-6 3-4-3-6 3Z"/></svg></button>
+  <button class="icon-btn" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
   <button class="icon-btn" id="settings-btn" title="设置">⚙</button>
     <button class="icon-btn" id="theme" title="明暗切换"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button>
   <button class="icon-btn" id="force-refresh" title="强制刷新（清缓存+全量同步）"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/><path d="M3 12a9 9 0 0 0 2.6 6.4M3 20v-5h5" opacity=".5"/></svg></button>
@@ -731,6 +744,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <span><span class="dot" id="sb-dot"></span><span id="sb-conn">connecting</span></span>
   <span id="sb-stats">—</span>
   <span id="sb-mode">—</span>
+  <span id="sb-sync" style="display:none"></span>
   <span id="sb-peers">在线 1</span>
   <span id="sb-user"></span>
   <span style="margin-left:auto">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
@@ -802,12 +816,14 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <div id="acct-ov" style="position:fixed;inset:0;z-index:215;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
 <div style="width:min(400px,92vw);padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">登录 / 同步账号</div>
+  <div id="acct-state" style="font-size:12.5px;color:var(--muted);margin-bottom:10px;min-height:16px"></div>
   <div style="color:var(--faint);font-size:12px;margin-bottom:14px">登录后把远端知识库拉到本地（内容相同自动跳过，不覆盖本地改动以外的部分请谨慎）</div>
   <input class="inp" id="acct-server" placeholder="服务器地址" value="https://kb.nownexts.com" style="margin-bottom:6px">
   <input class="inp" id="acct-user" placeholder="用户名" autocomplete="username" style="margin-bottom:6px">
   <input class="inp" id="acct-pass" type="password" placeholder="密码" autocomplete="current-password" style="margin-bottom:10px">
   <button class="act" id="acct-go" style="width:100%;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">登录并拉取到本地</button>
   <div id="acct-msg" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;text-align:center"></div>
+  <button class="act" id="acct-logout" style="width:100%;margin-top:8px;border-color:var(--danger);color:var(--danger);display:none">退出当前账号</button>
   <button class="act" onclick="document.getElementById('acct-ov').style.display='none'" style="width:100%;margin-top:8px">关闭</button>
 </div></div>
 <div id="term-ov" style="position:fixed;inset:0;z-index:210;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
@@ -857,8 +873,11 @@ const BASE=location.pathname.replace(/\/+$/,'').replace(/\/index\.html$/,'');
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register(BASE+'/sw.js').catch(()=>{});
   navigator.serviceWorker.addEventListener('message',e=>{
-    if(e.data&&e.data.type==='shell-updated'&&typeof toast==='function')
-      toast('发现新版本，点顶栏 🔄 刷新即可更新','ok');
+    if(e.data&&e.data.type==='shell-updated'){
+      // 外壳变了：直接刷新，避免「账号入口/新功能」被旧缓存一直挡着
+      if(typeof toast==='function')toast('发现新版本，正在更新…','ok');
+      setTimeout(()=>location.reload(),800);
+    }
   });
 }
 const params=new URLSearchParams(location.search);
@@ -2995,20 +3014,96 @@ async function openSettings(){
       document.getElementById('set-vault-path').value=v.root;
   }catch(e){toast('读取本机能力失败：'+e.message,'err')}
 }
+function remoteInfo(){ try{return JSON.parse(localStorage.getItem('thirdc_remote')||'{}')||{}}catch{return{}} }
 function renderAcctInfo(){
-  const el=document.getElementById('set-acct-info'); if(!el)return;
-  let rem={}; try{rem=JSON.parse(localStorage.getItem('thirdc_remote')||'{}')}catch{}
-  el.innerHTML=rem.server?`已连接：<b>${rem.user||''}</b> @ ${rem.server}`:'本机（未登录账号）';
+  const rem=remoteInfo(), linked=!!rem.server;
+  const info=document.getElementById('set-acct-info');
+  if(info)info.innerHTML=linked?`已连接：<b>${rem.user||''}</b> @ ${rem.server}`:'本机（未登录账号）';
+  const btn=document.getElementById('acct-btn');
+  if(btn)btn.classList.toggle('linked',linked);
+  const st=document.getElementById('acct-state');
+  if(st){
+    st.innerHTML=linked?`当前：<b style="color:var(--ok)">已连接</b> ${rem.user||''} @ ${rem.server}`:'当前：本机（未登录账号）';
+    const lo=document.getElementById('acct-logout'); if(lo)lo.style.display=linked?'block':'none';
+    const go=document.getElementById('acct-go'); if(go)go.textContent=linked?'再次拉取到本地':'登录并拉取到本地';
+  }
+  currentUser=rem.user||'';
+  const su=document.getElementById('sb-user');
+  if(su)su.textContent=linked?`👤 ${rem.user||'已连接'}`:'';
 }
 function openAccount(){
+  renderAcctInfo();
   const ov=document.getElementById('acct-ov'); if(!ov)return;
-  let rem={}; try{rem=JSON.parse(localStorage.getItem('thirdc_remote')||'{}')}catch{}
+  const rem=remoteInfo();
   if(rem.server)document.getElementById('acct-server').value=rem.server;
   if(rem.user)document.getElementById('acct-user').value=rem.user;
   ov.style.display='grid';
-  document.getElementById('acct-user').focus();
+  const focus=rem.server?document.getElementById('acct-pass'):document.getElementById('acct-user');
+  focus&&focus.focus();
+}
+function logoutAccount(){
+  localStorage.removeItem('thirdc_remote');
+  renderAcctInfo();
+  toast('已退出同步账号（本地文件保留）','ok');
 }
 $('set-login').addEventListener('click',openAccount);
+$('acct-btn')&&$('acct-btn').addEventListener('click',openAccount);
+$('acct-logout')&&$('acct-logout').addEventListener('click',logoutAccount);
+
+/* ───────── 远端同步：结构先行、正文后台、进度在状态栏 ───────── */
+let pullTimer=null;
+function setSyncChip(text,kind){
+  const el=$('sb-sync'); if(!el)return;
+  el.textContent=text||'';
+  el.style.display=text?'':'none';
+  el.classList.toggle('busy',kind==='busy');
+  el.style.color=kind==='err'?'var(--danger)':kind==='ok'?'var(--ok)':kind==='busy'?'var(--accent)':'var(--muted)';
+}
+function welcomeAfterSync(s){
+  // 同步完成：不打断当前动作，只给一条可点的提示
+  toast(`同步完成：${s.pulled} 篇就绪${s.skipped?`（跳过 ${s.skipped}）`:''}${s.failed?`，失败 ${s.failed}`:''} · 打开看看`, 'ok');
+  setSyncChip(`✓ 已同步 ${s.pulled} 篇 · 点击刷新`, 'ok');
+  if(localStorage.getItem('thirdc_sync_onboarded')!=='1'){
+    localStorage.setItem('thirdc_sync_onboarded','1');
+    if(!dirty) openOnboard('同步完成 · 近期更新','远端知识库已到你本机，看看这次同步带来了什么：');
+  }
+}
+async function pollPull(){
+  let s;
+  try{ s=await api('/desktop/pull/status'); }
+  catch(e){ if(pullTimer){clearInterval(pullTimer);pullTimer=null} setSyncChip('同步状态不可用','err'); return; }
+  if(s.active){
+    setSyncChip(`同步中 ${s.done}/${s.total}${s.failed?` · 失败 ${s.failed}`:''}`,'busy');
+    return s;
+  }
+  if(pullTimer){clearInterval(pullTimer);pullTimer=null}
+  if(s.phase==='done'){ welcomeAfterSync(s); await refreshAll(); }
+  else if(s.phase==='error'){ setSyncChip(`同步中断：${s.error||'失败'} · 点击重试`,'err'); toast('同步未完成：'+(s.error||'部分文件失败'),'err'); }
+  else setSyncChip('');
+  return s;
+}
+$('sb-sync')&&$('sb-sync').addEventListener('click',async()=>{
+  const el=$('sb-sync');
+  if(el.classList.contains('busy'))return;
+  if((el.textContent||'').includes('中断')){ openAccount(); return; }
+  await refreshAll(); fit(); toast('已刷新','ok'); setSyncChip('');
+});
+/* 刷新/重开页面时接续后台任务：只要 daemon 还在跑，进度就不丢 */
+async function resumeSync(){
+  if(!localStorage.getItem('thirdc_remote'))return;
+  try{
+    const s=await api('/desktop/pull/status');
+    if(s.active){
+      setSyncChip(`同步中 ${s.done}/${s.total}${s.failed?` · 失败 ${s.failed}`:''}`,'busy');
+      if(pullTimer)clearInterval(pullTimer);
+      pullTimer=setInterval(pollPull,1200);
+    }else if(s.phase==='done'&&s.pulled>0){
+      setSyncChip(`✓ 已同步 ${s.pulled} 篇 · 点击刷新`,'ok');
+    }else if(s.phase==='error'){
+      setSyncChip(`同步中断：${s.error||'失败'} · 点击重试`,'err');
+    }
+  }catch{}
+}
 $('acct-go').addEventListener('click',async()=>{
   const server=document.getElementById('acct-server').value.trim().replace(/\/+$/,'');
   const user=document.getElementById('acct-user').value.trim();
@@ -3017,14 +3112,26 @@ $('acct-go').addEventListener('click',async()=>{
   if(!server||!user||!pass){msg.textContent='请填写服务器、用户名、密码';return}
   const b=$('acct-go'); b.textContent='登录中…'; b.disabled=true; msg.textContent='';
   try{
+    // 同步阶段只等登录 + 结构（通常亚秒级）；正文由后台拉取
     const r=await api('/desktop/pull',{method:'POST',json:{server,user,pass}});
     localStorage.setItem('thirdc_remote',JSON.stringify({server,user}));
-    msg.textContent=`完成：拉取 ${r.pulled} 篇，跳过 ${r.skipped}${r.failed?`，失败 ${r.failed}`:''}（远端共 ${r.total}）`;
-    toast(`已同步 ${r.pulled} 篇到本地`,'ok');
+    renderAcctInfo();
+    // 账号与结构已就绪 → 立刻收起浮层进入编辑区，不挡任何操作
+    document.getElementById('acct-ov').style.display='none';
+    if(r.already){
+      toast('已有同步任务在后台进行，继续等待即可','ok');
+    }else{
+      toast(`已登录 ${user}，结构就绪（${r.total} 篇），正文后台同步中…`,'ok');
+    }
+    setSyncChip(`同步中 0/${r.total||(r.job&&r.job.total)||0}`,'busy');
+    if(pullTimer)clearInterval(pullTimer);
+    pullTimer=setInterval(pollPull,1200);
+    loadRail();
+    loadGraph(true);
+    pollPull();
     b.textContent='再次拉取';
-  }catch(e){msg.textContent='失败：'+e.message;b.textContent='登录并拉取到本地'}
+  }catch(e){ msg.textContent='失败：'+e.message; b.textContent='登录并拉取到本地'; }
   b.disabled=false;
-  renderAcctInfo();
 });
 $('set-logout').addEventListener('click',()=>{
   localStorage.removeItem('thirdc_token');
@@ -3140,11 +3247,30 @@ if(!token){
 
   }
 }
-/* 首屏引导：仅首次访问 */
-function maybeOnboard(){
-  if(localStorage.getItem('thirdc_onboarded')==='1')return;
-  const el=$('onboard');
-  if(!el)return;
+/* 近期更新（Onboarding 用；发版时在此追加一条即可） */
+const WHATS_NEW=[
+  {ver:'0.1.0',date:'2026-09-22',items:[
+    '登录后先拿账号与文件结构，正文在后台拉取——不挡你立刻动手',
+    '状态栏显示同步进度；完成后提示「打开看看」，不打断其他操作',
+    '空库三个起点：新建 / 导入本机目录 / 登录同步账号',
+    '桌面独占：AI 原生转码 · 溯源去重 · 去噪扫描 · 内嵌终端',
+  ]},
+  {ver:'0.0.9',date:'2026-09-21',items:[
+    'Memo 随手记 + 语音录制转文字',
+    '50 个经典设计风格、右键菜单、顶栏减密',
+    '启动/浏览性能治理：监听式同步、启动预热、缓存纪律',
+  ]},
+];
+function whatsNewHtml(){
+  return WHATS_NEW.map(r=>`<div class="uh"><span class="ver">v${r.ver}</span><span>${r.date}</span></div>
+    <ul>${r.items.map(i=>`<li>${i}</li>`).join('')}</ul>`).join('');
+}
+/* 引导浮层：首次访问展示；同步完成后也可再打开看更新 */
+function openOnboard(title,sub){
+  const el=$('onboard'); if(!el)return;
+  const h=el.querySelector('.ob-card h2'); if(h&&title)h.textContent=title;
+  const s=el.querySelector('.ob-card .sub'); if(s&&sub)s.textContent=sub;
+  const u=$('ob-upd'); if(u)u.innerHTML=whatsNewHtml();
   el.classList.add('on');
   el.querySelectorAll('[data-ob]').forEach(b=>b.onclick=()=>{
     localStorage.setItem('thirdc_onboarded','1');
@@ -3154,15 +3280,35 @@ function maybeOnboard(){
     if(k==='topic')openPalette();
     if(k==='conn')$('board-pill').dispatchEvent(new MouseEvent('dblclick'));
   });
-  el.addEventListener('click',e=>{
-    if(e.target===el){localStorage.setItem('thirdc_onboarded','1');el.classList.remove('on');}
-  });
+  el.onclick=e=>{ if(e.target===el){localStorage.setItem('thirdc_onboarded','1');el.classList.remove('on');} };
+}
+function maybeOnboard(){
+  if(localStorage.getItem('thirdc_onboarded')==='1')return;
+  openOnboard('欢迎来到 ThirdC Studio','你的知识是文件，是画布，也是 agent 的工具。选一个起点开始：');
 }
 
 function applyStatus(s){
   const m=$('sb-stats'); if(m)m.textContent=`${s.docs} docs · ${s.indexed} indexed · ${s.assets} assets`;
   const n=$('v-name'); if(n&&s.vault)n.textContent=s.vault;
+  const d=$('v-docs'); if(d)d.textContent=s.docs;
+  const i=$('v-idx'); if(i)i.textContent=s.indexed;
+  const a=$('v-assets'); if(a)a.textContent=s.assets;
   const c=$('sb-conn'); if(c)c.textContent='connected';
+  const u=$('sb-user'); if(u&&currentUser)u.textContent='👤 '+currentUser;
+}
+async function loadStatus(){
+  const s=await api('/status');
+  cacheSet('status',s);
+  applyStatus(s);
+}
+async function loadMeta(){
+  try{const m=await api('/connections');
+    $('sb-mode').textContent=(m.ai&&m.ai.configured?`AI ${m.ai.model}`:`命令模式 · ${(m.connections||[]).length} 连接`)+` · ${view==='canvas'?'画布':view==='timeline'?'时间线':'看板'}`;
+  }catch{}
+}
+async function refreshAll(){
+  window.__docsFetchedAt=0;
+  await Promise.all([loadGraph(true),loadRail(),loadStatus(),loadMeta()]);
 }
 function renderBrowseCached(b){
   const nodes=[];
@@ -3184,6 +3330,7 @@ function bootDone(){
   applyTheme();
   applyThemePreset();
   if(window.__TAURI_INTERNALS__||window.__TAURI__) document.documentElement.classList.add('desktop');
+  renderAcctInfo();
   const cs=cacheGet('status'); if(cs)applyStatus(cs);
   const raw=cacheGet('browse');
   const cachedBrowse=(raw&&raw.data)?((!raw.path||raw.path==='Notes')?raw.data:null):(raw&&raw.folders?raw:null);
@@ -3206,6 +3353,7 @@ function bootDone(){
   applyVP();
   setTimeout(()=>initPresence(),1400);
   setTimeout(()=>maybeOnboard(),700);
+  setTimeout(()=>resumeSync(),1200);
   if(!localStorage.getItem('thirdc_welcomed')){
     localStorage.setItem('thirdc_welcomed','1');
     addMsg('studio','画布已就绪。拖空白处平移、⌘滚轮缩放、拖节点排布。\n试试输入「搜索」，或点 ⌘K 找文档。');
