@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v18';
+const SHELL = 'thirdc-shell-v19';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -1029,11 +1029,12 @@ fn extract_memo_tags(head: &str) -> Vec<String> {
 }
 
 /// 构建 memo 文档索引：路径/标题来自索引表，标签读每篇头部 4KB。
+/// 只统计 memo 笔记本（Thino 式每日随手记目录 `Notes/Memos/`），不再扫全 Notes。
 fn memo_build_sync(root: &std::path::Path, stats: &HashMap<String, (i64, i64)>) -> Vec<MemoDoc> {
     use std::io::Read;
     let mut docs: Vec<MemoDoc> = Vec::with_capacity(stats.len());
     for (p, (mt, _sz)) in stats {
-        if !p.starts_with("Notes/") || !(p.ends_with(".md") || p.ends_with(".html")) {
+        if !p.starts_with("Notes/Memos/") || !(p.ends_with(".md") || p.ends_with(".html")) {
             continue;
         }
         let mut buf = [0u8; 4096];
@@ -1648,6 +1649,41 @@ mod tests {
         );
         let folders = v["folders"].as_array().unwrap();
         assert!(folders.iter().any(|f| f["name"] == "Topic" && f["count"] == 1));
+    }
+
+    #[tokio::test]
+    async fn memo_only_counts_memos_notebook() {
+        let (app, token, _dir) = test_router();
+        let auth = format!("Bearer {token}");
+        // 直接写盘（API 也可，但更稳的是先落盘再 sync）
+        std::fs::create_dir_all(_dir.path().join("Notes/Memos")).unwrap();
+        std::fs::create_dir_all(_dir.path().join("Notes/Topic")).unwrap();
+        std::fs::write(_dir.path().join("Notes/Topic/other.md"), "# other\n").unwrap();
+        std::fs::write(_dir.path().join("Notes/Memos/2026-09-24.md"), "# memo day\n").unwrap();
+
+        // 通过 API 触发 sync + memo 构建
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/memo/docs")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        let docs = v["docs"].as_array().unwrap();
+        assert!(
+            docs.iter().any(|d| d["path"] == "Notes/Memos/2026-09-24.md"),
+            "expected memo notebook entry, got {v}"
+        );
+        assert!(
+            !docs.iter().any(|d| d["path"] == "Notes/Topic/other.md"),
+            "non-memo notebook must not be counted, got {v}"
+        );
     }
 
     #[tokio::test]

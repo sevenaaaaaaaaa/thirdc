@@ -12,7 +12,7 @@
 | `GET /browse?path=` | 1s | 75ms | 单层文件夹 + peek 标题（头部字节） |
 | `GET /doc`（热） | 100ms | 1ms | 块模型 + HTML 渲染 |
 | `GET /search` | 300ms | 23ms | FTS5 + 语料缓存命中 |
-| `GET /memo/docs`（首建） | 3s | 1.7s | 12k × 头部 4KB 读，构建一次（启动预热已暖） |
+| `GET /memo/docs`（首建） | 3s | 1.7s | 只扫 `Notes/Memos/` 头部 4KB（Thino 式笔记本，不再全 Notes），构建一次（启动预热已暖） |
 | `GET /memo/docs`（缓存） | 50ms | 1ms | 缓存序列化好的 Bytes |
 | chat 首事件（recall） | 1s | 0.76s | 语料预热后；recal/resolve_view 已节流，禁止裸 sync_all |
 
@@ -54,7 +54,7 @@
 ## 已知取舍（balance，不是 bug）
 
 - 外部编辑器改文件的可见延迟：正常 <1s（监听即脏）；监听失效时最长 10 分钟（兜底周期）。
-- memo 首建读 12k 文件头（~1.7s 磁盘/page-cache）：一次性成本，换后续 1ms。
+- memo 首建只扫 `Notes/Memos/` 文件头（Thino 式笔记本）：一次性成本，换后续 1ms。
 - 混合检索的语料全量驻内存（~300MB 量级）：换 23ms 检索；语料构建 50-70s 一次，
   在 daemon 启动预热中完成（索引 → 语料 → memo 索引，日志三条 preheat 行）。内存敏感场景未来可加 LRU。
 - 浏览器磁盘缓存可能 hold 旧壳：SW bump + 强刷（或带 ?v= 参数）才拿新壳。
