@@ -1769,7 +1769,8 @@ $('editor').addEventListener('input',e=>{
 (function buildSlash(){
   const menu=$('slash-menu');
   const items=[['插入表格','| a | b |\n| --- | --- |\n| 1 | 2 |'],['插入列表','- 甲\n- 乙'],['插入引用','> 引用内容'],['插入代码块','```rust\n\n```'],['插入分隔线','---'],['插入锚点',' ^anchor-1'],['插入标签','#新标签 '],['嵌入网页','<iframe src="https://" style="width:100%;height:400px;border:1px solid #ddd;border-radius:12px"></iframe>'],['嵌入 PDF','<embed src="Assets/…/file.pdf" type="application/pdf" width="100%" height="500px">'],
-    ['插入表格视图','```view\ntype: table\nsource: folder:Notes/Sources\nfields: [title, tags, updated]\nlimit: 20\n```'],
+    ['插入表格视图','```view\ntype: table\nsource: folder:Notes/Sources\nfields: title, tags, updated\nlimit: 20\n```'],
+    ['插入数据库视图（计算/汇总/关联）','```view\ntype: table\nsource: folder:Notes\nfields: title, status, hours, 工时, related\nrelation: related\nformula: 工时 = hours * rate\ntotal: hours\nsort: hours:desc\nlimit: 20\n```'],
     ['插入看板视图','```view\ntype: kanban\nsource: all\ngroup_by: collection\nlimit: 30\n```'],
     ['插入日历视图','```view\ntype: calendar\nsource: all\nlimit: 60\n```'],
     ['插入检索视图','```view\ntype: list\nsource: query:关键词\nlimit: 10\n```']];
@@ -2204,9 +2205,17 @@ const CMDS=[
     if(!current){toast('先打开一篇文档','err');return}
     const kind=prompt('视图类型：table / kanban / calendar / list','table')||'table';
     const source=prompt('数据源：all / folder:Notes/Sources / query:关键词 / here','all')||'all';
-    const block=`\n\`\`\`view\ntype: ${kind}\nsource: ${source}\n${kind==='kanban'?'group_by: collection\n':''}limit: 20\n\`\`\`\n`;
-    ($('editor').value||'').length;
-    const t=$('editor');t.value=t.value+'\n'+block;dirty=true;
+    let extra='';
+    if(kind==='table'){
+      const f=prompt('计算列（可选，如：工时 = hours * rate，留空跳过）','');
+      if(f&&f.includes('='))extra+=`formula: ${f}\n`;
+      const t=prompt('汇总字段（可选，如 hours，留空跳过）','');
+      if(t.trim())extra+=`total: ${t.trim()}\n`;
+      const r=prompt('关系字段（可选，如 related，留空跳过）','');
+      if(r.trim())extra+=`relation: ${r.trim()}\n`;
+    }
+    const block=`\n\`\`\`view\ntype: ${kind}\nsource: ${source}\n${extra}${kind==='kanban'?'group_by: collection\n':''}limit: 20\n\`\`\`\n`;
+    const t2=$('editor');t2.value=t2.value+'\n'+block;dirty=true;
     await saveDoc();
   }],
   ['全量备份（加密）','bk',async()=>{

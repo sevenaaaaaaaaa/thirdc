@@ -987,7 +987,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn views_formula_total_and_relation_links() {
         let dir = tempdir().unwrap();
         let vault = Vault::init(dir.path(), "k").unwrap();
@@ -1017,6 +1016,18 @@ mod tests {
         assert!(html.contains("<a data-doc=\"客户\">客户</a>"), "relation 渲染为链接：{html}");
     }
 
+    #[test]
+    fn view_spec_accepts_bracket_list_values() {
+        // 编辑器模板/用户习惯写法：[a, b, c] 与带引号都要认
+        let s = crate::views::ViewSpec::from_yamlish(
+            "type: table\nsource: folder:Notes\nfields: [title, tags, updated]\nrelation: [\"related\", owner]\nlimit: 10",
+        );
+        assert_eq!(s.fields, vec!["title", "tags", "updated"], "fields 应剥掉方括号");
+        assert_eq!(s.relation, vec!["related", "owner"], "relation 应剥掉方括号并小写");
+        assert_eq!(s.limit, 10);
+    }
+
+    #[test]
     fn assets_are_deduped_and_backlinked() {
         let dir = tempdir().unwrap();
         let vault = Vault::init(dir.path(), "k").unwrap();
@@ -1605,6 +1616,13 @@ pub mod memory {
 
 /// 内联视图（Views 层）：在笔记里声明表格/看板/日历，数据源可以是文件夹、
 /// 当前页列表、或检索结果。声明用 ```view 代码块（YAML 风格），不破坏 Markdown。
+///
+/// 关键字（table）：
+/// - `fields: title, status, hours` —— 任意 frontmatter 属性可当列
+/// - `filter: status=doing` / `sort: priority:desc`（数值优先）
+/// - `formula: 工时 = hours * rate` —— 计算列（+−×÷ 括号）
+/// - `total: hours` —— 表尾合计行
+/// - `relation: related` —— 该列渲染为文档链接
 pub mod views {
     use serde::{Deserialize, Serialize};
 
@@ -1651,18 +1669,28 @@ pub mod views {
                     "group_by" | "group" | "分组" => s.group_by = Some(val),
                     "limit" | "条数" => s.limit = val.parse().unwrap_or(30),
                     "fields" | "字段" => {
-                        s.fields = val.split([',', '，']).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+                        s.fields = split_list(&val)
                     }
                     "formula" | "公式" => s.formula = Some(val),
                     "total" | "汇总" => s.total = Some(val),
                     "relation" | "relations" | "关联" => {
-                        s.relation = val.split([',', '，']).map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect()
+                        s.relation = split_list(&val).into_iter().map(|x| x.to_lowercase()).collect()
                     }
                     _ => {}
                 }
             }
             s
         }
+    }
+
+    /// 列表值解析：`title, tags` 与 `[title, tags]` / `"a", "b"` 都认（兼容 YAML 风格写法）。
+    fn split_list(val: &str) -> Vec<String> {
+        let cleaned = val.trim().trim_start_matches('[').trim_end_matches(']').to_string();
+        cleaned
+            .split([',', '，'])
+            .map(|x| x.trim().trim_matches('"').trim_matches('\'').trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect()
     }
 
     /// 一行视图数据。
