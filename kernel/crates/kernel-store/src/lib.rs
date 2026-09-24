@@ -52,6 +52,10 @@ pub struct VaultConfig {
     /// Web 登录凭据覆盖。缺省 admin / machine token；设置了用户名密码则以这里为准。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthConfig>,
+    /// 回收站保留天数：删除的文档先进 `.thirdc/trash/`，到期自动清除。
+    /// 缺省 30；`0` = 永久保留（不自动清除）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trash_days: Option<u32>,
 }
 
 /// 登录凭据覆盖（thirdc.toml [auth]）。API token 鉴权不受影响，这里只管 Web 登录表单。

@@ -24,11 +24,16 @@ thirdc serve <vault> [--addr 127.0.0.1:7700]
 | GET | `/search?q=` | FTS5 检索，返回 `{hits:[{path, rank}]}` |
 | GET | `/doc?path=Notes/x.md` | `{path, title, blocks, markdown, html}` |
 | PUT | `/doc?path=Notes/x.md` | body = markdown；写文件 + op-log + 索引 |
-| DELETE | `/doc?path=Notes/x.md` | 删除文件并回收索引 |
+| DELETE | `/doc?path=Notes/x.md` | **软删除**：移入 `.thirdc/trash/`（文件与文件夹皆可），回收索引；返回 `{deleted, trash, retention_days}` |
+| GET | `/trash` | 回收站列表 `{retention_days, entries:[{path, deleted_at, days_left}]}`；顺带清除过期项 |
+| POST | `/trash/restore` | `{path}` → 恢复到原路径（目标已存在则 409） |
+| POST | `/trash/purge` | `{path}` 或 `{all:true}` → 彻底删除（不可恢复） |
 | POST | `/asset?name=photo.png` | body = 字节；内容寻址入库，返回 hash/path/markdown |
 | POST | `/sync` | 扫描外部改动，返回 `{changed}` |
 
 `html` 字段为预留（AI-HTML 渲染管线接入后填充）。
+
+**回收站保留期**：`thirdc.toml` 可配 `trash_days = N`（缺省 30；`0` = 永久保留）。到期项在每次 `DELETE`/`GET /trash` 时自动清除。
 
 ## 安全
 

@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v13';
+const SHELL = 'thirdc-shell-v15';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -121,8 +121,6 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-  // API 一律走网络（数据必须最新）
-  if (/^\/(status|docs|graph|browse|tree|doc|search|view|agent|connections|board|boards|refresh|backup|publish|share|ingest|chat|design|git|organize|presentation|asset)/.test(url.pathname)) return;
 
   if (req.mode === 'navigate') {
     // 外壳：先用缓存秒开，再后台校验；变了就通知页面刷新
@@ -145,7 +143,9 @@ self.addEventListener('fetch', e => {
     })());
     return;
   }
-  // 静态资源：缓存优先（字体/CSS 变更少）
+  // 白名单：只有静态资产走缓存。其余（/trash 等一切 API）一律网络，绝不缓存
+  const p = url.pathname;
+  if (!(p.startsWith('/assets/') || p === '/icon48.png' || p === '/manifest-pwa.json')) return;
   e.respondWith(caches.open(SHELL).then(async c => {
     const hit = await c.match(req);
     if (hit) return hit;
@@ -221,6 +221,9 @@ self.addEventListener('fetch', e => {
         .route("/backup", post(backup_vault))
         .route("/agent/memory", get(agent_memory_list).post(agent_memory_add))
         .route("/view/resolve", post(view_resolve))
+        .route("/trash", get(trash_list))
+        .route("/trash/restore", post(trash_restore))
+        .route("/trash/purge", post(trash_purge))
         .route("/agent/recall", get(agent_recall))
         .route("/ws", get(ws_handler))
         .with_state(state)
@@ -1235,13 +1238,221 @@ async fn delete_doc(
     }
     let mut k = st.kernel.lock().unwrap();
     let abs = k.vault.root.join(&path);
-    match std::fs::remove_file(&abs) {
-        Ok(()) => {
-            let _ = k.sync_all();
-            Json(json!({ "deleted": path })).into_response()
-        }
-        Err(e) => err(StatusCode::NOT_FOUND, e).into_response(),
+    if !abs.exists() {
+        return err(StatusCode::NOT_FOUND, "not found").into_response();
     }
+    let days = k.vault.config.trash_days.unwrap_or(30);
+    let _ = trash_purge_expired(&k.vault.root, days);
+    let mut entries = trash_load(&k.vault.root);
+    let trash_rel = trash_unique_rel(&entries, &path);
+    let dest = trash_dir(&k.vault.root).join(&trash_rel);
+    if let Some(p) = dest.parent() {
+        if let Err(e) = std::fs::create_dir_all(p) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+        }
+    }
+    // rename 对文件与文件夹都成立（软删除 = 移入回收站，可恢复）
+    match std::fs::rename(&abs, &dest) {
+        Ok(()) => {
+            entries.push(TrashEntry {
+                path: path.clone(),
+                trash: trash_rel,
+                deleted_at: trash_now(),
+            });
+            if let Err(e) = trash_save(&k.vault.root, &entries) {
+                // 清单写失败则回滚，避免“移走了却查不到”
+                let _ = std::fs::rename(&dest, &abs);
+                return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+            }
+            let _ = k.sync_all();
+            Json(json!({ "deleted": path, "trash": true, "retention_days": days })).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/* ───────── 回收站（软删除 / 恢复 / 保留期） ─────────
+ * 删除 = 移入 `.thirdc/trash/<相对路径>`，清单 `.thirdc/trash/index.json`。
+ * 保留期取 thirdc.toml `trash_days`：缺省 30 天，0 = 永久保留。 */
+
+fn trash_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(".thirdc").join("trash")
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct TrashEntry {
+    /// 原始库内路径（Notes/…）
+    path: String,
+    /// 回收站内相对路径（同 path；冲突时带 .1/.2 后缀）
+    trash: String,
+    /// 删除时刻（unix 秒）
+    deleted_at: u64,
+}
+
+fn trash_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn trash_load(root: &std::path::Path) -> Vec<TrashEntry> {
+    std::fs::read_to_string(trash_dir(root).join("index.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn trash_save(root: &std::path::Path, entries: &[TrashEntry]) -> std::io::Result<()> {
+    let dir = trash_dir(root);
+    std::fs::create_dir_all(&dir)?;
+    let json = serde_json::to_vec_pretty(entries)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    std::fs::write(dir.join("index.json"), json)
+}
+
+fn trash_unique_rel(entries: &[TrashEntry], path: &str) -> String {
+    let mut cand = path.to_string();
+    let mut i = 1usize;
+    while entries.iter().any(|e| e.trash == cand) {
+        cand = format!("{path}.{i}");
+        i += 1;
+    }
+    cand
+}
+
+/// 清除超过保留期的条目；返回清除数。days=0 → 永久保留。
+fn trash_purge_expired(root: &std::path::Path, days: u32) -> usize {
+    if days == 0 {
+        return 0;
+    }
+    let mut entries = trash_load(root);
+    let now = trash_now();
+    let before = entries.len();
+    let limit = days as u64 * 86_400;
+    entries.retain(|e| {
+        if now.saturating_sub(e.deleted_at) >= limit {
+            let p = trash_dir(root).join(&e.trash);
+            let _ = if p.is_dir() {
+                std::fs::remove_dir_all(&p)
+            } else {
+                std::fs::remove_file(&p)
+            };
+            false
+        } else {
+            true
+        }
+    });
+    let removed = before - entries.len();
+    if removed > 0 {
+        let _ = trash_save(root, &entries);
+    }
+    removed
+}
+
+/// GET /trash — 回收站列表（顺带清除过期）
+async fn trash_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let days = k.vault.config.trash_days.unwrap_or(30);
+    let _ = trash_purge_expired(&k.vault.root, days);
+    let entries = trash_load(&k.vault.root);
+    let now = trash_now();
+    let items: Vec<Value> = entries
+        .iter()
+        .rev()
+        .map(|e| {
+            let elapsed_d = now.saturating_sub(e.deleted_at) / 86_400;
+            json!({
+                "path": e.path,
+                "deleted_at": e.deleted_at,
+                "days_left": if days == 0 { Value::Null } else { json!(days.saturating_sub(elapsed_d as u32)) },
+            })
+        })
+        .collect();
+    Json(json!({ "retention_days": days, "entries": items })).into_response()
+}
+
+/// POST /trash/restore {path} — 恢复到原路径
+async fn trash_restore(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let path = req.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+    if !is_safe_doc_path(&path) {
+        return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+    }
+    let mut k = st.kernel.lock().unwrap();
+    let mut entries = trash_load(&k.vault.root);
+    let Some(idx) = entries.iter().position(|e| e.path == path) else {
+        return err(StatusCode::NOT_FOUND, "not in trash").into_response();
+    };
+    let src = trash_dir(&k.vault.root).join(&entries[idx].trash);
+    let dst = k.vault.root.join(&path);
+    if dst.exists() {
+        return err(StatusCode::CONFLICT, "target path already exists").into_response();
+    }
+    if let Some(p) = dst.parent() {
+        if let Err(e) = std::fs::create_dir_all(p) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+        }
+    }
+    if let Err(e) = std::fs::rename(&src, &dst) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    entries.remove(idx);
+    if let Err(e) = trash_save(&k.vault.root, &entries) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let _ = k.sync_all();
+    Json(json!({ "restored": path })).into_response()
+}
+
+/// POST /trash/purge {path} 或 {all:true} — 彻底删除（不可恢复）
+async fn trash_purge(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let all = req.get("all").and_then(|a| a.as_bool()).unwrap_or(false);
+    let path = req.get("path").and_then(|p| p.as_str()).map(|s| s.to_string());
+    if !all && path.is_none() {
+        return err(StatusCode::BAD_REQUEST, "需要 path 或 all:true").into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let mut entries = trash_load(&k.vault.root);
+    let mut purged = 0usize;
+    if all {
+        for e in &entries {
+            let p = trash_dir(&k.vault.root).join(&e.trash);
+            let _ = if p.is_dir() {
+                std::fs::remove_dir_all(&p)
+            } else {
+                std::fs::remove_file(&p)
+            };
+            purged += 1;
+        }
+        entries.clear();
+    } else {
+        let path = path.unwrap();
+        if let Some(idx) = entries.iter().position(|e| e.path == path) {
+            let p = trash_dir(&k.vault.root).join(&entries[idx].trash);
+            let _ = if p.is_dir() {
+                std::fs::remove_dir_all(&p)
+            } else {
+                std::fs::remove_file(&p)
+            };
+            entries.remove(idx);
+            purged += 1;
+        }
+    }
+    if let Err(e) = trash_save(&k.vault.root, &entries) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    Json(json!({ "purged": purged })).into_response()
 }
 
 async fn post_asset(
@@ -1437,6 +1648,190 @@ mod tests {
         );
         let folders = v["folders"].as_array().unwrap();
         assert!(folders.iter().any(|f| f["name"] == "Topic" && f["count"] == 1));
+    }
+
+    #[tokio::test]
+    async fn delete_goes_to_trash_then_restore_and_purge() {
+        let (app, token, dir) = test_router();
+        let auth = format!("Bearer {token}");
+        // 建文档
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/doc?path=Notes/x.md")
+                    .header("authorization", &auth)
+                    .header("content-type", "text/markdown")
+                    .body(Body::from("# X\n\n内容\n"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // 删除 → 软删除进回收站，原路径消失
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/doc?path=Notes/x.md")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!(v["trash"], true, "delete 应进回收站: {v}");
+        assert!(!dir.path().join("Notes/x.md").exists(), "原路径应消失");
+        assert!(
+            dir.path().join(".thirdc/trash/Notes/x.md").is_file(),
+            "文件应在回收站"
+        );
+
+        // 回收站列表
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/trash")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!(v["retention_days"], 30, "缺省保留 30 天");
+        let entries = v["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["path"], "Notes/x.md");
+
+        // 恢复 → 回到原路径
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/trash/restore")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Notes/x.md"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(dir.path().join("Notes/x.md").is_file(), "恢复后回到原路径");
+        assert!(!dir.path().join(".thirdc/trash/Notes/x.md").exists());
+
+        // 再删一次 + 彻底删除
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/doc?path=Notes/x.md")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/trash/purge")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Notes/x.md"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!(v["purged"], 1);
+        assert!(!dir.path().join(".thirdc/trash/Notes/x.md").exists(), "彻底删除后回收站内文件消失");
+
+        // 列表已空
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/trash")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let v = body_json(resp).await;
+        assert_eq!(v["entries"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn delete_folder_moves_directory_to_trash() {
+        // 复现原 bug：文件夹节点点删除曾报 Operation not permitted（对目录 remove_file）
+        let (app, token, dir) = test_router();
+        let auth = format!("Bearer {token}");
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/doc?path=Notes/研究/b.md")
+                    .header("authorization", &auth)
+                    .header("content-type", "text/markdown")
+                    .body(Body::from("# B\n\n内容\n"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/doc?path=Notes/研究")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "文件夹删除应成功");
+        assert!(!dir.path().join("Notes/研究").exists(), "原文件夹应消失");
+        assert!(
+            dir.path().join(".thirdc/trash/Notes/研究/b.md").is_file(),
+            "文件夹整体应在回收站"
+        );
+
+        // 恢复整个文件夹
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/trash/restore")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Notes/研究"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(dir.path().join("Notes/研究/b.md").is_file(), "文件夹恢复后内容完整");
     }
 
     #[test]

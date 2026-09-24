@@ -654,6 +654,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   <button class="mm-item" id="pub-btn">⬆ 发布 / 线上</button>
   <button class="mm-item" id="design-btn">🎨 设计规范</button>
   <button class="mm-item" id="road-btn">🗺 路线图</button>
+  <button class="mm-item" id="trash-btn">🗑 回收站</button>
   <button class="mm-item" id="theme">🌓 明暗切换</button>
   <button class="mm-item" id="sync">🔄 同步外部改动</button>
   <button class="mm-item" id="force-refresh">⟲ 强制刷新</button>
@@ -809,6 +810,11 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 <div class="overlay" id="conn-ov"><div class="panel">
   <div class="panel-head"><h3>连接器</h3><span class="badge plan" id="conn-ai">—</span><button class="icon-btn" data-close="conn-ov">✕</button></div>
   <div class="panel-body" id="conn-list"></div>
+</div></div>
+
+<div class="overlay" id="trash-ov"><div class="panel">
+  <div class="panel-head"><h3>回收站</h3><span class="badge plan" id="trash-count">—</span><button class="act danger" id="trash-empty" style="height:26px;padding:0 10px;font-size:12px">清空</button><button class="icon-btn" data-close="trash-ov">✕</button></div>
+  <div class="panel-body" id="trash-list"></div>
 </div></div>
 
 <div class="overlay" id="boards-ov"><div class="panel">
@@ -982,7 +988,7 @@ function toast(msg,kind=''){const el=document.createElement('div');el.className=
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .4s'},2300);setTimeout(()=>el.remove(),2800);}
 async function api(path,opts={}){const headers=Object.assign({},opts.headers||{});if(token)headers['authorization']='Bearer '+token;
   if(opts.json!==undefined){headers['content-type']='application/json';opts.body=JSON.stringify(opts.json);}
-  const res=await fetch(BASE+path,Object.assign({},opts,{headers}));const text=await res.text();let data;
+  const res=await fetch(BASE+path,Object.assign({},opts,{headers,cache:'no-store'}));const text=await res.text();let data;
   try{data=text?JSON.parse(text):{};}catch{data={raw:text};}
   if(res.status===401){
     localStorage.removeItem('thirdc_token');localStorage.removeItem('thirdc_user');
@@ -1298,6 +1304,9 @@ document.addEventListener('keydown',e=>{
   const tag=(e.target.tagName||'').toLowerCase();
   if(tag==='input'||tag==='textarea')return;
   if(e.key==='f'){fit();}if(e.key==='t'){tidy();}if(e.key==='n'){newDoc();}
+  if(e.key==='Delete'&&selected&&!document.querySelector('.overlay.open')&&!$('drawer').classList.contains('open')){
+    e.preventDefault();$b('ins-del').click();
+  }
   if(e.key==='m'&&e.shiftKey){toggleMemo();}
   if(e.key==='m'){sparkle(20);$('organize-btn').click();}
   if(e.key==='1'){document.querySelector('[data-view=timeline]').click();}
@@ -1797,10 +1806,13 @@ $b('ins-pub').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.
 $b('ins-focus').onclick=()=>selected&&focusNodes(new Set([selected]));
 $b('ins-copy').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(!n)return;navigator.clipboard?.writeText(n.path);toast('已复制 '+n.path);};
 $b('ins-del').onclick=async()=>{
-  const n=graph.nodes.find(x=>x.id===selected);if(!n||n.kind==='asset')return;
-  if(!confirm('删除 '+n.path+'？文件真相将被移除（op-log 保留历史）。'))return;
-  await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});
-  selected=null;$('inspector').classList.add('closed');await refreshAll();toast('已删除','ok');
+  const n=graph.nodes.find(x=>x.id===selected);if(!n)return;
+  if(n.kind==='asset'){toast('附件请在附件列表处理','err');return}
+  if(!confirm('移入回收站？\n'+n.path+'\n（可在 ⌘K「回收站」恢复，保留期见回收站）'))return;
+  try{
+    await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});
+    selected=null;$('inspector').classList.add('closed');await refreshAll();toast('已移入回收站','ok');
+  }catch(err){toast('删除失败：'+err.message,'err');}
 };
 
 /* ───────── 对话（SSE 流式） ───────── */
@@ -2017,6 +2029,57 @@ function renderRoad(){
     <span class="txt"><b>${t}</b>${d}</span></div>`).join('');
 }
 $b('road-btn').onclick=()=>{renderRoad();openOverlay('road-ov');};
+$b('trash-btn').onclick=()=>openTrash();
+/* ───────── 回收站 ───────── */
+async function openTrash(){openOverlay('trash-ov');await renderTrash();}
+async function renderTrash(){
+  const box=$('trash-list');
+  try{
+    const t=await api('/trash');
+    $('trash-count').textContent=t.entries.length+' 项';
+    if(!t.entries.length){
+      box.innerHTML=`<div style="color:var(--faint);font-size:13px;padding:8px 4px">回收站是空的。删除的文档/文件夹会先进这里，${t.retention_days===0?'永久保留（trash_days = 0）':'默认保留 '+t.retention_days+' 天后自动清除'}。</div>`;
+      return;
+    }
+    box.innerHTML='';
+    t.entries.forEach(e=>{
+      const el=document.createElement('div');el.className='prow';
+      const d=new Date(e.deleted_at*1000);
+      const when=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      const left=e.days_left==null?'永久':`剩 ${e.days_left} 天`;
+      el.innerHTML=`<span class="badge warn">${left}</span><span class="t"></span><span class="h">${when}</span>`
+        +`<span class="h" data-act="restore" style="cursor:pointer;color:var(--ok)">恢复</span>`
+        +`<span class="h" data-act="purge" style="cursor:pointer;color:var(--danger)">彻底删除</span>`;
+      el.querySelector('.t').textContent=e.path;
+      el.onclick=async ev=>{
+        const act=ev.target.dataset.act;if(!act)return;
+        try{
+          if(act==='restore'){
+            await api('/trash/restore',{method:'POST',json:{path:e.path}});
+            toast('已恢复 '+e.path,'ok');await refreshAll();
+          }else{
+            if(!confirm('彻底删除（不可恢复）：'+e.path+'？'))return;
+            await api('/trash/purge',{method:'POST',json:{path:e.path}});
+            toast('已彻底删除','ok');
+          }
+          await renderTrash();
+        }catch(err){toast((act==='restore'?'恢复':'删除')+'失败：'+err.message,'err');}
+      };
+      box.appendChild(el);
+    });
+  }catch(err){
+    box.innerHTML=`<div style="color:var(--danger);font-size:13px">加载失败：${err.message}</div>`;
+  }
+}
+$b('trash-empty').onclick=async()=>{
+  try{
+    const t=await api('/trash');
+    if(!t.entries.length){toast('回收站已经是空的','ok');return}
+    if(!confirm(`彻底删除回收站全部 ${t.entries.length} 项？（不可恢复）`))return;
+    await api('/trash/purge',{method:'POST',json:{all:true}});
+    toast('回收站已清空','ok');await renderTrash();
+  }catch(err){toast('清空失败：'+err.message,'err');}
+};
 
 /* ───────── 视图切换与多画布 ───────── */
 document.querySelectorAll('#view-seg button').forEach(b=>b.onclick=()=>{
@@ -2194,6 +2257,7 @@ const CMDS=[
   ['切换到看板','2',()=>{closeAll();document.querySelector('[data-view=kanban]').click();}],
   ['切换到画布','3',()=>{closeAll();document.querySelector('[data-view=canvas]').click();}],
   ['管理画布','b',async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();}],
+  ['回收站','x',async()=>{closeAll();await openTrash();}],
   ['A2UI 示例','a',()=>{closeAll();$('a2ui-demo').click();}],
   ['连接器管理','c',async()=>{closeAll();await openConnPanel();}],
   ['退出登录','out',()=>{
@@ -2953,7 +3017,7 @@ document.getElementById('canvas').addEventListener('contextmenu',e=>{
       {label:'🚀 发布为 AI-HTML',fn:()=>$b('ins-pub').click()},
       {label:'📋 复制路径',fn:()=>{navigator.clipboard.writeText(n.path);toast('已复制 '+n.path,'ok');}},
       'sep',
-      {label:'🗑 删除文档',danger:true,fn:()=>$b('ins-del').click()},
+      {label:'🗑 移入回收站',danger:true,fn:()=>$b('ins-del').click()},
     ]);
   }else{
     openCtx(e.clientX,e.clientY,[
@@ -2980,9 +3044,9 @@ document.getElementById('rail-list').addEventListener('contextmenu',e=>{
       {label:'📝 打开',fn:()=>openDoc(path)},
       {label:'📋 复制路径',fn:()=>{navigator.clipboard.writeText(path);toast('已复制','ok');}},
       'sep',
-      {label:'🗑 删除文档',danger:true,fn:async()=>{
-        if(!confirm('删除 '+path+'？'))return;
-        try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});toast('已删除','ok');await refreshAll();}
+      {label:'🗑 移入回收站',danger:true,fn:async()=>{
+        if(!confirm('移入回收站？'+path+'\n（可在 ⌘K「回收站」恢复）'))return;
+        try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});toast('已移入回收站','ok');await refreshAll();}
         catch(err){toast('删除失败：'+err.message,'err');}
       }},
     ]);
@@ -3055,13 +3119,13 @@ function clearSel(){multiSel.clear();document.querySelectorAll('#nodes .node').f
 $b('b-clear').onclick=clearSel;
 $b('b-del').onclick=async()=>{
   if(!multiSel.size)return;
-  if(!confirm(`删除选中的 ${multiSel.size} 篇文档？（文件真相将被移除）`))return;
+  if(!confirm(`将选中的 ${multiSel.size} 篇移入回收站？（可在 ⌘K「回收站」恢复）`))return;
   let ok=0;
   for(const id of multiSel){
     const n=graph.nodes.find(x=>x.id===id);
     if(n&&n.kind!=='asset'){try{await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});ok++}catch{}}
   }
-  clearSel();toast(`已删除 ${ok} 篇`,'ok');await refreshAll();
+  clearSel();toast(`已移入回收站 ${ok} 篇`,'ok');await refreshAll();
 };
 $b('b-move').onclick=async()=>{
   if(!multiSel.size)return;
