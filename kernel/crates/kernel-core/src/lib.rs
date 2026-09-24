@@ -549,6 +549,25 @@ impl Kernel {
             }
         }
         rows.truncate(if spec.limit == 0 { 30 } else { spec.limit });
+        // 计算列：`名称 = 表达式`，变量来自该行 frontmatter 属性
+        if let Some(f) = &spec.formula {
+            if let Some((name, expr)) = f.split_once('=') {
+                let name = name.trim().to_lowercase();
+                if !name.is_empty() && !expr.trim().is_empty() {
+                    let expr = expr.trim().to_string();
+                    for r in &mut rows {
+                        if let Some(v) = views::eval_formula(&expr, &r.props) {
+                            let s = if (v - v.trunc()).abs() < 1e-9 {
+                                format!("{}", v.trunc() as i64)
+                            } else {
+                                format!("{v:.2}")
+                            };
+                            r.props.insert(name.clone(), s);
+                        }
+                    }
+                }
+            }
+        }
         Ok(rows)
     }
 
@@ -968,6 +987,36 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn views_formula_total_and_relation_links() {
+        let dir = tempdir().unwrap();
+        let vault = Vault::init(dir.path(), "k").unwrap();
+        let mut k = Kernel::open(vault).unwrap();
+        k.put_doc(
+            "Notes/task-a.md",
+            "---\nhours: 2\nrate: 100\nrelated: 客户\n---\n# 任务 A\n\n工作记录\n",
+        )
+        .unwrap();
+        k.put_doc("Notes/task-b.md", "---\nhours: 3.5\nrate: 80\n---\n# B\n\n工作记录\n")
+            .unwrap();
+
+        // 计算列：工时 = hours * rate；relation 列渲染为链接
+        let spec = crate::views::ViewSpec::from_yamlish(
+            "type: table\nsource: folder:Notes\nfields: title, hours, rate, 工时, related\nrelation: related\nformula: 工时 = hours * rate\ntotal: hours\nlimit: 50",
+        );
+        let rows = k.resolve_view(&spec, None).unwrap();
+        let a = rows.iter().find(|r| r.path == "Notes/task-a.md").unwrap();
+        assert_eq!(a.props.get("工时").map(|s| s.as_str()), Some("200"), "计算列");
+        assert_eq!(
+            rows.iter().find(|r| r.path == "Notes/task-b.md").unwrap().props.get("工时").map(|s| s.as_str()),
+            Some("280"),
+            "3.5*80"
+        );
+        let html = crate::views::render_html(&spec, &rows);
+        assert!(html.contains("合计"), "汇总行：{html}");
+        assert!(html.contains("<a data-doc=\"客户\">客户</a>"), "relation 渲染为链接：{html}");
+    }
+
     fn assets_are_deduped_and_backlinked() {
         let dir = tempdir().unwrap();
         let vault = Vault::init(dir.path(), "k").unwrap();
@@ -1575,6 +1624,15 @@ pub mod views {
         pub group_by: Option<String>,
         #[serde(default)]
         pub limit: usize,
+        /// 计算列：`工时 = hours * rate`（+ - * / 括号，变量取 frontmatter 属性）
+        #[serde(default)]
+        pub formula: Option<String>,
+        /// 汇总：对某属性求和，输出表尾合计行
+        #[serde(default)]
+        pub total: Option<String>,
+        /// 关系列：这些字段渲染为文档链接（relation 最小形态）
+        #[serde(default)]
+        pub relation: Vec<String>,
     }
 
     impl ViewSpec {
@@ -1594,6 +1652,11 @@ pub mod views {
                     "limit" | "条数" => s.limit = val.parse().unwrap_or(30),
                     "fields" | "字段" => {
                         s.fields = val.split([',', '，']).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+                    }
+                    "formula" | "公式" => s.formula = Some(val),
+                    "total" | "汇总" => s.total = Some(val),
+                    "relation" | "relations" | "关联" => {
+                        s.relation = val.split([',', '，']).map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect()
                     }
                     _ => {}
                 }
@@ -1684,16 +1747,212 @@ pub mod views {
                             "updated" | "更新时间" => fmt_day(r.mtime),
                             "collection" | "集合" => esc(&r.collection),
                             "path" | "路径" => format!("<code>{}</code>", esc(&r.path)),
-                            other => esc(r.props.get(&other.to_lowercase()).map(|s| s.as_str()).unwrap_or("")),
+                            other => {
+                                let key = other.to_lowercase();
+                                let v = r.props.get(&key).map(|s| s.as_str()).unwrap_or("");
+                                if spec.relation.iter().any(|x| x == &key) {
+                                    if v.trim().is_empty() { String::new() } else {
+                                        format!("<a data-doc=\"{}\">{}</a>", esc(v), esc(v))
+                                    }
+                                } else {
+                                    render_prop_value(v)
+                                }
+                            }
                         };
                         out.push_str(&format!("<td>{cell}</td>"));
                     }
                     out.push_str("</tr>");
                 }
+                // 汇总行：total 指定属性求和 + 行数
+                if let Some(t) = &spec.total {
+                    let tk = t.trim().to_lowercase();
+                    let sum: f64 = rows
+                        .iter()
+                        .filter_map(|r| r.props.get(&tk).and_then(|s| s.parse::<f64>().ok()))
+                        .sum();
+                    let s = if (sum - sum.trunc()).abs() < 1e-9 { format!("{}", sum.trunc() as i64) } else { format!("{sum:.1}") };
+                    out.push_str(&format!(
+                        "<tfoot><tr><td colspan=\"{}\">共 {} 行 · {} 合计：{}</td></tr></tfoot>",
+                        fields.len().max(1),
+                        rows.len(),
+                        esc(&tk),
+                        s
+                    ));
+                }
                 out.push_str("</tbody></table>");
             }
         }
         out.push_str("</section>");
+        out
+    }
+
+    /// 计算列求值：+ - * / 与括号，变量 = frontmatter 属性（小写键，空值/缺失按 0）。
+    pub(crate) fn eval_formula(expr: &str, vars: &std::collections::BTreeMap<String, String>) -> Option<f64> {
+        let tokens = tokenize_formula(expr)?;
+        let mut p = 0usize;
+        let v = parse_expr(&tokens, &mut p, vars)?;
+        if p != tokens.len() {
+            return None;
+        }
+        Some(v.0)
+    }
+
+    #[derive(Debug, Clone)]
+    enum FTok {
+        Num(f64),
+        Var(String),
+        Op(char),
+        LP,
+        RP,
+    }
+
+    fn tokenize_formula(expr: &str) -> Option<Vec<FTok>> {
+        let mut out = Vec::new();
+        let chars: Vec<char> = expr.chars().collect();
+        let mut i = 0usize;
+        while i < chars.len() {
+            let c = chars[i];
+            if c.is_whitespace() {
+                i += 1;
+                continue;
+            }
+            if "+-*/".contains(c) {
+                out.push(FTok::Op(c));
+                i += 1;
+                continue;
+            }
+            if c == '(' {
+                out.push(FTok::LP);
+                i += 1;
+                continue;
+            }
+            if c == ')' {
+                out.push(FTok::RP);
+                i += 1;
+                continue;
+            }
+            if c.is_ascii_digit() || (c == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit()) {
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                    i += 1;
+                }
+                let s: String = chars[start..i].iter().collect();
+                out.push(FTok::Num(s.parse().ok()?));
+                continue;
+            }
+            if c.is_alphabetic() {
+                let start = i;
+                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                out.push(FTok::Var(chars[start..i].iter().collect::<String>().to_lowercase()));
+                continue;
+            }
+            return None; // 未知字符
+        }
+        Some(out)
+    }
+
+    struct FVal(f64);
+
+    fn parse_expr(t: &[FTok], p: &mut usize, vars: &std::collections::BTreeMap<String, String>) -> Option<FVal> {
+        let mut left = parse_term(t, p, vars)?;
+        while *p < t.len() {
+            if let FTok::Op(op) = &t[*p] {
+                if *op == '+' || *op == '-' {
+                    let op = *op;
+                    *p += 1;
+                    let right = parse_term(t, p, vars)?;
+                    left = FVal(match op {
+                        '+' => left.0 + right.0,
+                        _ => left.0 - right.0,
+                    });
+                    continue;
+                }
+            }
+            break;
+        }
+        Some(left)
+    }
+
+    fn parse_term(t: &[FTok], p: &mut usize, vars: &std::collections::BTreeMap<String, String>) -> Option<FVal> {
+        let mut left = parse_factor(t, p, vars)?;
+        while *p < t.len() {
+            if let Some(FTok::Op(op)) = t.get(*p) {
+                if *op == '*' || *op == '/' {
+                    let op = *op;
+                    *p += 1;
+                    let right = parse_factor(t, p, vars)?;
+                    left = FVal(if op == '*' { left.0 * right.0 } else { left.0 / right.0 });
+                    continue;
+                }
+            }
+            break;
+        }
+        Some(left)
+    }
+
+    fn parse_factor(t: &[FTok], p: &mut usize, vars: &std::collections::BTreeMap<String, String>) -> Option<FVal> {
+        if *p >= t.len() {
+            return None;
+        }
+        match &t[*p] {
+            FTok::LP => {
+                *p += 1;
+                let v = parse_expr(t, p, vars)?;
+                if *p >= t.len() || !matches!(t[*p], FTok::RP) {
+                    return None;
+                }
+                *p += 1;
+                Some(v)
+            }
+            FTok::Num(n) => {
+                let v = *n;
+                *p += 1;
+                Some(FVal(v))
+            }
+            FTok::Var(name) => {
+                *p += 1;
+                let s = vars.get(&name.to_lowercase()).map(|s| s.as_str()).unwrap_or("");
+                Some(FVal(s.trim().parse::<f64>().unwrap_or(0.0)))
+            }
+            FTok::Op('-') => {
+                *p += 1;
+                let v = parse_factor(t, p, vars)?;
+                Some(FVal(-v.0))
+            }
+            FTok::Op('+') => {
+                *p += 1;
+                parse_factor(t, p, vars)
+            }
+            _ => None,
+        }
+    }
+
+    /// 表格里的属性值：`[[X]]` 渲染为可点链接（relation 最小形态）。
+    fn render_prop_value(v: &str) -> String {
+        if !v.contains("[[") {
+            return esc(v);
+        }
+        let mut out = String::new();
+        let mut rest = v;
+        while let Some(i) = rest.find("[[") {
+            out.push_str(&esc(&rest[..i]));
+            let after = &rest[i + 2..];
+            match after.find("]]") {
+                Some(j) => {
+                    let target = &after[..j];
+                    out.push_str(&format!("<a data-doc=\"{}\">{}</a>", esc(target), esc(target)));
+                    rest = &after[j + 2..];
+                }
+                None => {
+                    out.push_str("[[");
+                    rest = after;
+                    break;
+                }
+            }
+        }
+        out.push_str(&esc(rest));
         out
     }
 
