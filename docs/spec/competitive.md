@@ -41,7 +41,7 @@
 |---|---|---|
 | 2 | **frontmatter 属性作视图列**：任意 `key` 可当列，`filter: key=value`、`sort: key:asc/desc`（数值优先）；修复 CRDT 往返**丢失 frontmatter**（文件即真相的硬伤） | ✅ 已交付 |
 | 2 | **formula / total / relation**：`formula: 工时 = hours * rate`（+−×÷ 括号计算列）、`total: hours`（表尾合计）、`relation: 字段` 渲染为文档链接 | ✅ 已交付 |
-| 2 | relation 指向真实文档（backlink 双向）/ rollup 按关联聚合 / AI 一句话建视图 | 下一步 |
+| 2 | relation 指向真实文档（backlink 双向）/ rollup 按关联聚合 / AI 一句话建视图 | ✅ 已交付 |
 | 1 | Obsidian/Notion/飞书 导入向导 | 规划 |
 | 3 | 一键 wiki（发布）+ 加密分享 | 已有底子，待打磨 |
 | 4 | 协作光标 + 评论最小集 | 规划 |

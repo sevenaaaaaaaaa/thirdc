@@ -549,6 +549,56 @@ impl Kernel {
             }
         }
         rows.truncate(if spec.limit == 0 { 30 } else { spec.limit });
+        // rollup：先于 formula，formula 可引用 rollup 结果
+        if !spec.rollup.is_empty() {
+            let mut lookup: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+            for p in list_docs(&self.vault).map_err(SyncError::Store)? {
+                let rel = p.to_string_lossy().into_owned();
+                let stem = rel.rsplit('/').next().unwrap_or(&rel).trim_end_matches(".md").to_lowercase();
+                lookup.entry(stem).or_insert_with(|| rel.clone());
+                lookup.entry(rel.to_lowercase()).or_insert_with(|| rel.clone());
+                let no_ext = rel.trim_end_matches(".md").to_lowercase();
+                lookup.entry(no_ext).or_insert_with(|| rel.clone());
+                if let Ok(raw) = fs::read_to_string(self.vault.root.join(&rel)) {
+                    if let Some(t) = refs::extract_title(&raw) {
+                        lookup.entry(t.to_lowercase()).or_insert_with(|| rel.clone());
+                    }
+                }
+            }
+            for expr in &spec.rollup {
+                let (col, field, prop, agg) = views::parse_rollup(expr);
+                if col.is_empty() || field.is_empty() { continue; }
+                for r in &mut rows {
+                    let rel_val = r.props.get(&field).cloned().unwrap_or_default();
+                    let mut vals: Vec<f64> = vec![];
+                    let mut resolved = 0usize;
+                    for tok in rel_val.split(',') {
+                        let tok = tok.trim().trim_start_matches('[').trim_end_matches(']').trim().to_lowercase();
+                        if tok.is_empty() { continue; }
+                        let Some(target) = lookup.get(&tok) else { continue; };
+                        let Ok(raw) = fs::read_to_string(self.vault.root.join(target)) else { continue; };
+                        resolved += 1;
+                        if let Some(pr) = &prop {
+                            if let Some(v) = parse_frontmatter_props(&raw).get(pr).and_then(|s| s.parse::<f64>().ok()) {
+                                vals.push(v);
+                            }
+                        }
+                    }
+                    let out: Option<f64> = match agg.as_str() {
+                        "count" => Some(resolved as f64),
+                        "sum" => Some(vals.iter().sum()),
+                        "avg" => if vals.is_empty() { None } else { Some(vals.iter().sum::<f64>() / vals.len() as f64) },
+                        "min" => vals.iter().cloned().fold(f64::INFINITY, f64::min).into(),
+                        "max" => vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max).into(),
+                        _ => None,
+                    };
+                    if let Some(v) = out {
+                        let s = if (v - v.trunc()).abs() < 1e-9 { format!("{}", v.trunc() as i64) } else { format!("{v:.2}") };
+                        r.props.insert(col.clone(), s);
+                    }
+                }
+            }
+        }
         // 计算列：`名称 = 表达式`，变量来自该行 frontmatter 属性
         if let Some(f) = &spec.formula {
             if let Some((name, expr)) = f.split_once('=') {
@@ -1025,6 +1075,45 @@ mod tests {
         assert_eq!(s.fields, vec!["title", "tags", "updated"], "fields 应剥掉方括号");
         assert_eq!(s.relation, vec!["related", "owner"], "relation 应剥掉方括号并小写");
         assert_eq!(s.limit, 10);
+    }
+
+    #[test]
+    fn views_rollup_aggregates_related_docs() {
+        let dir = tempdir().unwrap();
+        let vault = Vault::init(dir.path(), "k").unwrap();
+        let mut k = Kernel::open(vault).unwrap();
+        k.put_doc("Notes/客户A.md", "---\nhours: 5\nrate: 100\n---\n# 客户A\n\n工作\n").unwrap();
+        k.put_doc("Notes/客户B.md", "---\nhours: 3\nrate: 80\n---\n# 客户B\n\n工作\n").unwrap();
+        k.put_doc(
+            "Notes/task.md",
+            "---\nrelated: 客户A, 客户B\n---\n# 任务\n\n关联两个客户\n",
+        )
+        .unwrap();
+
+        // sum + count（别名列名）
+        let spec = crate::views::ViewSpec::from_yamlish(
+            "type: table\nsource: folder:Notes\nfields: title, related, 关联工时, 关联数\nrelation: related\nrollup: 关联工时 = related.hours:sum, 关联数 = related:count\nlimit: 50",
+        );
+        let rows = k.resolve_view(&spec, None).unwrap();
+        let task = rows.iter().find(|r| r.path == "Notes/task.md").unwrap();
+        assert_eq!(task.props.get("关联工时").map(|s| s.as_str()), Some("8"), "5+3=8");
+        assert_eq!(task.props.get("关联数").map(|s| s.as_str()), Some("2"), "关联两个文档");
+
+        // avg / min / max / 无别名列名默认表达式
+        let spec2 = crate::views::ViewSpec::from_yamlish(
+            "type: table\nsource: folder:Notes\nfields: title, related.hours:avg\nrollup: related.hours:avg, related.hours:min, related.hours:max\nlimit: 50",
+        );
+        let rows2 = k.resolve_view(&spec2, None).unwrap();
+        let task2 = rows2.iter().find(|r| r.path == "Notes/task.md").unwrap();
+        assert_eq!(task2.props.get("related.hours:avg").map(|s| s.as_str()), Some("4"), "(5+3)/2");
+        assert_eq!(task2.props.get("related.hours:min").map(|s| s.as_str()), Some("3"));
+        assert_eq!(task2.props.get("related.hours:max").map(|s| s.as_str()), Some("5"));
+
+        // 解析器单测
+        let (c, f, p, a) = crate::views::parse_rollup("客户工时 = related.hours:sum");
+        assert_eq!((c.as_str(), f.as_str(), p.as_deref(), a.as_str()), ("客户工时", "related", Some("hours"), "sum"));
+        let (c2, f2, p2, a2) = crate::views::parse_rollup("related:count");
+        assert_eq!((c2.as_str(), f2.as_str(), p2.as_deref(), a2.as_str()), ("related:count", "related", None, "count"));
     }
 
     #[test]
@@ -1623,6 +1712,7 @@ pub mod memory {
 /// - `formula: 工时 = hours * rate` —— 计算列（+−×÷ 括号）
 /// - `total: hours` —— 表尾合计行
 /// - `relation: related` —— 该列渲染为文档链接
+/// - `rollup: related.hours:sum` —— 按关联聚合目标文档属性（sum/avg/count/min/max）
 pub mod views {
     use serde::{Deserialize, Serialize};
 
@@ -1651,6 +1741,10 @@ pub mod views {
         /// 关系列：这些字段渲染为文档链接（relation 最小形态）
         #[serde(default)]
         pub relation: Vec<String>,
+        /// rollup 按关联聚合：`related.hours:sum`、`related:count`、
+        /// 别名 `客户工时 = related.hours:sum`（sum/avg/count/min/max）
+        #[serde(default)]
+        pub rollup: Vec<String>,
     }
 
     impl ViewSpec {
@@ -1675,6 +1769,9 @@ pub mod views {
                     "total" | "汇总" => s.total = Some(val),
                     "relation" | "relations" | "关联" => {
                         s.relation = split_list(&val).into_iter().map(|x| x.to_lowercase()).collect()
+                    }
+                    "rollup" | "聚合" => {
+                        s.rollup = split_list(&val)
                     }
                     _ => {}
                 }
@@ -1823,6 +1920,32 @@ pub mod views {
             return None;
         }
         Some(v.0)
+    }
+
+    /// 解析 rollup 条目 → (列名, 关联字段, 目标属性?, 聚合函数)。
+    /// 支持 `related.hours:sum`、`related:count`、别名 `客户工时 = related.hours:sum`。
+    /// 无别名时列名 = 完整表达式小写（如 `related.hours:avg`）。
+    pub(crate) fn parse_rollup(s: &str) -> (String, String, Option<String>, String) {
+        let s = s.trim();
+        let (alias, body) = match s.split_once('=') {
+            Some((a, b)) => (a.trim().to_lowercase(), b.trim().to_string()),
+            None => (String::new(), s.to_string()),
+        };
+        let (left, agg) = match body.rsplit_once(':') {
+            Some((l, a)) if matches!(a, "sum" | "avg" | "count" | "min" | "max") => {
+                (l.to_string(), a.to_string())
+            }
+            _ => {
+                let agg = if body.contains('.') { "sum".to_string() } else { "count".to_string() };
+                (body.clone(), agg)
+            }
+        };
+        let col = if alias.is_empty() { body.to_lowercase() } else { alias };
+        let (field, prop) = match left.split_once('.') {
+            Some((f, p)) => (f.to_lowercase(), Some(p.to_lowercase())),
+            None => (left.to_lowercase(), None),
+        };
+        (col, field, prop, agg)
     }
 
     #[derive(Debug, Clone)]

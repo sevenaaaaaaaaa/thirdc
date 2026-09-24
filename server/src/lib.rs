@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v15';
+const SHELL = 'thirdc-shell-v16';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -1882,6 +1882,48 @@ mod tests {
                     .header("authorization", &auth)
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"op":"rewrite","text":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn view_resolve_rule_mode_and_ai_prompt_without_config() {
+        let (app, token, dir) = test_router();
+        let auth = format!("Bearer {token}");
+        std::fs::write(dir.path().join("Notes/a.md"), "---\nhours: 3\n---\n# A\n\nx\n").unwrap();
+
+        // 规则模式：spec 字符串解析正常
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/view/resolve")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"spec":"type: table\nsource: folder:Notes\nfields: title, hours\nlimit: 10"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!(v["mode"], "rule");
+        assert_eq!(v["rows"].as_array().map(|a| a.len()), Some(1));
+        assert!(v["spec_text"].as_str().unwrap_or("").contains("fields"));
+
+        // AI prompt：未配置模型 → 501
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/view/resolve")
+                    .header("authorization", &auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"prompt":"按工时倒序的任务表"}"#))
                     .unwrap(),
             )
             .await
@@ -3689,15 +3731,58 @@ async fn view_resolve(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
         return e.into_response();
     }
     let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
-    let spec = kernel_core::views::ViewSpec::from_yamlish(
-        req.get("spec").and_then(|s| s.as_str()).unwrap_or("type: table\nsource: all"),
-    );
     let current = req.get("current").and_then(|c| c.as_str()).map(|s| s.to_string());
+
+    // AI 一句话建视图：{ prompt } → 模型生成 yamlish → 解析；未配置模型 → 501
+    let (spec_text, mode) = if let Some(p) = req.get("prompt").and_then(|p| p.as_str()).filter(|s| !s.trim().is_empty()) {
+        let ai = st.kernel.lock().unwrap().vault.config.ai.clone();
+        let cfg = match ai {
+            Some(c) if !c.base_url.is_empty() => c,
+            _ => return err(StatusCode::NOT_IMPLEMENTED, "AI建视图需要先在「设置 → 连接」配置模型").into_response(),
+        };
+        let server = st.mcp.clone();
+        let full = format!(
+            "你是 ThirdC 视图规格生成器。把用户的一句话转成 ```view 代码块内的 yamlish 规格。\
+             只输出规格文本本身，不要解释、不要 Markdown 代码围栏。\n\n\
+             可用键：type(table|kanban|calendar|list)、source(all|here|folder:路径|query:关键词)、\
+             fields(列，逗号分隔)、filter(tag:x|text:x|kind:x|key=value)、\
+             sort(属性:asc|desc 或 updated_desc)、group_by(tag|collection|kind)、limit、\
+             formula(名称 = 表达式，变量为frontmatter属性)、total(属性名)、\
+             relation(关联字段)、rollup(关联字段.属性:sum|avg|count|min|max，可逗号分隔，可用「别名 = 表达式」)。\n\n\
+             示例：\n用户：按工时倒序的任务表，带合计和客户关联汇总\n\
+             type: table\nsource: folder:Notes\nfields: title, status, hours, related, 关联工时\n\
+             relation: related\nrollup: 关联工时 = related.hours:sum\ntotal: hours\nsort: hours:desc\nlimit: 50\n\n\
+             用户：{p}"
+        );
+        let outcome = match thirdc_mcp::agent::run_ai(&server, &cfg, &full).await {
+            Ok(o) => o,
+            Err(e) => return err(StatusCode::BAD_GATEWAY, format!("模型调用失败：{e}")).into_response(),
+        };
+        (extract_view_spec(&outcome.reply), "ai")
+    } else {
+        (
+            req.get("spec").and_then(|s| s.as_str()).unwrap_or("type: table\nsource: all").to_string(),
+            "rule",
+        )
+    };
+
+    let spec = kernel_core::views::ViewSpec::from_yamlish(&spec_text);
     let mut k = st.kernel.lock().unwrap();
     match k.resolve_view(&spec, current.as_deref()) {
-        Ok(rows) => Json(json!({ "spec": spec, "rows": rows, "html": kernel_core::views::render_html(&spec, &rows) })).into_response(),
+        Ok(rows) => Json(json!({ "spec": spec, "spec_text": spec_text, "mode": mode, "rows": rows, "html": kernel_core::views::render_html(&spec, &rows) })).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
+}
+
+/// 从模型回复中提取视图规格：优先 ```view 块，否则剥围栏取全文。
+fn extract_view_spec(s: &str) -> String {
+    let t = s.trim();
+    if let Some(start) = t.find("```view") {
+        let rest = &t[start + 7..];
+        let end = rest.find("```").unwrap_or(rest.len());
+        return rest[..end].trim().to_string();
+    }
+    strip_fence(t)
 }
 
 /// Agent 记忆：列出 / 追加 / 回忆。

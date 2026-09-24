@@ -28,6 +28,7 @@ thirdc serve <vault> [--addr 127.0.0.1:7700]
 | GET | `/trash` | 回收站列表 `{retention_days, entries:[{path, deleted_at, days_left}]}`；顺带清除过期项 |
 | POST | `/trash/restore` | `{path}` → 恢复到原路径（目标已存在则 409） |
 | POST | `/trash/purge` | `{path}` 或 `{all:true}` → 彻底删除（不可恢复） |
+| POST | `/view/resolve` | body `{spec}`（yamlish 字符串）或 `{prompt}`（AI 一句话建视图，需配置模型否则 501）→ `{spec, spec_text, mode, rows, html}` |
 | POST | `/asset?name=photo.png` | body = 字节；内容寻址入库，返回 hash/path/markdown |
 | POST | `/sync` | 扫描外部改动，返回 `{changed}` |
 
