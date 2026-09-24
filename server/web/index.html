@@ -73,7 +73,7 @@ html.desktop .lights{display:none}
   border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
 #more-menu.open{display:flex;animation:nodeIn .18s var(--ease-out) both}
 .mm-item{display:flex;align-items:center;gap:9px;height:34px;padding:0 11px;border-radius:9px;border:none;background:transparent;color:var(--muted);
-  font:500 13px var(--font-body);text-align:left;cursor:pointer;transition:background .15s,color .15s}
+  font:500 13px var(--font-body);text-align:left;cursor:pointer;transition:background .15s var(--ease-out),color .15s var(--ease-out)}
 .mm-item:hover{background:var(--hover);color:var(--fg)}
 .mm-sep{height:1px;margin:5px 8px;background:var(--border)}
 /* 划选即指令：动作栏 */
@@ -81,13 +81,13 @@ html.desktop .lights{display:none}
 #actionbar.on{display:flex;animation:nodeIn .16s var(--ease-out) both}
 #ab-q{height:40px;border:none;border-bottom:1px solid var(--border);background:transparent;color:var(--fg);padding:0 12px;font:13px var(--font-body);outline:none}
 #ab-list{display:flex;flex-wrap:wrap;gap:6px;padding:8px}
-.ab-verb{height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font:500 12px var(--font-body);cursor:pointer;transition:all .15s}
+.ab-verb{height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font:500 12px var(--font-body);cursor:pointer;transition:all .15s var(--ease-out)}
 .ab-verb:hover{color:var(--fg);border-color:var(--border-strong)}
 .ab-verb.ai{color:var(--accent)}
 .ab-verb:disabled{opacity:.5;cursor:default}
 #ab-preview{border-top:1px solid var(--border);padding:10px}
 .ab-pv-head{font:600 11px var(--font-mono);color:var(--faint);margin-bottom:6px;display:flex;gap:8px}
-.ab-pv-body{max-height:36vh;overflow:auto;white-space:pre-wrap;font:12.5px/1.7 var(--font-body);color:var(--fg);background:var(--bg3);border-radius:8px;padding:10px;margin:0}
+.ab-pv-body{max-height:36vh;overflow:auto;white-space:pre-wrap;font:12.5px/1.7 var(--font-body);color:var(--fg);background:var(--bg-soft);border-radius:8px;padding:10px;margin:0}
 .ab-pv-actions{display:flex;gap:6px;margin-top:8px}
 
 /* ── 侧栏 ── */
@@ -111,7 +111,7 @@ html.desktop .lights{display:none}
   background:transparent;color:var(--muted);cursor:pointer;font:600 13px var(--font-body);transition:all .2s}
 .rail-new:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 .rail-list{flex:1;overflow:auto;padding:0 8px 10px}
-.rail-item{display:block;padding:8px 10px;border-radius:11px;cursor:pointer;border:1px solid transparent;transition:background .18s}
+.rail-item{display:block;padding:8px 10px;border-radius:11px;cursor:pointer;border:1px solid transparent;transition:background .18s var(--ease-out)}
 .rail-item:hover{background:var(--glass)}
 .rail-item.on{background:var(--surface-strong);border-color:var(--border)}
 .rail-item .t{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -142,7 +142,7 @@ html.desktop .lights{display:none}
 .node{position:absolute;width:var(--node-w);background:var(--node-bg);border:1px solid var(--border);border-radius:var(--r-md);
   box-shadow:var(--node-shadow);user-select:none;
   transition:box-shadow .3s,border-color .3s}
-.node:hover,.node.on{-webkit-backdrop-filter:blur(14px) saturate(150%);backdrop-filter:blur(14px) saturate(150%)}
+.node:hover,.node.on{-webkit-backdrop-filter:brightness(1.04);backdrop-filter:brightness(1.04)}
 .node:hover{border-color:var(--border-strong)}
 .node.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft),var(--node-shadow)}
 .node.enter{animation:nodeIn .55s var(--ease-spring) both}
@@ -163,7 +163,7 @@ html.desktop .lights{display:none}
 .n-hit{font-size:12px;color:var(--muted);padding:5px 8px;border-radius:8px;background:var(--hover);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .n-hit:hover{background:var(--hover-strong);color:var(--fg)}
 .n-tags{display:flex;gap:5px;padding:0 13px 12px;flex-wrap:wrap}
-.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:10px;font-family:var(--font-mono);background:var(--hover);color:var(--faint)}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 8px;border-radius:999px;font-size:10px;font-family:var(--font-mono);background:var(--hover);color:var(--faint)}
 
 /* ── 检查器 ── */
 #inspector{position:fixed;top:calc(8px + var(--chrome-h) + 16px);right:10px;bottom:34px;width:272px;z-index:35;display:flex;flex-direction:column;gap:10px;
@@ -176,7 +176,7 @@ html.desktop .lights{display:none}
 .insp-sec{border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:7px}
 .insp-sec h4{margin:0;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
 .act{display:flex;align-items:center;gap:9px;height:36px;padding:0 11px;border-radius:11px;border:1px solid var(--border);background:var(--surface);
-  color:var(--fg);cursor:pointer;font:500 13px var(--font-body);transition:all .18s}
+  color:var(--fg);cursor:pointer;font:500 13px var(--font-body);transition:all .18s var(--ease-out)}
 .act:hover{border-color:var(--border-strong);background:var(--surface-strong);transform:translateX(2px)}
 .act.danger:hover{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
 .act svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
@@ -338,7 +338,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 /* ── 侧栏树 ── */
 .tree{font-size:13px}
 .tree-folder{user-select:none}
-.tree-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:9px;cursor:pointer;color:var(--muted);transition:background .16s,color .16s}
+.tree-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:9px;cursor:pointer;color:var(--muted);transition:background .16s var(--ease-out),color .16s var(--ease-out)}
 .tree-row:hover{background:var(--glass);color:var(--fg)}
 .tree-row.drop-hot{background:var(--accent-soft);color:var(--accent)}
 .tree-row .chev{width:12px;height:12px;stroke:currentColor;stroke-width:2;fill:none;transition:transform .25s var(--ease-spring);flex:0 0 auto}
@@ -347,15 +347,15 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .tree-row .ct{font-family:var(--font-mono);font-size:9.5px;color:var(--faint)}
 .tree-kids{display:none;padding-left:14px;border-left:1px solid var(--border-soft);margin-left:9px}
 .tree-folder.open>.tree-kids{display:block}
-.tree-leaf{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:9px;cursor:grab;color:var(--fg);transition:background .16s}
+.tree-leaf{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:9px;cursor:grab;color:var(--fg);transition:background .16s var(--ease-out)}
 .tree-leaf:hover{background:var(--glass)}
 .tree-leaf.on{background:var(--surface-strong);box-shadow:inset 2px 0 0 var(--accent)}
 .tree-leaf .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.tagchip{display:inline-flex;align-items:center;height:15px;padding:0 6px;border-radius:999px;font:600 9px var(--font-mono);color:var(--on-accent);flex:0 0 auto}
-#rail-search{margin:2px 10px 6px;width:calc(100% - 20px);height:30px;padding:0 10px;border-radius:9px;border:1px solid var(--border);background:var(--bg3);color:var(--fg);font:12.5px var(--font-body);outline:none;box-sizing:border-box}
+.tagchip{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font:600 10px var(--font-mono);color:var(--on-accent);flex:0 0 auto}
+#rail-search{margin:2px 10px 6px;width:calc(100% - 20px);height:30px;padding:0 10px;border-radius:9px;border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12.5px var(--font-body);outline:none;box-sizing:border-box}
 #rail-search:focus{border-color:var(--accent)}
 #rail-vaults{display:flex;gap:6px;flex-wrap:wrap;padding:2px 10px 8px}
-.rail-vault{height:26px;max-width:100%;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+.rail-vault{height:26px;max-width:100%;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--muted);
   font:500 11.5px var(--font-body);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:all .2s var(--ease-spring)}
 .rail-vault:hover{color:var(--fg);border-color:var(--border-strong)}
 .rail-vault.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
@@ -372,19 +372,19 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .rm-tag:hover{background:var(--accent);color:var(--on-accent)}
 .rm-empty{color:var(--faint);font-size:10.5px}
 .rm-add{display:flex;gap:6px;margin-top:9px}
-.rm-add input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--fg);font:12px var(--font-body);outline:none}
+.rm-add input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12px var(--font-body);outline:none}
 .rm-add input:focus{border-color:var(--accent)}
 .rm-send{width:28px;height:28px;flex:0 0 auto;border-radius:8px;border:none;background:var(--accent);color:var(--on-accent);cursor:pointer;font-size:15px;line-height:1}
 .rail-actions{padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;flex:0 0 auto}
 .rail-act{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--surface);
-  color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-spring)}
+  color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-out)}
 .rail-act:hover{color:var(--fg);border-color:var(--border-strong);transform:translateY(-1px)}
 .rail-act.accent{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 #agent-toggle{height:38px;padding:0 11px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--muted);
-  font:600 12.5px var(--font-body);cursor:pointer;display:flex;align-items:center;gap:6px;flex:0 0 auto;transition:all .2s var(--ease-spring)}
+  font:600 12.5px var(--font-body);cursor:pointer;display:flex;align-items:center;gap:6px;flex:0 0 auto;transition:all .2s var(--ease-out)}
 #agent-toggle:hover{color:var(--fg);border-color:var(--border-strong)}
 #agent-toggle.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
-.bg3{background:var(--bg-soft)}
+
 
 /* ── 展示模式 ── */
 #present-ov{position:fixed;inset:0;z-index:200;background:var(--bg);display:none}
@@ -431,7 +431,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 /* ── 发布水滴 ── */
 #water-overlay{position:fixed;inset:0;z-index:300;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 70%,transparent);backdrop-filter:blur(10px)}
 #water-overlay.open{display:grid}
-.drop{width:20px;height:20px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);
+#water-overlay .drop{width:20px;height:20px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);
   animation:drop-fall .7s var(--ease-out) both}
 @keyframes drop-fall{from{transform:translateY(-40vh) rotate(-45deg) scale(.5);opacity:1}
   80%{transform:translateY(0) rotate(-45deg) scale(1)}to{transform:translateY(0) rotate(-45deg) scale(1);opacity:1}}
@@ -457,7 +457,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 #ws-panel{position:fixed;top:calc(8px + var(--chrome-h) + 16px);left:var(--rail-x,270px);right:290px;z-index:85;display:none;
   background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
 #ws-panel.open{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-.ws-chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:11px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font:500 13px var(--font-body);transition:all .2s}
+.ws-chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:11px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font:500 13px var(--font-body);transition:all .2s var(--ease-out)}
 .ws-chip:hover{border-color:var(--border-strong);background:var(--surface-strong)}
 .ws-chip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
 #cal-ov{position:fixed;inset:0;z-index:190;display:none;background:var(--bg);overflow:auto;padding:60px 20px 20px}
@@ -524,7 +524,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
 /* ── 骨架屏 ── */
 .skel{height:11px;border-radius:6px;background:linear-gradient(90deg,var(--hover) 25%,var(--hover-strong) 37%,var(--hover) 63%);
-  background-size:400% 100%;animation:shimmer 1.4s linear infinite;margin:9px 10px}
+  background-size:400% 100%;animation:shimmer 1.2s linear infinite;margin:9px 10px}
 @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
 .node.skel-node{width:var(--node-w);height:96px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--node-bg);opacity:.55}
 #toast{position:fixed;right:16px;bottom:44px;z-index:460;display:flex;flex-direction:column;gap:8px;pointer-events:none}
@@ -545,14 +545,16 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .empty p{margin:0 0 16px;color:var(--muted);font-size:13px}
 .empty .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 @media (max-width:1180px){#dock{width:min(700px,calc(100vw - 320px))}}
-@media (max-width:900px){#dock{width:calc(100vw - 40px)}#drawer{width:calc(100vw - 20px)}}
+@media (max-width:900px){#dock{width:calc(100vw - 40px)}#drawer{width:calc(100vw - 20px)}
+  #statusbar .sb-hint,#sb-peers{display:none}
+  .ob-grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
 
 /* ── 键盘焦点：可 tab 元素必须有可见焦点环 ── */
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon-btn:focus-visible,.act:focus-visible,
 .rail-item:focus-visible,.tree-leaf:focus-visible,.tree-row:focus-visible,.doc-tab:focus-visible,.prow:focus-visible,.mm-item:focus-visible,
 .rail-act:focus-visible,.ws-chip:focus-visible,.ab-verb:focus-visible,.quick button:focus-visible,.toc-item:focus-visible,nav a:focus-visible{
-  outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  outline:2px solid var(--accent);outline-offset:2px}
 
 /* ── 粗指针（触屏）：高频控件抬到 ≥40px，桌面 fine 指针不回归 ── */
 @media (pointer:coarse){
@@ -574,12 +576,20 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 #chrome .icon-btn{width:28px;height:28px}
 @media (max-width:1360px){#board-name{display:none}}
 /* 全局按压反馈：所有可点元素按下轻微收缩，给出"已命中"的手感 */
-#chrome button:active,.act:active,.tab-pill:active,.prow:active,.tree-leaf:active,.tagchip:active{transform:scale(.96)}
-.act,.tab-pill,.prow,.tree-leaf{transition:transform .12s var(--ease-spring),background .2s}
+#chrome button:active,.act:active,.tab-pill:active,.prow:active,.tree-leaf:active,.tagchip:active,
+.rail-act:active,.mm-item:active,.quick button:active,.icon-btn:active,.rm-full:active,.rm-tag:active,.ws-chip:active{transform:scale(.96)}
+.act,.tab-pill,.prow,.tree-leaf{transition:transform .12s var(--ease-spring),background .2s var(--ease-out)}
+.rail-act,.mm-item,.quick button,.icon-btn,.rm-full,.ws-chip{transition:transform .12s var(--ease-spring),background .2s var(--ease-out),color .2s var(--ease-out),border-color .2s var(--ease-out)}
+/* 禁用态：全局统一，避免按钮只能靠文案猜状态 */
+.act:disabled,.icon-btn:disabled,.quick button:disabled,.rail-act:disabled,.mm-item:disabled,
+.rm-send:disabled,.send:disabled,.tab-pill:disabled,.ws-chip:disabled,.ab-verb:disabled{
+  opacity:.55;cursor:default;transform:none;filter:saturate(.6)}
+.act:disabled:hover{transform:none;border-color:var(--border);background:var(--surface)}
+.quick button{transition:background .2s var(--ease-out),color .2s var(--ease-out),border-color .2s var(--ease-out)}
 /* 画布节点：按下反馈 + 载入淡入 */
 .node{cursor:pointer}
 .node:active{transform:scale(calc(var(--ds,1)*.97))}
-#nodes{transition:opacity .18s ease}
+#nodes{transition:opacity .18s var(--ease-out)}
 #canvas.loading #nodes{opacity:.25}
 /* 抽屉：滑入动画 + 加载骨架 */
 #drawer{transition:transform .28s var(--ease-spring),opacity .22s}
@@ -587,9 +597,9 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 #drawer .drawer-body{position:relative}
 #drawer.loading .drawer-body::before{content:'';position:absolute;inset:0;z-index:5;
   background:linear-gradient(100deg,transparent 30%,color-mix(in oklab,var(--accent) 12%,transparent) 50%,transparent 70%);
-  background-size:200% 100%;animation:shimmer 1.1s linear infinite}
-@keyframes shimmer{to{background-position:-200% 0}}
-#preview,#p-frame{transition:opacity .25s ease}
+  background-size:200% 100%;animation:drawer-sweep 1.2s linear infinite}
+@keyframes drawer-sweep{to{background-position:-200% 0}}
+#preview,#p-frame{transition:opacity .25s var(--ease-out)}
 /* 右键菜单 */
 #ctx{position:fixed;z-index:400;display:none;min-width:180px;padding:5px;border-radius:12px;
   border:1px solid var(--border);background:var(--surface-strong);backdrop-filter:blur(18px);box-shadow:var(--shadow);
@@ -601,7 +611,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 #ctx .ctx-i.danger{color:var(--danger,#e5484d)}
 #ctx .ctx-sep{height:1px;margin:4px 6px;background:var(--border)}
 /* 风格选择器 */
-.style-sel{height:30px;max-width:170px;border-radius:9px;border:1px solid var(--border);background:var(--bg3);
+.style-sel{height:30px;max-width:170px;border-radius:9px;border:1px solid var(--border);background:var(--bg-soft);
   color:var(--fg);font:12px var(--font-body);padding:0 6px;outline:none}
 /* chat：消息进场、思考进度、token 提示 */
 .msg{animation:msgIn .3s var(--ease-spring) both}
@@ -612,6 +622,10 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 @keyframes thinkbar{from{background-position:-50% 0}to{background-position:150% 0}}
 .msg .meta{margin-top:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--faint)}
 .think-timer{font-family:var(--font-mono);font-size:10.5px;color:var(--faint);margin-top:4px}
+/* ── 减少动效：系统开启后动画/过渡收敛 ── */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0s!important}
+}
 </style>
 </head>
 <body>
@@ -679,19 +693,19 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div id="more-menu">
   <button class="mm-item" id="studio-mode-btn">🏠 Studio 模式</button>
   <div class="mm-sep"></div>
-  <button class="mm-item" id="present-btn">🖼 展示模式</button>
-  <button class="mm-item" id="organize-mode-btn">✨ 整理模式</button>
-  <button class="mm-item" id="learn-mode-btn">📖 学习模式</button>
-  <button class="mm-item" id="rag-mode-btn">🔎 RAG 检索</button>
+  <button class="mm-item" id="present-btn" title="全屏展示当前画布">🖼 展示模式</button>
+  <button class="mm-item" id="organize-mode-btn" title="整理模式（空白拖拽圈选）">✨ 整理模式</button>
+  <button class="mm-item" id="learn-mode-btn" title="学习模式">📖 学习模式</button>
+  <button class="mm-item" id="rag-mode-btn" title="RAG 检索模式">🔎 RAG 检索</button>
   <div class="mm-sep"></div>
-  <button class="mm-item" id="pub-btn">⬆ 发布 / 线上</button>
-  <button class="mm-item" id="design-btn">🎨 设计规范</button>
-  <button class="mm-item" id="road-btn">🗺 路线图</button>
-  <button class="mm-item" id="trash-btn">🗑 回收站</button>
-  <button class="mm-item" id="theme">🌓 明暗切换</button>
-  <button class="mm-item" id="sync">🔄 同步外部改动</button>
-  <button class="mm-item" id="force-refresh">⟲ 强制刷新</button>
-  <button class="mm-item" id="settings-btn">⚙ 设置</button>
+  <button class="mm-item" id="pub-btn" title="发布为 AI-HTML">⬆ 发布 / 线上</button>
+  <button class="mm-item" id="design-btn" title="设计规范 / tokens">🎨 设计规范</button>
+  <button class="mm-item" id="road-btn" title="功能路线图">🗺 路线图</button>
+  <button class="mm-item" id="trash-btn" title="回收站">🗑 回收站</button>
+  <button class="mm-item" id="theme" title="明暗切换">🌓 明暗切换</button>
+  <button class="mm-item" id="sync" title="同步外部改动">🔄 同步外部改动</button>
+  <button class="mm-item" id="force-refresh" title="强制刷新">⟲ 强制刷新</button>
+  <button class="mm-item" id="settings-btn" title="设置">⚙ 设置</button>
 </div>
 
 <aside id="rail">
@@ -759,7 +773,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <div class="dockbar">
     <button id="agent-toggle" title="切到 Agent 模式（对话优先）">🤖 Agent</button>
     <input id="say" placeholder="和知识库对话…「搜索 CRDT」「列出」">
-    <button class="send" id="send"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+    <button class="send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
   </div>
 </section>
 
@@ -809,7 +823,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 
 <div class="overlay" id="pub-ov"><div class="panel">
-  <div class="panel-head"><h3>发布</h3><span class="badge plan">本地预览</span><button class="icon-btn" data-close="pub-ov">✕</button></div>
+  <div class="panel-head"><h3>发布</h3><span class="badge plan">本地预览</span><button class="icon-btn" data-close="pub-ov" title="关闭" aria-label="关闭发布面板">✕</button></div>
   <div class="panel-body">
     <p style="margin:0 0 12px;color:var(--muted);font-size:13px">
       发布 = 渲染为自包含 AI-HTML（语义标签 + 内嵌 JSON-LD），产出 <code style="font-family:var(--font-mono)">llms.txt</code> 便于 agent 发现。
@@ -821,7 +835,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 
 <div class="overlay" id="design-ov"><div class="panel">
-  <div class="panel-head"><h3>设计规范</h3><span class="badge plan" id="design-active-badge">内置契约</span><button class="icon-btn" data-close="design-ov">✕</button></div>
+  <div class="panel-head"><h3>设计规范</h3><span class="badge plan" id="design-active-badge">内置契约</span><button class="icon-btn" data-close="design-ov" title="关闭" aria-label="关闭设计规范">✕</button></div>
   <div class="panel-body">
     <div class="drop" id="design-drop">拖入 design.md / SKILL 目录里的 md / tokens.css / 页面 HTML，或点击选择文件<br>
       <span style="font-size:11px;color:var(--faint)">也可以直接粘贴路径（服务端目录，如 /Users/you/Design/skill）</span></div>
@@ -842,22 +856,22 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 
 <div class="overlay" id="conn-ov"><div class="panel">
-  <div class="panel-head"><h3>连接器</h3><span class="badge plan" id="conn-ai">—</span><button class="icon-btn" data-close="conn-ov">✕</button></div>
+  <div class="panel-head"><h3>连接器</h3><span class="badge plan" id="conn-ai">—</span><button class="icon-btn" data-close="conn-ov" title="关闭" aria-label="关闭连接器">✕</button></div>
   <div class="panel-body" id="conn-list"></div>
 </div></div>
 
 <div class="overlay" id="trash-ov"><div class="panel">
-  <div class="panel-head"><h3>回收站</h3><span class="badge plan" id="trash-count">—</span><button class="act danger" id="trash-empty" style="height:26px;padding:0 10px;font-size:12px">清空</button><button class="icon-btn" data-close="trash-ov">✕</button></div>
+  <div class="panel-head"><h3>回收站</h3><span class="badge plan" id="trash-count">—</span><button class="act danger" id="trash-empty" style="height:26px;padding:0 10px;font-size:12px">清空</button><button class="icon-btn" data-close="trash-ov" title="关闭" aria-label="关闭回收站">✕</button></div>
   <div class="panel-body" id="trash-list"></div>
 </div></div>
 
 <div class="overlay" id="boards-ov"><div class="panel">
-  <div class="panel-head"><h3>画布</h3><span class="badge plan" id="board-count">—</span><button class="icon-btn" data-close="boards-ov">✕</button></div>
+  <div class="panel-head"><h3>画布</h3><span class="badge plan" id="board-count">—</span><button class="icon-btn" data-close="boards-ov" title="关闭" aria-label="关闭画布列表">✕</button></div>
   <div class="panel-body" id="boards-list"></div>
 </div></div>
 
 <div class="overlay" id="road-ov"><div class="panel">
-  <div class="panel-head"><h3>路线图</h3><span class="badge warn">功能可见性契约</span><button class="icon-btn" data-close="road-ov">✕</button></div>
+  <div class="panel-head"><h3>路线图</h3><span class="badge warn">功能可见性契约</span><button class="icon-btn" data-close="road-ov" title="关闭" aria-label="关闭路线图">✕</button></div>
   <div class="panel-body road" id="road-list"></div>
 </div></div>
 
@@ -868,7 +882,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <span id="sb-sync" style="display:none"></span>
   <span id="sb-peers">在线 1</span>
   <span id="sb-user"></span>
-  <span style="margin-left:auto">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
+  <span style="margin-left:auto" class="sb-hint">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
 </div>
 <div id="gitpanel">
   <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
@@ -886,7 +900,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div id="memo-bar">
   <span class="date" id="memo-date"></span>
   <input id="memo-input" placeholder="随手记…（Enter 发送）">
-  <button class="send" id="memo-send"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+  <button class="send" id="memo-send" title="保存" aria-label="保存随手记"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
 </div>
 <div id="water-overlay">
   <div style="text-align:center;position:relative">
@@ -984,10 +998,10 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div id="ws-panel">
   <span class="kicker">工作区</span><span id="ws-list"></span>
   <button class="ws-chip" id="ws-add" style="border-style:dashed">＋ 添加库</button>
-  <button class="icon-btn" id="ws-close" style="width:26px;height:26px;margin-left:auto">✕</button>
+  <button class="icon-btn" id="ws-close" style="width:26px;height:26px;margin-left:auto" title="关闭工作区面板" aria-label="关闭工作区面板">✕</button>
 </div>
 <div id="cal-ov">
-  <div class="cal-head"><button class="icon-btn" id="cal-prev">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next">›</button><button class="icon-btn" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
+  <div class="cal-head"><button class="icon-btn" id="cal-prev" title="上一月" aria-label="上一月">‹</button><h2 id="cal-title"></h2><button class="icon-btn" id="cal-next" title="下一月" aria-label="下一月">›</button><button class="icon-btn" title="关闭日历" aria-label="关闭日历" onclick="document.getElementById('cal-ov').classList.remove('open')">✕</button></div>
   <div class="cal-grid" id="cal-grid"></div>
 </div>
 <script data-cfasync="false">
@@ -1103,7 +1117,7 @@ function tagColor(t){
   const dark=document.documentElement.dataset.theme==='dark';
   return `oklch(${dark?'72%':'52%'} .14 ${h})`;
 }
-/* 景深：离屏幕中心越远越小越淡（物理错落感） */
+/* 景深：离屏幕中心越远越少淡（世界坐标算距离，避免每帧 getBoundingClientRect 强制布局） */
 let depthQueued=false;
 function queueDepth(){if(depthQueued)return;depthQueued=true;requestAnimationFrame(()=>{depthQueued=false;updateDepth()});}
 function updateDepth(){
@@ -1113,9 +1127,11 @@ function updateDepth(){
   if(nodes.length>36)return;
   const cx=innerWidth/2,cy=innerHeight/2;
   nodes.forEach(el=>{
-    const r=el.getBoundingClientRect();
-    if(!r.width)return;
-    const d=Math.hypot((r.left+r.width/2-cx)/innerWidth,(r.top+r.height/2-cy)/innerHeight);
+    const p=board.nodes[el.dataset.id];
+    if(!p)return;
+    const sx=p.x*vp.k+vp.x+(vp.k*(el.offsetWidth||300)/2);
+    const sy=p.y*vp.k+vp.y+(vp.k*(el.offsetHeight||96)/2);
+    const d=Math.hypot((sx-cx)/innerWidth,(sy-cy)/innerHeight);
     const sc=Math.max(.58,1-d*.75), op=Math.max(.5,1-d*.9);
     el.style.setProperty('--ds',multiSel.has(el.dataset.id)?'1':sc.toFixed(3));
     el.style.opacity=(el.dataset.id===selected||multiSel.has(el.dataset.id))?1:op.toFixed(3);
@@ -1747,7 +1763,12 @@ function renderTree(docs){
     return n;
   }
   renderLevel(root,box);
-  updateDepth();
+  if(q&&!box.children.length){
+    const empty=document.createElement('div');
+    empty.style.cssText='padding:12px 10px;color:var(--faint);font-size:12.5px';
+    empty.textContent=`没有匹配「${q}」的文档`;
+    box.appendChild(empty);
+  }
 }
 
 /* ───────── 抽屉 ───────── */
@@ -2675,11 +2696,19 @@ function renderPalette(q){
     el.innerHTML=`<span class="badge ok">文档</span><span class="t"></span><span class="h">${d.path}</span>`;
     el.querySelector('.t').textContent=d.title||d.path.split('/').pop();
     el.onclick=()=>{closeAll();openDoc(d.path);};box.appendChild(el);});
+  if(ql&&ql.length>=2&&!cmds.length&&!docs.length){
+    const empty=document.createElement('div');
+    empty.dataset.paletteEmpty='1';
+    empty.style.cssText='padding:12px 10px;color:var(--faint);font-size:12.5px';
+    empty.textContent='没有匹配的命令或文档。试试更短的关键词。';
+    box.appendChild(empty);
+  }
   // 全文命中（FTS5）：标题没中但内容里有的也补上
   if(ql.length>=2){
     api('/search?q='+encodeURIComponent(ql)).then(r=>{
       const hits=(r.hits||[]).filter(x=>!seen.has(x.path)).slice(0,6);
       if(!hits.length)return;
+      box.querySelector('[data-palette-empty]')?.remove();
       const lbl=document.createElement('div');
       lbl.style.cssText='padding:6px 10px;color:var(--faint);font-size:11px';
       lbl.textContent='全文命中';
