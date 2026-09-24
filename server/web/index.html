@@ -986,6 +986,52 @@ if(!token){ showLogin(); throw new Error('login-gate'); }
 
 function toast(msg,kind=''){const el=document.createElement('div');el.className='toast '+kind;el.textContent=msg;$('toast').appendChild(el);
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .4s'},2300);setTimeout(()=>el.remove(),2800);}
+/* macOS Tauri/WKWebView：原生 confirm/alert/prompt 是静默 no-op（confirm 恒 false，无弹窗）。
+   一律走应用内对话框；浏览器端行为一致。 */
+function uiModal({title='',body='',okText='确定',cancelText='取消',danger=false,input=false,inputVal='',password=false}){
+  return new Promise(resolve=>{
+    const old=document.getElementById('ui-modal');if(old)old.remove();
+    const mask=document.createElement('div');mask.id='ui-modal';
+    mask.style.cssText='position:fixed;inset:0;z-index:500;display:grid;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(6px);padding:20px';
+    const box=document.createElement('div');
+    box.style.cssText='width:min(420px,92vw);background:var(--surface-strong);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:20px 22px;font:14px/1.55 var(--font-body);color:var(--fg)';
+    let done=false;
+    const finish=(ok,val)=>{if(done)return;done=true;mask.remove();document.removeEventListener('keydown',onKey,true);resolve({ok,val:val??''});};
+    const onKey=e=>{
+      if(e.key==='Escape'){e.stopPropagation();finish(false);}
+      if(e.key==='Enter'){e.preventDefault();finish(true,inputEl?inputEl.value:undefined);}
+    };
+    document.addEventListener('keydown',onKey,true);
+    if(title){const h=document.createElement('div');h.textContent=title;h.style.cssText='font-weight:650;margin-bottom:8px;font-size:15px';box.appendChild(h);}
+    const b=document.createElement('div');b.style.cssText='white-space:pre-wrap;word-break:break-all;color:var(--muted);margin-bottom:14px';b.textContent=body;box.appendChild(b);
+    let inputEl=null;
+    if(input){
+      inputEl=document.createElement('input');
+      inputEl.type=password?'password':'text';
+      inputEl.value=inputVal;
+      inputEl.style.cssText='width:100%;margin-bottom:14px;padding:9px 11px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--fg);font:13px var(--font-mono);outline:none';
+      box.appendChild(inputEl);
+      setTimeout(()=>{inputEl.focus();inputEl.select();},20);
+    }
+    const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;justify-content:flex-end';
+    const mk=(txt,dangerBtn,ok)=>{
+      const btn=document.createElement('button');
+      btn.type='button';btn.textContent=txt;
+      btn.style.cssText=`padding:7px 14px;border-radius:10px;font:550 13px var(--font-body);cursor:pointer;border:1px solid ${dangerBtn?'transparent':'var(--border)'};background:${dangerBtn?(danger?'var(--danger, #e5484d)':'var(--surface)'):'transparent'};color:${dangerBtn?'#fff':'var(--fg)'}`;
+      btn.onclick=()=>finish(ok,inputEl?inputEl.value:undefined);
+      row.appendChild(btn);return btn;
+    };
+    if(cancelText)mk(cancelText,false,false);
+    mk(okText,true,true);
+    box.appendChild(row);
+    mask.appendChild(box);
+    mask.addEventListener('pointerdown',e=>{if(e.target===mask)finish(false);});
+    document.body.appendChild(mask);
+  });
+}
+const uiConfirm=(msg,opts={})=>uiModal(Object.assign({body:String(msg),okText:opts.ok||'确定',cancelText:opts.cancel||'取消',danger:opts.danger!==false},opts)).then(r=>!!r.ok);
+const uiPrompt=(msg,def='',opts={})=>uiModal(Object.assign({body:String(msg),input:true,inputVal:def==null?'':String(def),okText:opts.ok||'确定',cancelText:opts.cancel||'取消',password:!!opts.password},opts)).then(r=>r.ok?(r.val||''):null);
+const uiAlert=msg=>uiModal({body:String(msg),okText:'好',cancelText:''}).then(()=>undefined);
 async function api(path,opts={}){const headers=Object.assign({},opts.headers||{});if(token)headers['authorization']='Bearer '+token;
   if(opts.json!==undefined){headers['content-type']='application/json';opts.body=JSON.stringify(opts.json);}
   const res=await fetch(BASE+path,Object.assign({},opts,{headers,cache:'no-store'}));const text=await res.text();let data;
@@ -1304,8 +1350,10 @@ document.addEventListener('keydown',e=>{
   const tag=(e.target.tagName||'').toLowerCase();
   if(tag==='input'||tag==='textarea')return;
   if(e.key==='f'){fit();}if(e.key==='t'){tidy();}if(e.key==='n'){newDoc();}
-  if(e.key==='Delete'&&selected&&!document.querySelector('.overlay.open')&&!$('drawer').classList.contains('open')){
-    e.preventDefault();$b('ins-del').click();
+  if(e.key==='Delete'&&(selected||current)&&!document.querySelector('.overlay.open')&&!document.getElementById('ui-modal')){
+    e.preventDefault();
+    if(!selected&&current)selected='doc:'+current;
+    $b('ins-del').click();
   }
   if(e.key==='m'&&e.shiftKey){toggleMemo();}
   if(e.key==='m'){sparkle(20);$('organize-btn').click();}
@@ -1672,7 +1720,7 @@ async function saveDoc(){
   }catch(e){toast('保存失败：'+e.message,'err');}
 }
 async function newDoc(){
-  const title=prompt('新文档标题','未命名');if(!title)return;
+  const title=await uiPrompt('新文档标题','未命名');if(!title)return;
   const slug=title.replace(/[^\p{L}\p{N}]+/gu,'-').replace(/^-|-$/g,'').toLowerCase()||('note-'+Date.now());
   const path='Notes/'+slug+'.md';
   try{await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:'# '+title+'\n\n',headers:{'content-type':'text/markdown'}});
@@ -1793,7 +1841,7 @@ $('editor').addEventListener('input',e=>{
 async function aiBuildView(){
   $('slash-menu').style.display='none';
   if(!current){toast('先打开一篇文档','err');return}
-  const p=prompt('用一句话描述你要的视图：','按工时倒序的任务表，带客户关联汇总');
+  const p=await uiPrompt('用一句话描述你要的视图：','按工时倒序的任务表，带客户关联汇总');
   if(!p||!p.trim())return;
   toast('AI 生成视图中…');
   try{
@@ -1841,11 +1889,12 @@ function dropDocLocal(path){
 }
 async function deleteDoc(path){
   if(!path){toast('请先选中要删除的节点','err');return;}
-  if(!confirm('移入回收站？\n'+path+'\n（可在 ⌘K「回收站」恢复，保留期见回收站）'))return;
+  if(!(await uiConfirm('移入回收站？\n'+path+'\n（可在 ⌘K「回收站」恢复，保留期见回收站）',{ok:'移入回收站'})))return;
   try{
     await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});
     dropDocLocal(path);
     toast('已移入回收站：'+path,'ok');
+    if(current===path){$('drawer').classList.remove('open');current=null;dirty=false;}
     await refreshAll();
   }catch(err){toast('删除失败：'+err.message,'err');}
 }
@@ -1857,6 +1906,7 @@ $b('ins-del').onclick=async()=>{
     path=$('ins-path')?.textContent||null;
     if(path&&/asset|附件/i.test(($('ins-meta')?.textContent||'')))path=null;
   }
+  if(!path&&current)path=current;
   if(!path){toast('请先选中要删除的节点','err');return;}
   if(n&&n.kind==='asset'){toast('附件请在附件列表处理','err');return}
   await deleteDoc(path);
@@ -2105,7 +2155,7 @@ async function renderTrash(){
             await api('/trash/restore',{method:'POST',json:{path:e.path}});
             toast('已恢复 '+e.path,'ok');await refreshAll();
           }else{
-            if(!confirm('彻底删除（不可恢复）：'+e.path+'？'))return;
+            if(!(await uiConfirm('彻底删除（不可恢复）：'+e.path+'？',{ok:'彻底删除'})))return;
             await api('/trash/purge',{method:'POST',json:{path:e.path}});
             toast('已彻底删除','ok');
           }
@@ -2122,7 +2172,7 @@ $b('trash-empty').onclick=async()=>{
   try{
     const t=await api('/trash');
     if(!t.entries.length){toast('回收站已经是空的','ok');return}
-    if(!confirm(`彻底删除回收站全部 ${t.entries.length} 项？（不可恢复）`))return;
+    if(!(await uiConfirm(`彻底删除回收站全部 ${t.entries.length} 项？（不可恢复）`,{ok:'全部清空'})))return;
     await api('/trash/purge',{method:'POST',json:{all:true}});
     toast('回收站已清空','ok');await renderTrash();
   }catch(err){toast('清空失败：'+err.message,'err');}
@@ -2157,7 +2207,7 @@ function renderBoards(){
   const el=document.createElement('div');el.className='prow';
   el.innerHTML='<span class="badge plan">新建</span><span class="t">新建画布…</span>';
   el.onclick=async()=>{
-    const n=prompt('画布名','board-'+(boards.length+1));if(!n)return;
+    const n=await uiPrompt('画布名','board-'+(boards.length+1));if(!n)return;
     await api('/boards',{method:'POST',json:{name:n}});
     await loadBoards();boardName=n;$('board-name').textContent=n;closeAll();
     board=await api('/board?name='+encodeURIComponent(n));renderGraph();fit();
@@ -2314,17 +2364,17 @@ const CMDS=[
   ['插入视图（表格/看板/日历）','vw',async()=>{
     closeAll();
     if(!current){toast('先打开一篇文档','err');return}
-    const kind=prompt('视图类型：table / kanban / calendar / list','table')||'table';
-    const source=prompt('数据源：all / folder:Notes/Sources / query:关键词 / here','all')||'all';
+    const kind=await uiPrompt('视图类型：table / kanban / calendar / list','table')||'table';
+    const source=await uiPrompt('数据源：all / folder:Notes/Sources / query:关键词 / here','all')||'all';
     let extra='';
     if(kind==='table'){
-      const f=prompt('计算列（可选，如：工时 = hours * rate，留空跳过）','');
+      const f=await uiPrompt('计算列（可选，如：工时 = hours * rate，留空跳过）','');
       if(f&&f.includes('='))extra+=`formula: ${f}\n`;
-      const t=prompt('汇总字段（可选，如 hours，留空跳过）','');
+      const t=await uiPrompt('汇总字段（可选，如 hours，留空跳过）','');
       if(t.trim())extra+=`total: ${t.trim()}\n`;
-      const r=prompt('关系字段（可选，如 related，留空跳过）','');
+      const r=await uiPrompt('关系字段（可选，如 related，留空跳过）','');
       if(r.trim())extra+=`relation: ${r.trim()}\n`;
-      const ro=prompt('关联聚合（可选，如：关联工时 = related.hours:sum，留空跳过）','');
+      const ro=await uiPrompt('关联聚合（可选，如：关联工时 = related.hours:sum，留空跳过）','');
       if(ro.trim())extra+=`rollup: ${ro.trim()}\n`;
     }
     const block=`\n\`\`\`view\ntype: ${kind}\nsource: ${source}\n${extra}${kind==='kanban'?'group_by: collection\n':''}limit: 20\n\`\`\`\n`;
@@ -2333,7 +2383,7 @@ const CMDS=[
   }],
   ['AI 一句话建视图','va',async()=>{closeAll();await aiBuildView();}],
   ['全量备份（加密）','bk',async()=>{
-    closeAll();const p2=prompt('备份密码（至少 8 位，丢失密码=丢失备份）','');
+    closeAll();const p2=await uiPrompt('备份密码（至少 8 位，丢失密码=丢失备份）','');
     if(!p2||p2.length<8)return;
     toast('备份中…');
     try{const r=await api('/backup',{method:'POST',json:{password:p2,webdav_url:localStorage.getItem('thirdc_webdav')||''}});
@@ -2343,14 +2393,14 @@ const CMDS=[
       const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=r.file;a.click();
     }catch(e){toast('备份失败：'+e.message,'err')}
   }],
-  ['设置 WebDAV 备份地址','wd',()=>{
+  ['设置 WebDAV 备份地址','wd',async()=>{
     const cur=localStorage.getItem('thirdc_webdav')||'';
-    const nv=prompt('WebDAV 地址（如 https://dav.jianguoyun.com/dav/kb/）',cur);
+    const nv=await uiPrompt('WebDAV 地址（如 https://dav.jianguoyun.com/dav/kb/）',cur);
     if(nv!==null)localStorage.setItem('thirdc_webdav',nv);
     toast(nv?'WebDAV 已设置':'WebDAV 已清除','ok');
   }],
   ['网页本地化','w',async()=>{
-    closeAll();const url=prompt('网页 URL','https://example.com/article');if(!url)return;
+    closeAll();const url=await uiPrompt('网页 URL','https://example.com/article');if(!url)return;
     try{
       const r=await api('/ingest/web',{method:'POST',json:{url}});
       toast(`已本地化「${r.title||url}」→ ${r.rel}`,'ok');await refreshAll();openDoc(r.rel);
@@ -2359,7 +2409,7 @@ const CMDS=[
   ['Agent 记忆','mem',async()=>{
     closeAll();
     const r=await api('/agent/memory');
-    const text=prompt('Agent 记忆（可直接编辑整段内容，每条一行）',r.memory||'');
+    const text=await uiPrompt('Agent 记忆（可直接编辑整段内容，每条一行）',r.memory||'');
     if(text!==null){
       // 整段覆盖写回
       await api('/doc?path='+encodeURIComponent('Notes/Agent/memory.md'),{method:'PUT',body:text,headers:{'content-type':'text/markdown'}});
@@ -2367,22 +2417,22 @@ const CMDS=[
     }
   }],
   ['记住一件事','rm',async()=>{
-    closeAll();const t=prompt('要记住什么？','');if(!t)return;
-    const k=prompt('类型（偏好/事实/决策）','事实')||'事实';
+    closeAll();const t=await uiPrompt('要记住什么？','');if(!t)return;
+    const k=await uiPrompt('类型（偏好/事实/决策）','事实')||'事实';
     await api('/agent/memory',{method:'POST',json:{kind:k,text:t}});
     toast('已记住','ok');
   }],
   ['回忆（检索历史）','rc',async()=>{
-    closeAll();const q=prompt('回忆什么？','');if(!q)return;
+    closeAll();const q=await uiPrompt('回忆什么？','');if(!q)return;
     const r=await api('/agent/recall?q='+encodeURIComponent(q));
     if(!r.hits.length){toast('没有相关记忆','err');return}
-    alert(r.hits.map(h=>`${h.path}\n  ${h.snippet}`).join('\n\n'));
+    await uiAlert(r.hits.map(h=>`${h.path}\n  ${h.snippet}`).join('\n\n'));
   }],
   ['内容日历','cal',async()=>{closeAll();await openCalendar()}],
   ['分享当前文档（加密）','sh',async()=>{if(current){$('share-pass').value='';shareEncrypted(current)}else toast('先打开一篇','err')}],
   ['工作区切换','ws',()=>{$('ws-panel').classList.toggle('open');renderWorkspaces()}],
   ['采集主题（快速建库）','t',async()=>{
-    closeAll();const t=prompt('采集主题','大语言模型');if(!t)return;
+    closeAll();const t=await uiPrompt('采集主题','大语言模型');if(!t)return;
     try{const r=await api('/ingest/topic',{method:'POST',json:{topic:t,limit:5}});
       toast(`已采集 ${r.imported.length} 篇「${t}」`,'ok');await refreshAll();fit();
     }catch(e){toast('采集失败：'+e.message,'err')}
@@ -2693,9 +2743,9 @@ function maybeSwitchToLastWs(){
   if(w){sessionStorage.setItem('thirdc_ws_redirected','1');openWorkspace(w);}
 }
 $b('ws-add').onclick=async()=>{
-  const url=prompt('另一个 ThirdC 的 URL','http://127.0.0.1:7700');if(!url)return;
-  const t2=prompt('Token','');if(!t2)return;
-  const name=prompt('显示名','新工作区')||url;
+  const url=await uiPrompt('另一个 ThirdC 的 URL','http://127.0.0.1:7700');if(!url)return;
+  const t2=await uiPrompt('Token','');if(!t2)return;
+  const name=await uiPrompt('显示名','新工作区')||url;
   const list=loadWorkspaces();list.push({name,url:url.replace(/\/+$/,''),token:t2});
   localStorage.setItem('thirdc_workspaces',JSON.stringify(list));renderWorkspaces();renderRailVaults();
 };
@@ -2732,10 +2782,10 @@ async function renderCalendar(){
         dot.title=n.title||n.path;cell.appendChild(dot);
       }
     });
-    cell.onclick=()=>{
+    cell.onclick=async()=>{
       const dayDocs=docs.filter(n=>{if(!n.mtime)return false;const nd=new Date(n.mtime*1000);return nd.getFullYear()===calY&&nd.getMonth()===calM&&nd.getDate()===d});
       if(dayDocs.length===1)openDoc(dayDocs[0].path);
-      else if(dayDocs.length>1){const names=dayDocs.map(n=>n.title||n.path.split('/').pop()).join('\n');const pick=prompt(`该日 ${dayDocs.length} 篇：\n${names}\n\n输入序号打开（1-${dayDocs.length}）：`);if(pick){const idx=parseInt(pick)-1;if(dayDocs[idx])openDoc(dayDocs[idx].path)}}
+      else if(dayDocs.length>1){const names=dayDocs.map(n=>n.title||n.path.split('/').pop()).join('\n');const pick=await uiPrompt(`该日 ${dayDocs.length} 篇：\n${names}\n\n输入序号打开（1-${dayDocs.length}）：`);if(pick){const idx=parseInt(pick)-1;if(dayDocs[idx])openDoc(dayDocs[idx].path)}}
     };
     g.appendChild(cell);
   }
@@ -3040,7 +3090,7 @@ function openCtx(x,y,items){
     if(it==='sep'){const s=document.createElement('div');s.className='ctx-sep';ctxEl.appendChild(s);return;}
     const el=document.createElement('div');el.className='ctx-i'+(it.danger?' danger':'');
     el.textContent=it.label;
-    el.onclick=()=>{closeCtx();try{it.fn()}catch(e){toast(e.message,'err')}};
+    el.onclick=async()=>{closeCtx();try{await it.fn()}catch(e){toast(e.message||String(e),'err')}};
     ctxEl.appendChild(el);
   });
   ctxEl.style.display='block';
@@ -3095,7 +3145,7 @@ document.getElementById('rail-list').addEventListener('contextmenu',e=>{
       {label:'📋 复制路径',fn:()=>{navigator.clipboard.writeText(path);toast('已复制','ok');}},
       'sep',
       {label:'🗑 移入回收站',danger:true,fn:async()=>{
-        if(!confirm('移入回收站？'+path+'\n（可在 ⌘K「回收站」恢复）'))return;
+        if(!(await uiConfirm('移入回收站？'+path+'\n（可在 ⌘K「回收站」恢复）',{ok:'移入回收站'})))return;
         try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});dropDocLocal(path);toast('已移入回收站：'+path,'ok');await refreshAll();}
         catch(err){toast('删除失败：'+err.message,'err');}
       }},
@@ -3169,7 +3219,7 @@ function clearSel(){multiSel.clear();document.querySelectorAll('#nodes .node').f
 $b('b-clear').onclick=clearSel;
 $b('b-del').onclick=async()=>{
   if(!multiSel.size)return;
-  if(!confirm(`将选中的 ${multiSel.size} 篇移入回收站？（可在 ⌘K「回收站」恢复）`))return;
+  if(!(await uiConfirm(`将选中的 ${multiSel.size} 篇移入回收站？（可在 ⌘K「回收站」恢复）`,{ok:'移入回收站'})))return;
   let ok=0;
   for(const id of multiSel){
     const n=graph.nodes.find(x=>x.id===id);
@@ -3179,7 +3229,7 @@ $b('b-del').onclick=async()=>{
 };
 $b('b-move').onclick=async()=>{
   if(!multiSel.size)return;
-  const dir=prompt('移动到目录（如 研究或 Sources/知识库；留空=根目录）','研究');
+  const dir=await uiPrompt('移动到目录（如 研究或 Sources/知识库；留空=根目录）','研究');
   if(dir===null)return;
   let ok=0;
   for(const id of multiSel){
@@ -3194,7 +3244,7 @@ $b('b-move').onclick=async()=>{
 };
 $b('b-tag').onclick=async()=>{
   if(!multiSel.size)return;
-  const tag=prompt('标签名（写入文档正文 #标签）');
+  const tag=await uiPrompt('标签名（写入文档正文 #标签）');
   if(!tag||!tag.trim())return;
   const t=tag.trim().replace(/^#/,'');
   let ok=0;
@@ -3231,7 +3281,7 @@ $b('organize-btn').onclick=async()=>{
   try{
     const plan=await api('/organize/plan',{method:'POST',json:{}});
     if(!plan.moves.length){toast('结构已经很整洁，无需整理','ok');return}
-    if(!confirm(`整理方案：${plan.moves.length} 项移动（按标签聚类）\n`+plan.moves.map(m=>`${m.from} → ${m.to}`).join('\n')+'\n\n执行？'))return;
+    if(!(await uiConfirm(`整理方案：${plan.moves.length} 项移动（按标签聚类）\n`+plan.moves.map(m=>`${m.from} → ${m.to}`).join('\n')+'\n\n执行？',{ok:'执行整理'})))return;
     const r=await api('/organize/apply',{method:'POST',json:{moves:plan.moves}});
     sparkle(40);
     toast(`✨ 已整理 ${r.applied} 篇（失败 ${r.failed.length}）`,'ok');
@@ -3470,14 +3520,14 @@ async function abRunNode(op){
     await refreshAll();abHide();return;
   }
   if(op==='connect'){
-    const to=prompt('连到哪篇？（标题，或 Notes/xxx.md）');
+    const to=await uiPrompt('连到哪篇？（标题，或 Notes/xxx.md）');
     if(!to)return;
     const r=await api('/agent/apply',{method:'POST',json:{op,path:abSel.path,target:to}});
     toast(r.already?('已存在 '+r.link):('已添加 '+r.link),'ok');
     await refreshAll();abHide();return;
   }
   if(op==='tag'){
-    const t=prompt('标签名（写入正文 #标签）');
+    const t=await uiPrompt('标签名（写入正文 #标签）');
     if(!t)return;
     const r=await api('/agent/apply',{method:'POST',json:{op,target:t,paths}});
     toast(`已为 ${r.tagged} 篇打上 #${r.tag}`,'ok');
@@ -3692,7 +3742,7 @@ $('set-scan').addEventListener('click',async()=>{
 });
 $('set-quarantine').addEventListener('click',async()=>{
   if(!SCAN_ITEMS.length)return;
-  if(!confirm(`确认隔离 ${SCAN_ITEMS.length} 篇？文件会移入 .thirdc/quarantine，可手动还原。`))return;
+  if(!(await uiConfirm(`确认隔离 ${SCAN_ITEMS.length} 篇？文件会移入 .thirdc/quarantine，可手动还原。`,{ok:'隔离'})))return;
   try{
     const r=await api('/desktop/quarantine',{method:'POST',json:{paths:SCAN_ITEMS}});
     toast(`已隔离 ${r.moved.length} 篇 → ${r.quarantine}`,'ok');
