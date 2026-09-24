@@ -1821,14 +1821,45 @@ $b('ins-open').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n
 $b('ins-pub').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.kind!=='asset')doPublish(n.path);};
 $b('ins-focus').onclick=()=>selected&&focusNodes(new Set([selected]));
 $b('ins-copy').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(!n)return;navigator.clipboard?.writeText(n.path);toast('已复制 '+n.path);};
-$b('ins-del').onclick=async()=>{
-  const n=graph.nodes.find(x=>x.id===selected);if(!n)return;
-  if(n.kind==='asset'){toast('附件请在附件列表处理','err');return}
-  if(!confirm('移入回收站？\n'+n.path+'\n（可在 ⌘K「回收站」恢复，保留期见回收站）'))return;
+/* 删除成功后立刻从本地各缓存剔除（画布/侧栏/检索），再后台对账 */
+function dropDocLocal(path){
+  if(Array.isArray(window.__fullDocs)){
+    window.__fullDocs=window.__fullDocs.filter(d=>d.path!==path);
+    cacheSet('docs',window.__fullDocs);
+    window.__docsFetchedAt=Date.now();
+  }
+  if(window.__browseCache){
+    for(const v of window.__browseCache.values()){
+      if(v&&Array.isArray(v.docs))v.docs=v.docs.filter(d=>d.path!==path);
+    }
+  }
+  if(currentBrowse&&Array.isArray(currentBrowse.docs))currentBrowse.docs=currentBrowse.docs.filter(d=>d.path!==path);
+  graph.nodes=graph.nodes.filter(n=>n.path!==path);
+  if(selected==='doc:'+path){selected=null;$('inspector').classList.add('closed');}
+  try{renderGraph()}catch{}
+  try{renderTreeFromTree(cacheGet('tree')||{dirs:[]})}catch{}
+}
+async function deleteDoc(path){
+  if(!path){toast('请先选中要删除的节点','err');return;}
+  if(!confirm('移入回收站？\n'+path+'\n（可在 ⌘K「回收站」恢复，保留期见回收站）'))return;
   try{
-    await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});
-    selected=null;$('inspector').classList.add('closed');await refreshAll();toast('已移入回收站','ok');
+    await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});
+    dropDocLocal(path);
+    toast('已移入回收站：'+path,'ok');
+    await refreshAll();
   }catch(err){toast('删除失败：'+err.message,'err');}
+}
+$b('ins-del').onclick=async()=>{
+  let n=graph.nodes.find(x=>x.id===selected);
+  let path=n&&n.kind!=='asset'?n.path:null;
+  /* 选中项不在当前 graph（如刚从侧栏打开）且检查器可见时，用检查器路径兜底 */
+  if(!path&&selected&&!$('inspector').classList.contains('closed')){
+    path=$('ins-path')?.textContent||null;
+    if(path&&/asset|附件/i.test(($('ins-meta')?.textContent||'')))path=null;
+  }
+  if(!path){toast('请先选中要删除的节点','err');return;}
+  if(n&&n.kind==='asset'){toast('附件请在附件列表处理','err');return}
+  await deleteDoc(path);
 };
 
 /* ───────── 对话（SSE 流式） ───────── */
@@ -3065,7 +3096,7 @@ document.getElementById('rail-list').addEventListener('contextmenu',e=>{
       'sep',
       {label:'🗑 移入回收站',danger:true,fn:async()=>{
         if(!confirm('移入回收站？'+path+'\n（可在 ⌘K「回收站」恢复）'))return;
-        try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});toast('已移入回收站','ok');await refreshAll();}
+        try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});dropDocLocal(path);toast('已移入回收站：'+path,'ok');await refreshAll();}
         catch(err){toast('删除失败：'+err.message,'err');}
       }},
     ]);
@@ -3142,7 +3173,7 @@ $b('b-del').onclick=async()=>{
   let ok=0;
   for(const id of multiSel){
     const n=graph.nodes.find(x=>x.id===id);
-    if(n&&n.kind!=='asset'){try{await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});ok++}catch{}}
+    if(n&&n.kind!=='asset'){try{await api('/doc?path='+encodeURIComponent(n.path),{method:'DELETE'});dropDocLocal(n.path);ok++}catch{}}
   }
   clearSel();toast(`已移入回收站 ${ok} 篇`,'ok');await refreshAll();
 };
@@ -3804,6 +3835,7 @@ async function loadMeta(){
 async function refreshAll(){
   window.__docsFetchedAt=0;
   await Promise.all([loadGraph(true),loadRail(),loadStatus(),loadMeta()]);
+  await loadDocsFull(); /* 不再依赖 loadRail 里 1.8s 延迟——删除/保存后侧栏立即对账 */
   renderRailMemo();
 }
 function renderBrowseCached(b){
