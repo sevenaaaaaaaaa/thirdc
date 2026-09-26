@@ -29,24 +29,28 @@ body::before{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:var(--r-pill);border:2px solid transparent;background-clip:content-box}
 
-/* ── 外壳：单层顶栏 ── */
-#chrome{position:fixed;top:8px;left:10px;right:10px;height:var(--chrome-h);z-index:60;display:flex;align-items:center;gap:8px;padding:0 12px;
-  border-radius:var(--r-md);border:1px solid var(--border);background:color-mix(in oklab,var(--bg) 84%,transparent);
-  -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);
-  box-shadow:inset 0 1px 0 color-mix(in oklab,var(--surface-strong),transparent 40%),var(--shadow-sm)}
-html.desktop #chrome{padding-left:84px;-webkit-app-region:drag}
-html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome .tabs,html.desktop #chrome nav,html.desktop #chrome .doc-tabs{-webkit-app-region:no-drag}
-html.desktop .lights{display:none}
-.lights{display:flex;gap:8px;margin-right:2px}
-.light{width:12px;height:12px;border-radius:50%}
-.light.r{background:oklch(70% .19 25)}.light.y{background:oklch(80% .16 85)}.light.g{background:oklch(74% .17 145)}
-.brand{display:flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:700}
+/* ── 外壳：单层顶栏，通栏贴顶（ui-redesign.md §3.3）── */
+#chrome{position:fixed;top:0;left:0;right:0;height:var(--chrome-h);z-index:var(--z-chrome);display:flex;align-items:center;gap:8px;padding:0 12px;
+  border:0;border-bottom:1px solid var(--border);background:color-mix(in oklab,var(--bg) 84%,transparent);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%)}
+/* 桌面：左端 84px 是系统红绿灯区=拖拽区，导航按钮起 no-drag；env() 在支持 titlebar-area 的宿主里取更大值 */
+html.desktop #chrome{padding-left:max(env(titlebar-area-x,84px),84px);-webkit-app-region:drag}
+html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome nav,html.desktop #chrome .doc-tabs{-webkit-app-region:no-drag}
+/* 库身份：Web 端无红绿灯，同位放「3C 标 + 库名」，与桌面端同一行同一体系 */
+.brand{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 4px;border:none;background:transparent;border-radius:var(--r-md);
+  font-family:var(--font-display);font-weight:700;color:var(--fg);cursor:pointer;flex:0 0 auto}
+.brand:hover{background:var(--glass)}
 .brand .mark{width:26px;height:26px;border-radius:var(--r-md);background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-size:12px}
-/* 顶栏左侧：三大金刚 + 知识库/采集/附件 */
-.chrome-left{display:flex;align-items:center;gap:8px;flex:0 0 auto}
-.chrome-icons{display:flex;align-items:center;gap:4px;padding:0 2px;border-left:1px solid var(--border);border-right:1px solid var(--border);margin:0 2px}
-.chrome-icons .icon-btn{width:30px;height:30px;border-radius:var(--r-md);border-color:transparent;background:transparent}
-.chrome-icons .icon-btn.on{color:var(--accent);background:var(--accent-soft);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+.brand .bname{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand .chev{width:13px;height:13px;stroke:var(--faint);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+/* ⌘K 搜索位（身份区）：检索与命令的唯一入口 */
+.search-pill{display:flex;align-items:center;gap:8px;height:32px;width:min(230px,24vw);min-width:36px;padding:0 10px;border-radius:var(--r-pill);
+  border:1px solid var(--border);background:var(--surface);color:var(--faint);font:400 12.5px var(--font-body);cursor:pointer;
+  transition:border-color .2s,color .2s;flex:0 1 auto}
+.search-pill:hover{color:var(--fg);border-color:var(--border-strong)}
+.search-pill svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;flex:0 0 auto}
+.search-pill .sp-txt{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-pill kbd{font-family:var(--font-mono);font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:var(--r-sm);padding:1px 5px;flex:0 0 auto}
 .chrome-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:auto}
 .tabs{display:flex;gap:2px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:4px}
 .doc-tabs{display:flex;align-items:center;gap:3px;margin-left:2px;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
@@ -69,7 +73,7 @@ html.desktop .lights{display:none}
 #acct-btn .on{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--ok);display:none;border:1px solid var(--surface)}
 #acct-btn.linked .on{display:block}
 #more-btn{font-size:17px;font-weight:700;line-height:1}
-#more-menu{position:fixed;top:calc(8px + var(--chrome-h) + 8px);right:12px;z-index:120;display:none;flex-direction:column;min-width:196px;padding:6px;border-radius:var(--r-lg);
+#more-menu{position:fixed;top:calc(var(--chrome-h) + 8px);right:12px;z-index:var(--z-overlay);display:none;flex-direction:column;min-width:196px;padding:6px;border-radius:var(--r-lg);
   border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
 #more-menu.open{display:flex;animation:nodeIn .18s var(--ease-out) both}
 .mm-item{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:var(--r-md);border:none;background:transparent;color:var(--muted);
@@ -77,7 +81,7 @@ html.desktop .lights{display:none}
 .mm-item:hover{background:var(--hover);color:var(--fg)}
 .mm-sep{height:1px;margin:4px 8px;background:var(--border)}
 /* 划选即指令：动作栏 */
-#actionbar{position:fixed;z-index:130;display:none;flex-direction:column;width:min(460px,82vw);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);overflow:hidden}
+#actionbar{position:fixed;z-index:var(--z-overlay);display:none;flex-direction:column;width:min(460px,82vw);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);overflow:hidden}
 #actionbar.on{display:flex;animation:nodeIn .16s var(--ease-out) both}
 #ab-q{height:40px;border:none;border-bottom:1px solid var(--border);background:transparent;color:var(--fg);padding:0 12px;font:13px var(--font-body);outline:none}
 #ab-list{display:flex;flex-wrap:wrap;gap:6px;padding:8px}
@@ -90,17 +94,29 @@ html.desktop .lights{display:none}
 .ab-pv-body{max-height:36vh;overflow:auto;white-space:pre-wrap;font:12.5px/1.7 var(--font-body);color:var(--fg);background:var(--bg-soft);border-radius:var(--r-sm);padding:10px;margin:0}
 .ab-pv-actions{display:flex;gap:6px;margin-top:8px}
 
-/* ── 侧栏 ── */
-#rail{position:fixed;top:calc(8px + var(--chrome-h) + 16px);left:10px;bottom:34px;width:250px;z-index:30;display:flex;flex-direction:column;
+/* ── 侧栏（Slot 化，ui-redesign.md §3.2：左栏=当前模式的导航，不做堆场）── */
+#rail{position:fixed;top:calc(var(--chrome-h) + 12px);left:10px;bottom:calc(var(--dock-h) + 8px);width:250px;z-index:var(--z-rail);display:flex;flex-direction:column;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(16px) saturate(150%);box-shadow:var(--shadow-sm);
   overflow:hidden;transition:transform .45s var(--ease-spring),opacity .3s}
 #rail.closed{transform:translateX(calc(-100% - 16px));opacity:0;pointer-events:none;visibility:hidden;transition:transform .45s var(--ease-spring),opacity .3s,visibility 0s .45s}
 #rail:not(.closed){transition:transform .45s var(--ease-spring),opacity .3s,visibility 0s 0s}
+.rail-slot{display:flex;flex-direction:column;flex:1;min-height:0}
+body[data-mode="learn"] .slot-studio{display:none}
+body[data-mode="studio"] .slot-learn,body[data-mode="organize"] .slot-learn{display:none}
+/* 展示模式：全屏优先，左栏与唤出钮一并退场 */
+body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:none}
+/* 学习 Slot：目录大纲 + Memo（原浮动 #toc 移入随栏滚动） */
+.slot-learn #toc{position:static;width:auto;flex:1;min-height:0;overflow-y:auto;border:none;border-radius:0;background:transparent;
+  -webkit-backdrop-filter:none;backdrop-filter:none;padding:8px 8px 0;display:none}
+.slot-learn #toc.open{display:block}
+.slot-learn .rail-memo{margin:0 10px 10px;flex:0 0 auto}
+/* Studio Slot：镜头四档与「过滤文档」并为顶部一处过滤行 */
+.rail-filter{padding:2px 10px 8px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
 #rail-fold{position:absolute;top:8px;right:8px;z-index:2;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);
   background:var(--surface-strong);color:var(--muted);cursor:pointer;display:grid;place-items:center;padding:0;transition:color .15s,border-color .15s}
 #rail-fold:hover{color:var(--fg);border-color:var(--border-strong)}
 #rail-fold svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
-#rail-open{position:fixed;left:10px;top:calc(8px + var(--chrome-h) + 16px);z-index:31;width:36px;height:36px;border-radius:var(--r-md);
+#rail-open{position:fixed;left:10px;top:calc(var(--chrome-h) + 12px);z-index:var(--z-rail);width:36px;height:36px;border-radius:var(--r-md);
   border:1px solid var(--border);background:var(--surface-strong);color:var(--muted);cursor:pointer;display:none;place-items:center;
   box-shadow:var(--shadow-sm);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);padding:0;transition:color .15s,border-color .15s,transform .15s}
 #rail-open:hover{color:var(--fg);border-color:var(--border-strong);transform:translateY(-1px)}
@@ -118,16 +134,16 @@ html.desktop .lights{display:none}
 .rail-item .p{font-family:var(--font-mono);font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ── 画布 ── */
-#canvas{position:fixed;inset:0;z-index:10;overflow:hidden;cursor:grab;touch-action:none}
+#canvas{position:fixed;inset:0;z-index:var(--z-canvas);overflow:hidden;cursor:grab;touch-action:none}
 #canvas.panning{cursor:grabbing}
 #canvas.dragging{cursor:grabbing}
 #viewport{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
 #viewport.anim{transition:transform .62s var(--ease-spring)}
-#grid{position:fixed;inset:0;z-index:5;pointer-events:none;
+#grid{position:fixed;inset:0;z-index:var(--z-canvas);pointer-events:none;
   background-image:radial-gradient(var(--grid-dot) 1px,transparent 1px);background-size:22px 22px;
   -webkit-mask-image:radial-gradient(72% 62% at 50% 45%,oklch(0% 0 0) 28%,transparent 100%);
           mask-image:radial-gradient(72% 62% at 50% 45%,oklch(0% 0 0) 28%,transparent 100%)}
-#aura{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .5s}
+#aura{position:fixed;inset:0;z-index:var(--z-canvas);pointer-events:none;opacity:0;transition:opacity .5s}
 #aura.on{opacity:1;background:radial-gradient(34% 30% at 50% 88%,var(--accent-soft),transparent 70%);
   animation:aura 2.6s var(--ease-spring) infinite}
 @keyframes aura{0%{transform:translateY(6px) scale(.98)}50%{transform:translateY(-4px) scale(1.02)}100%{transform:translateY(6px) scale(.98)}}
@@ -163,8 +179,8 @@ html.desktop .lights{display:none}
 .n-tags{display:flex;gap:4px;padding:0 12px 12px;flex-wrap:wrap}
 .tag{display:inline-flex;align-items:center;height:18px;padding:0 8px;border-radius:var(--r-pill);font-size:10px;font-family:var(--font-mono);background:var(--hover);color:var(--faint)}
 
-/* ── 检查器 ── */
-#inspector{position:fixed;top:calc(8px + var(--chrome-h) + 16px);right:10px;bottom:34px;width:272px;z-index:35;display:flex;flex-direction:column;gap:10px;
+/* ── 检查器：默认收起，选中节点滑出（唯一家=右键菜单同源动作）── */
+#inspector{position:fixed;top:calc(var(--chrome-h) + 12px);right:10px;bottom:calc(var(--dock-h) + 8px);width:272px;z-index:var(--z-rail);display:flex;flex-direction:column;gap:10px;
   padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(16px) saturate(150%);
   box-shadow:var(--shadow-sm);overflow:auto;transition:transform .45s var(--ease-spring),opacity .3s}
 #inspector.closed{transform:translateX(calc(100% + 16px));opacity:0;pointer-events:none;visibility:hidden;transition:transform .45s var(--ease-spring),opacity .3s,visibility 0s .45s}
@@ -179,10 +195,10 @@ html.desktop .lights{display:none}
 .act.danger:hover{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
 .act svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 
-/* ── 对话舱（关键修复：容器不吃指针，只有子元素吃） ── */
-#dock{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:70;width:min(780px,calc(100vw - 600px));pointer-events:none}
+/* ── 底栏（ui-redesign.md §3.2）：对话输入条 + 右端状态簇，三层并一层，通栏贴底 ── */
+#dock{position:fixed;left:0;right:0;bottom:0;z-index:var(--z-dock);pointer-events:none}
 #dock>*{pointer-events:auto}
-#dock .thread{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;max-height:44vh;overflow:auto;padding:2px 4px}
+#dock .thread{display:flex;flex-direction:column;gap:8px;margin:0 auto 10px;width:min(780px,calc(100% - 24px));max-height:44vh;overflow:auto;padding:2px 4px}
 #dock .thread:empty{display:none;margin:0}
 .msg{border-radius:var(--r-md);padding:12px 14px;font-size:13.5px;line-height:1.72;border:1px solid var(--border);background:var(--surface-strong);
   backdrop-filter:blur(16px);box-shadow:var(--shadow-sm);white-space:pre-wrap}
@@ -198,21 +214,26 @@ html.desktop .lights{display:none}
 .stepchip.run{background:var(--accent-soft);color:var(--accent)}
 .stepchip .spin{width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.dockbar{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 16px;border-radius:var(--r-lg);border:1px solid var(--border);
-  background:var(--chat-bg);backdrop-filter:blur(20px) saturate(160%);box-shadow:var(--shadow);transition:box-shadow .4s,border-color .3s}
+.dockbar{display:flex;align-items:center;gap:10px;height:var(--dock-h);padding:0 14px;border:0;border-top:1px solid var(--border);
+  background:var(--chat-bg);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
 #dock.thinking .dockbar{border-color:color-mix(in oklab,var(--accent) 55%,var(--border));
   box-shadow:var(--shadow),0 0 0 4px var(--accent-soft),0 0 44px -8px var(--accent)}
-.dockbar input{flex:1;border:none;outline:none;background:transparent;color:var(--fg);font:14px var(--font-body)}
+.dockbar input{flex:1;min-width:0;border:none;outline:none;background:transparent;color:var(--fg);font:14px var(--font-body)}
 .dockbar input::placeholder{color:var(--faint)}
 .send{width:36px;height:36px;border-radius:var(--r-md);border:none;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:background .2s,transform .2s var(--ease-spring)}
 .send:hover{background:var(--accent-strong)}
 .send:active{transform:scale(.94)}
 .send svg{width:17px;height:17px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.quick button{height:26px;padding:0 12px;border-radius:var(--r-pill);font-size:12px;border:1px solid var(--border);background:var(--surface-strong);color:var(--muted);cursor:pointer;font-family:inherit}
-.quick button:hover{color:var(--fg);border-color:var(--border-strong)}
+/* 状态簇：连接 / 统计 / 用户 / 提示的唯一家（原 statusbar 并入底栏右端） */
+.sb-cluster{display:flex;align-items:center;gap:14px;margin-left:6px;padding-left:14px;border-left:1px solid var(--border);
+  font-family:var(--font-mono);font-size:11px;color:var(--faint);flex:0 0 auto;white-space:nowrap}
+.sb-cluster .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px}
+#sb-sync{cursor:pointer;font-variant-numeric:tabular-nums;transition:color .2s}
+#sb-sync.busy::before{content:'';display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;vertical-align:middle;animation:sb-spin .8s linear infinite}
+@keyframes sb-spin{to{transform:rotate(360deg)}}
 
 /* ── 抽屉 / 面板 / 调色板 ── */
-#drawer{position:fixed;top:calc(8px + var(--chrome-h) + 16px);right:10px;bottom:34px;width:min(600px,44vw);z-index:80;display:flex;flex-direction:column;
+#drawer{position:fixed;top:calc(var(--chrome-h) + 12px);right:10px;bottom:calc(var(--dock-h) + 8px);width:min(600px,44vw);z-index:var(--z-drawer);display:flex;flex-direction:column;
   background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden;
   transform:translateX(calc(100% + 20px));visibility:hidden;pointer-events:none;
   transition:transform .45s var(--ease-spring),visibility 0s .45s}
@@ -225,12 +246,12 @@ html.desktop .lights{display:none}
 .drawer-body.view #editor{display:none}
 .drawer-body.edit #preview{display:none}
 /* 铺开：覆盖画布区域（盖在画布之上，不是嵌进画布），左编辑右实时预览 */
-#drawer.wide{left:calc(var(--rail-x,270px) + 12px);width:auto;top:calc(8px + var(--chrome-h) + 16px)}
+#drawer.wide{left:calc(var(--rail-x,270px) + 12px);width:auto;top:calc(var(--chrome-h) + 12px)}
 #drawer.wide #editor,#drawer.wide #preview{display:block;flex:1}
 #drawer.wide #preview{flex:1.15}
 @media (max-width:900px){#drawer.wide{left:10px}}
 
-.overlay{position:fixed;inset:0;z-index:100;display:none;align-items:flex-start;justify-content:center;padding-top:14vh;
+.overlay{position:fixed;inset:0;z-index:var(--z-overlay);display:none;align-items:flex-start;justify-content:center;padding-top:14vh;
   background:color-mix(in oklab,var(--bg) 55%,transparent);backdrop-filter:blur(6px)}
 .overlay.open{display:flex;animation:fade .2s var(--ease-out)}
 @keyframes fade{from{opacity:0}to{opacity:1}}
@@ -296,7 +317,7 @@ html.desktop .lights{display:none}
 .a2ui-host{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--bg-soft)}
 .a2ui-frame{width:100%;height:260px;border:none;display:block;background:var(--bg)}
 .a2ui-loading{padding:14px;color:var(--faint);font-size:12.5px;font-family:var(--font-mono)}
-.peer{position:absolute;pointer-events:none;transition:left .12s linear,top .12s linear;z-index:40}
+.peer{position:absolute;pointer-events:none;transition:left .12s linear,top .12s linear}
 .peer .arrow{width:0;height:0;border:7px solid transparent;border-bottom-color:var(--accent);border-left-color:var(--accent)}
 .peer .label{margin-left:6px;margin-top:10px;padding:2px 8px;border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);font:600 10.5px var(--font-body);white-space:nowrap;box-shadow:var(--shadow-sm)}
 .peer .tagline{padding:8px 0 0;font-family:var(--font-mono);font-size:10px;color:var(--faint)}
@@ -309,10 +330,9 @@ html.desktop .lights{display:none}
 #mode-seg button,#view-seg button{height:30px;padding:0 12px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .25s var(--ease-spring)}
 #mode-seg button:hover,#view-seg button:hover{color:var(--fg);background:var(--glass)}
 #mode-seg button.on,#view-seg button.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
-body[data-mode="organize"] #dock{display:none}
-body[data-mode="learn"] #dock{display:none}
-body[data-mode="agent"] #dock .thread{max-height:72vh}
-body[data-mode="agent"] #canvas{filter:saturate(.55) brightness(.82)}
+/* 模式即布局（§1.4）：三主模式切换布局；整理=Studio 工具态；Agent=底栏常驻（对话优先态） */
+body.agent #dock .thread{max-height:72vh}
+body.agent #canvas{filter:saturate(.55) brightness(.82)}
 body[data-mode="organize"] #canvas{cursor:crosshair}
 
 /* ── 卡片物理：景深 + 悬浮 ── */
@@ -323,8 +343,9 @@ body[data-mode="organize"] #canvas{cursor:crosshair}
 .node:hover{transform:scale(calc(var(--ds,1)*1.045)) translateY(-6px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));
   box-shadow:0 30px 70px -26px oklch(0% 0 0/.5),0 0 0 3px var(--accent-soft)}
 .node.multi{box-shadow:0 0 0 3px var(--accent),var(--node-shadow)}
-#lasso{position:fixed;z-index:55;border:1.5px solid var(--accent);background:var(--accent-soft);display:none;pointer-events:none}
-#batchbar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:75;display:none;align-items:center;gap:8px;
+/* 圈选矩形/批量操作条：画布层的画布工具（文档级节点，非 rail 子节点） */
+#lasso{position:fixed;z-index:var(--z-canvas);border:1.5px solid var(--accent);background:var(--accent-soft);display:none;pointer-events:none}
+#batchbar{position:fixed;left:50%;bottom:calc(var(--dock-h) + 12px);transform:translateX(-50%);z-index:var(--z-dock);display:none;align-items:center;gap:8px;
   padding:8px 14px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-strong);backdrop-filter:blur(18px);box-shadow:var(--shadow)}
 #batchbar b{font-family:var(--font-mono);font-size:12px;color:var(--accent)}
 body[data-mode="organize"] #batchbar.show{display:flex}
@@ -349,14 +370,14 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .tree-leaf.on{background:var(--surface-strong);box-shadow:inset 2px 0 0 var(--accent)}
 .tree-leaf .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .tagchip{display:inline-flex;align-items:center;height:18px;padding:0 8px;border-radius:var(--r-pill);font:600 10px var(--font-mono);color:var(--on-accent);flex:0 0 auto}
-#rail-search{margin:2px 10px 6px;width:calc(100% - 20px);height:30px;padding:0 10px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12.5px var(--font-body);outline:none;box-sizing:border-box}
+#rail-search{margin:0;width:100%;height:30px;padding:0 10px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12.5px var(--font-body);outline:none;box-sizing:border-box}
 #rail-search:focus{border-color:var(--accent)}
 #rail-vaults{display:flex;gap:6px;flex-wrap:wrap;padding:2px 10px 8px}
 .rail-vault{height:26px;max-width:100%;padding:0 10px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-soft);color:var(--muted);
   font:500 11.5px var(--font-body);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:all .2s var(--ease-spring)}
 .rail-vault:hover{color:var(--fg);border-color:var(--border-strong)}
 .rail-vault.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
-.rail-lens{display:flex;gap:4px;flex-wrap:wrap;padding:0 10px 8px}
+.rail-lens{display:flex;gap:4px;flex-wrap:wrap}
 .rail-lens .tab-pill{height:26px;padding:0 8px;font-size:11.5px;border-radius:var(--r-sm)}
 .rail-memo{margin:2px 10px 8px;padding:10px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface)}
 .rm-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
@@ -383,27 +404,23 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 #agent-toggle.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 
 
-/* ── 展示模式 ── */
-#present-ov{position:fixed;inset:0;z-index:200;background:var(--bg);display:none}
+/* ── 展示模式（P2 完成全屏无 chrome；本层只保 iframe + 控制条）── */
+#present-ov{position:fixed;inset:0;z-index:var(--z-present);background:var(--bg);display:none}
 #present-ov.open{display:block}
 #present-ov iframe{width:100%;height:calc(100% - 46px);border:none;background:var(--bg)}
 .present-bar{height:46px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--border);background:var(--surface)}
 .present-bar .t{font-family:var(--font-display);font-weight:700;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 
 @keyframes sparkle{0%{transform:scale(0);opacity:1}70%{opacity:.9}100%{transform:scale(1.6) translateY(-24px);opacity:0}}
-.sparkle{position:fixed;pointer-events:none;z-index:300;width:8px;height:8px;border-radius:50%;background:var(--accent);animation:sparkle .9s var(--ease-out) both}
+.sparkle{position:fixed;pointer-events:none;z-index:var(--z-present);width:8px;height:8px;border-radius:50%;background:var(--accent);animation:sparkle .9s var(--ease-out) both}
 @keyframes treeIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
 
-#gitpanel{position:fixed;left:10px;bottom:34px;width:250px;z-index:36;background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);display:none;padding:10px}
+#gitpanel{position:fixed;left:10px;bottom:calc(var(--dock-h) + 8px);width:250px;z-index:var(--z-rail);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);display:none;padding:10px}
 #gitpanel.open{display:block}
 #gitpanel .row{display:flex;gap:6px;margin-bottom:8px}
 #gitpanel input{flex:1;min-width:0;height:30px;padding:0 8px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12px var(--font-body);outline:none}
 #gitpanel .log{max-height:150px;overflow:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted);line-height:1.8}
-/* ── TOC ── */
-#toc{position:fixed;left:var(--rail-x,270px);top:calc(8px + var(--chrome-h) + 68px);bottom:60px;width:180px;z-index:25;
-  overflow-y:auto;padding:10px 8px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);
-  backdrop-filter:blur(12px);font-size:11.5px;display:none;transition:opacity .3s,left .35s var(--ease-spring)}
-#toc.open{display:block}
+/* ── TOC：目录大纲（P1 起作为学习模式左栏 Slot 的内容，仅保留条目样式）── */
 #toc h4{margin:0 0 8px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
 .toc-item{padding:3px 8px;border-radius:var(--r-sm);cursor:pointer;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   transition:color .15s,background .15s;border-left:2px solid transparent}
@@ -411,11 +428,11 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .toc-item.active{color:var(--accent);border-left-color:var(--accent);font-weight:600}
 .toc-item.lv2{padding-left:16px}.toc-item.lv3{padding-left:24px}.toc-item.lv4{padding-left:32px}
 .toc-line{position:fixed;left:calc(var(--rail-x,270px) - 2px);top:0;width:2px;height:28px;background:var(--accent);border-radius:var(--r-sm);opacity:0;
-  transition:top .3s var(--ease-spring),opacity .3s,left .35s var(--ease-spring);pointer-events:none;z-index:26}
+  transition:top .3s var(--ease-spring),opacity .3s,left .35s var(--ease-spring);pointer-events:none;z-index:var(--z-rail)}
 .toc-line.on{opacity:1}
 
-/* ── Memo 模式 ── */
-#memo-bar{position:fixed;top:calc(8px + var(--chrome-h) + 12px);left:50%;transform:translateX(-50%);z-index:80;
+/* ── Memo 快记条（⌘⇧M 全局唤起）── */
+#memo-bar{position:fixed;top:calc(var(--chrome-h) + 12px);left:50%;transform:translateX(-50%);z-index:var(--z-drawer);
   width:min(600px,80vw);display:none;align-items:center;gap:8px;padding:8px 14px;
   border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);backdrop-filter:blur(20px) saturate(160%);box-shadow:var(--shadow)}
 #memo-bar.open{display:flex;animation:nodeIn .35s var(--ease-spring) both}
@@ -426,7 +443,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 #memo-bar .date{font-family:var(--font-mono);font-size:10px;color:var(--faint);white-space:nowrap}
 
 /* ── 发布水滴 ── */
-#water-overlay{position:fixed;inset:0;z-index:300;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 70%,transparent);backdrop-filter:blur(10px)}
+#water-overlay{position:fixed;inset:0;z-index:var(--z-present);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 70%,transparent);backdrop-filter:blur(10px)}
 #water-overlay.open{display:grid}
 #water-overlay .drop{width:20px;height:20px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);
   animation:drop-fall .7s var(--ease-out) both}
@@ -445,19 +462,19 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .envelope .hint{font-size:11px;color:var(--faint)}
 
 /* ── 分享面板 / 工作区面板 / 日历 ── */
-#share-overlay{position:fixed;inset:0;z-index:210;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)}
+#share-overlay{position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)}
 #share-overlay.open{display:grid}
 .share-card{width:min(480px,92vw);padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)}
 .share-card input{width:100%;padding:10px 14px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:13px var(--font-mono);outline:none;margin:10px 0}
 .share-card .link{font-family:var(--font-mono);font-size:11.5px;color:var(--accent);word-break:break-all;padding:10px;background:var(--hover);border-radius:var(--r-md);cursor:pointer}
 .share-card .hint{font-size:11px;color:var(--faint);margin-top:8px}
-#ws-panel{position:fixed;top:calc(8px + var(--chrome-h) + 16px);left:var(--rail-x,270px);right:290px;z-index:85;display:none;
+#ws-panel{position:fixed;top:calc(var(--chrome-h) + 12px);left:var(--rail-x,270px);right:290px;z-index:var(--z-drawer);display:none;
   background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
 #ws-panel.open{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 .ws-chip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);cursor:pointer;font:500 13px var(--font-body);transition:all .2s var(--ease-out)}
 .ws-chip:hover{border-color:var(--border-strong);background:var(--surface-strong)}
 .ws-chip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
-#cal-ov{position:fixed;inset:0;z-index:190;display:none;background:var(--bg);overflow:auto;padding:60px 20px 20px}
+#cal-ov{position:fixed;inset:0;z-index:var(--z-overlay);display:none;background:var(--bg);overflow:auto;padding:60px 20px 20px}
 #cal-ov.open{display:block}
 .cal-head{display:flex;align-items:center;gap:14px;max-width:900px;margin:0 auto 16px}
 .cal-head h2{font-family:var(--font-display);font-size:22px;margin:0;flex:1}
@@ -469,14 +486,14 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .cal-cell .dot-n.cap{background:var(--type-capture)}
 .cal-cell .dot-n.memo{background:var(--type-asset)}
 .cal-empty{color:var(--faint);text-align:center;padding:60px;font-size:14px}
-#crumb{position:fixed;top:calc(8px + var(--chrome-h) + 16px);left:50%;transform:translateX(-50%);z-index:56;
+#crumb{position:fixed;top:calc(var(--chrome-h) + 12px);left:50%;transform:translateX(-50%);z-index:var(--z-chrome);
   display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--r-pill);border:1px solid var(--border);
   background:var(--surface-strong);backdrop-filter:blur(14px);font:500 12.5px var(--font-body);box-shadow:var(--shadow-sm);max-width:70vw;overflow:auto}
 .node.k-folder{border-color:var(--border-strong);background:color-mix(in oklab,var(--accent) 7%,var(--node-bg))}
 .node.k-folder .n-kind{background:var(--accent)}
 .node.k-folder .n-title{font-weight:700}
 /* ── 画布初始化状态 ── */
-#canvas-state{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:26;display:none;
+#canvas-state{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:var(--z-rail);display:none;
   max-width:420px;padding:26px;border-radius:var(--r-lg);border:1px solid var(--border);
   background:var(--surface-strong);backdrop-filter:blur(18px);box-shadow:var(--shadow);text-align:center}
 #canvas-state.on{display:block;animation:nodeIn .35s var(--ease-spring) both}
@@ -486,13 +503,13 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .spinner{width:26px;height:26px;border-radius:50%;border:2.5px solid var(--border);border-top-color:var(--accent);
   margin:0 auto 12px;animation:spin .8s linear infinite}
 /* ── 画布提示条（首次显示，可关闭） ── */
-#hintbar{position:fixed;left:50%;transform:translateX(-50%);bottom:38px;z-index:24;display:flex;align-items:center;gap:10px;
+#hintbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--dock-h) + 10px);z-index:var(--z-rail);display:flex;align-items:center;gap:10px;
   padding:6px 14px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface);
   backdrop-filter:blur(12px);font:12px var(--font-mono);color:var(--muted);box-shadow:var(--shadow-sm)}
 #hintbar b{color:var(--fg);font-weight:600}
 #hintbar .x{cursor:pointer;color:var(--faint);padding:0 2px}
 /* ── 首屏引导 ── */
-#onboard{position:fixed;inset:0;z-index:250;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 82%,transparent);backdrop-filter:blur(6px)}
+#onboard{position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 82%,transparent);backdrop-filter:blur(6px)}
 #onboard.on{display:grid}
 .ob-card{width:min(560px,92vw);padding:30px;border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow)}
 .ob-card h2{margin:0 0 6px;font-family:var(--font-display);font-size:23px}
@@ -524,26 +541,18 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   background-size:400% 100%;animation:shimmer 1.2s linear infinite;margin:8px 10px}
 @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
 .node.skel-node{width:var(--node-w);height:96px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--node-bg);opacity:.55}
-#toast{position:fixed;right:16px;bottom:44px;z-index:460;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+#toast{position:fixed;right:16px;bottom:calc(var(--dock-h) + 12px);z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
 .toast.err{border-left-color:var(--danger)}
 .toast.ok{border-left-color:var(--ok)}
-#statusbar{position:fixed;left:0;right:0;bottom:0;height:26px;z-index:40;display:flex;align-items:center;gap:14px;padding:0 14px;
-  font-family:var(--font-mono);font-size:11px;color:var(--faint);background:color-mix(in oklab,var(--bg) 80%,transparent);backdrop-filter:blur(10px);
-  border-top:1px solid var(--border-soft)}
-#statusbar .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px}
-#sb-sync{cursor:pointer;font-variant-numeric:tabular-nums;transition:color .2s}
-#sb-sync.busy::before{content:'';display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;vertical-align:middle;animation:sb-spin .8s linear infinite}
-@keyframes sb-spin{to{transform:rotate(360deg)}}
-.empty{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;width:min(430px,86vw);padding:26px;border-radius:var(--r-lg);
+.empty{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:var(--z-rail);width:min(430px,86vw);padding:26px;border-radius:var(--r-lg);
   border:1px solid var(--border);background:var(--surface);backdrop-filter:blur(18px);box-shadow:var(--shadow);text-align:center}
 .empty h2{margin:0 0 6px;font-family:var(--font-display);font-size:20px}
 .empty p{margin:0 0 16px;color:var(--muted);font-size:13px}
 .empty .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-@media (max-width:1180px){#dock{width:min(700px,calc(100vw - 320px))}}
-@media (max-width:900px){#dock{width:calc(100vw - 40px)}#drawer{width:calc(100vw - 20px)}
-  #statusbar .sb-hint,#sb-peers{display:none}
+@media (max-width:900px){#drawer{width:calc(100vw - 20px)}
+  .sb-cluster .sb-hint,#sb-peers{display:none}
   .ob-grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
 
 /* ── 键盘焦点：可 tab 元素必须有可见焦点环 ── */
@@ -598,7 +607,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 @keyframes drawer-sweep{to{background-position:-200% 0}}
 #preview,#p-frame{transition:opacity .25s var(--ease-out)}
 /* 右键菜单 */
-#ctx{position:fixed;z-index:400;display:none;min-width:180px;padding:4px;border-radius:var(--r-md);
+#ctx{position:fixed;z-index:var(--z-ctx);display:none;min-width:180px;padding:4px;border-radius:var(--r-md);
   border:1px solid var(--border);background:var(--surface-strong);backdrop-filter:blur(18px);box-shadow:var(--shadow);
   animation:ctxIn .14s var(--ease-spring) both}
 @keyframes ctxIn{from{opacity:0;transform:scale(.94) translateY(-4px)}}
@@ -631,7 +640,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div id="crumb"></div>
 <div id="canvas-state"></div>
 <div id="hintbar"></div>
-<div id="boot" style="position:fixed;inset:0;z-index:240;display:grid;place-items:center;background:var(--bg)">
+<div id="boot" style="position:fixed;inset:0;z-index:var(--z-overlay);display:grid;place-items:center;background:var(--bg)">
   <div style="text-align:center">
     <div class="ring"></div>
     <div style="font-family:var(--font-display);font-size:19px;font-weight:700;margin-bottom:4px">ThirdC Studio</div>
@@ -658,47 +667,53 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <div class="ob-upd" id="ob-upd"></div>
 </div></div>
 <div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div><div id="peers"></div></div></div>
+<div id="lasso"></div>
+<div id="batchbar">
+  <b id="batch-n">0</b>
+  <button class="act" id="b-move">移动到…</button>
+  <button class="act" id="b-tag">打标签</button>
+  <button class="act" id="b-act">✨ 动作</button>
+  <button class="act danger" id="b-del">删除</button>
+  <button class="act" id="b-clear">取消</button>
+</div>
 
 <header id="chrome" data-tauri-drag-region>
-  <div class="chrome-left">
-    <nav id="view-seg" title="视图（快捷键 1/2/3）">
-      <button data-view="canvas" class="on" aria-pressed="true">画布</button>
-      <button data-view="timeline" aria-pressed="false">时间线</button>
-      <button data-view="kanban" aria-pressed="false">看板</button>
-    </nav>
-    <div class="chrome-icons">
-      <button class="icon-btn" id="vault-btn" title="切换知识库" aria-expanded="false" aria-label="切换知识库">
-        <svg viewBox="0 0 24 24"><path d="M4 7.5 12 4l8 3.5v9L12 20l-8-3.5v-9z"/><path d="M12 11.5 20 7.5M12 11.5 4 7.5M12 11.5V20"/></svg>
-      </button>
-      <button class="icon-btn" id="capture-btn" title="采集透镜（只看采集）" aria-pressed="false" aria-label="采集透镜">
-        <svg viewBox="0 0 24 24"><path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/><path d="M9 21h6"/></svg>
-      </button>
-      <button class="icon-btn" id="asset-btn" title="附件透镜（只看附件）" aria-pressed="false" aria-label="附件透镜">
-        <svg viewBox="0 0 24 24"><path d="M21.4 11.6 12.4 20.6a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 0 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/></svg>
-      </button>
-    </div>
-    <button id="board-pill" title="切换画布（双击切知识库）"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-  </div>
+  <!-- 身份区：库名（Web 端与桌面红绿灯同位起排）+ ⌘K 检索 -->
+  <button class="brand" id="brand" title="切换知识库 / 工作区">
+    <span class="mark">3C</span><span class="bname" id="brand-name">ThirdC</span>
+    <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <button class="search-pill" id="search-btn" title="检索与命令（⌘K）">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="sp-txt">搜索文档、命令…</span><kbd>⌘K</kbd>
+  </button>
+  <!-- Studio 视图与画布（P2 将降级为画布右上角视图胶囊） -->
+  <nav id="view-seg" title="视图（快捷键 1/2/3）">
+    <button data-view="canvas" class="on" aria-pressed="true">画布</button>
+    <button data-view="timeline" aria-pressed="false">时间线</button>
+    <button data-view="kanban" aria-pressed="false">看板</button>
+  </nav>
+  <button id="board-pill" title="切换画布（双击切知识库）"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <nav class="doc-tabs" id="doc-tabs"></nav>
+  <!-- 模式区：三主模式（整理/RAG/线上/Memo/Agent 均为工具态，不再并列） -->
+  <nav id="mode-seg" title="主模式：Studio 创作 · 学习 研读 · 展示 演示">
+    <button data-mode="studio" class="on" aria-pressed="true">Studio</button>
+    <button data-mode="learn" aria-pressed="false">学习</button>
+    <button data-mode="present" aria-pressed="false">展示</button>
+  </nav>
   <div class="chrome-actions">
-    <button class="icon-btn" id="fit" title="适配视图 (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-    <button class="icon-btn" id="tidy" title="整理布局 (T)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
     <button class="icon-btn" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
     <button class="icon-btn" id="more-btn" title="更多" aria-expanded="false" aria-haspopup="menu" aria-controls="more-menu">⋯</button>
   </div>
 </header>
 <div id="more-menu">
-  <button class="mm-item" id="studio-mode-btn">🏠 Studio 模式</button>
-  <div class="mm-sep"></div>
-  <button class="mm-item" id="present-btn" title="全屏展示当前画布">🖼 展示模式</button>
-  <button class="mm-item" id="organize-mode-btn" title="整理模式（空白拖拽圈选）">✨ 整理模式</button>
-  <button class="mm-item" id="learn-mode-btn" title="学习模式">📖 学习模式</button>
-  <button class="mm-item" id="rag-mode-btn" title="RAG 检索模式">🔎 RAG 检索</button>
+  <button class="mm-item" id="organize-mode-btn" title="Studio 工具态：空白拖拽圈选（M）">✨ 整理（圈选批量）</button>
   <div class="mm-sep"></div>
   <button class="mm-item" id="pub-btn" title="发布为 AI-HTML">⬆ 发布 / 线上</button>
   <button class="mm-item" id="design-btn" title="设计规范 / tokens">🎨 设计规范</button>
   <button class="mm-item" id="road-btn" title="功能路线图">🗺 路线图</button>
   <button class="mm-item" id="trash-btn" title="回收站">🗑 回收站</button>
+  <div class="mm-sep"></div>
   <button class="mm-item" id="theme" title="明暗切换">🌓 明暗切换</button>
   <button class="mm-item" id="sync" title="同步外部改动">🔄 同步外部改动</button>
   <button class="mm-item" id="force-refresh" title="强制刷新">⟲ 强制刷新</button>
@@ -707,30 +722,32 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 <aside id="rail">
   <button id="rail-fold" title="收起侧栏" aria-label="收起侧栏"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
-  <div class="rail-memo" id="rail-memo-w">
-    <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
-    <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
-    <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
-    <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
+  <!-- 学习 Slot：目录大纲 + Memo（热力图/标签/随手记） -->
+  <div class="rail-slot slot-learn">
+    <div id="toc"><h4>目录</h4><div id="toc-list"></div></div>
+    <div class="rail-memo" id="rail-memo-w">
+      <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
+      <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
+      <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
+      <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
+    </div>
   </div>
-  <nav class="rail-lens" id="rail-lens">
-    <button class="tab-pill on" data-lens="all" aria-pressed="true">全部</button>
-    <button class="tab-pill" data-lens="doc" aria-pressed="false">文档</button>
-  </nav>
-  <input id="rail-search" placeholder="过滤文档…">
-  <div id="lasso"></div>
-  <div id="batchbar">
-    <b id="batch-n">0</b>
-    <button class="act" id="b-move">移动到…</button>
-    <button class="act" id="b-tag">打标签</button>
-    <button class="act" id="b-act">✨ 动作</button>
-    <button class="act danger" id="b-del">删除</button>
-    <button class="act" id="b-clear">取消</button>
-  </div>
-  <div class="rail-list" id="rail-list"></div>
-  <div class="rail-actions">
-    <button class="rail-act accent" id="rail-new" title="新建文档">＋ 新建 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">N</kbd></button>
-    <button class="rail-act" id="organize-btn" title="一键整理">✨ 整理 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">M</kbd></button>
+  <!-- Studio Slot：过滤行（镜头四档）+ 文档树 + 动作 -->
+  <div class="rail-slot slot-studio">
+    <div class="rail-filter">
+      <input id="rail-search" placeholder="过滤文档…">
+      <nav class="rail-lens" id="rail-lens" title="透镜：只看某一类">
+        <button class="tab-pill on" data-lens="all" aria-pressed="true">全部</button>
+        <button class="tab-pill" data-lens="doc" aria-pressed="false">文档</button>
+        <button class="tab-pill" data-lens="capture" aria-pressed="false">采集</button>
+        <button class="tab-pill" data-lens="asset" aria-pressed="false">附件</button>
+      </nav>
+    </div>
+    <div class="rail-list" id="rail-list"></div>
+    <div class="rail-actions">
+      <button class="rail-act accent" id="rail-new" title="新建文档">＋ 新建 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">N</kbd></button>
+      <button class="rail-act" id="organize-btn" title="按标签聚类，一键搬移文档">✨ 自动整理</button>
+    </div>
   </div>
 </aside>
 <button id="rail-open" title="展开侧栏" aria-label="展开侧栏"><svg viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></svg></button>
@@ -757,9 +774,19 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <section id="dock">
   <div class="thread" id="thread"></div>
   <div class="dockbar">
-    <button id="agent-toggle" title="切到 Agent 模式（对话优先）">🤖 Agent</button>
+    <button id="agent-toggle" title="对话优先：画布退居背景" aria-pressed="false">🤖 Agent</button>
     <input id="say" placeholder="和知识库对话…">
     <button class="send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+    <!-- 状态簇：连接 / 统计 / 同步进度 / 在线 / 用户 / 提示的唯一家（原 statusbar 并入） -->
+    <div class="sb-cluster">
+      <span><span class="dot" id="sb-dot"></span><span id="sb-conn">connecting</span></span>
+      <span id="sb-stats">—</span>
+      <span id="sb-sync" style="display:none" title="点击刷新"></span>
+      <span id="sb-peers">在线 1</span>
+      <span id="sb-user"></span>
+      <span id="sb-ai"></span>
+      <span class="sb-hint">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
+    </div>
   </div>
 </section>
 
@@ -861,15 +888,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <div class="panel-body road" id="road-list"></div>
 </div></div>
 
-<div id="statusbar">
-  <span><span class="dot" id="sb-dot"></span><span id="sb-conn">connecting</span></span>
-  <span id="sb-stats">—</span>
-  <span id="sb-mode">—</span>
-  <span id="sb-sync" style="display:none"></span>
-  <span id="sb-peers">在线 1</span>
-  <span id="sb-user"></span>
-  <span style="margin-left:auto" class="sb-hint">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
-</div>
+<div class="toc-line" id="toc-line"></div>
 <div id="gitpanel">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
     <span class="badge ok" id="git-branch">—</span><span class="dv-meta" id="git-changes" style="margin:0;flex:1"></span>
@@ -880,9 +899,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <div class="row"><input id="git-newbranch" placeholder="新分支名…"><button class="act" id="git-do-branch" style="height:30px;padding:0 10px">新建</button></div>
   <div class="log" id="git-log"></div>
 </div>
-<div id="slash-menu" style="display:none;position:fixed;z-index:150;background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);padding:6px;flex-direction:column;min-width:180px"></div>
-<div id="toc"><h4>目录</h4><div id="toc-list"></div></div>
-<div class="toc-line" id="toc-line"></div>
+<div id="slash-menu" style="display:none;position:fixed;z-index:var(--z-overlay);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);padding:6px;flex-direction:column;min-width:180px"></div>
 <div id="memo-bar">
   <span class="date" id="memo-date"></span>
   <input id="memo-input" placeholder="随手记…（Enter 发送）">
@@ -901,7 +918,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   </div>
 </div>
 
-<div id="settings-ov" style="position:fixed;inset:0;z-index:200;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
+<div id="settings-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
 <div style="width:min(460px,92vw);max-height:88vh;overflow:auto;padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:14px">设置</div>
   <div style="margin-bottom:16px">
@@ -934,7 +951,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   </div>
   <button class="act" onclick="document.getElementById('settings-ov').style.display='none'" style="margin-top:10px;width:100%">关闭</button>
 </div></div>
-<div id="acct-ov" style="position:fixed;inset:0;z-index:215;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
+<div id="acct-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
 <div style="width:min(400px,92vw);padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">登录 / 同步账号</div>
   <div id="acct-state" style="font-size:12.4px;color:var(--muted);margin-bottom:10px;min-height:16px"></div>
@@ -947,7 +964,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <button class="act" id="acct-logout" style="width:100%;margin-top:8px;border-color:var(--danger);color:var(--danger);display:none">退出当前账号</button>
   <button class="act" onclick="document.getElementById('acct-ov').style.display='none'" style="width:100%;margin-top:8px">关闭</button>
 </div></div>
-<div id="term-ov" style="position:fixed;inset:0;z-index:210;display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
+<div id="term-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
 <div style="width:min(680px,94vw);padding:20px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:4px">终端</div>
   <div style="font-size:12px;color:var(--faint);margin-bottom:10px">thirdc 命令需路径参数时用 <b>.</b>（工作目录已设为库根）<br>白名单：thirdc 子命令 · ls/cat/grep/rg/find/head/tail/wc/tree/du/file/stat · git status|log|diff|branch</div>
@@ -1026,7 +1043,7 @@ function uiModal({title='',body='',okText='确定',cancelText='取消',danger=fa
   return new Promise(resolve=>{
     const old=document.getElementById('ui-modal');if(old)old.remove();
     const mask=document.createElement('div');mask.id='ui-modal';
-    mask.style.cssText='position:fixed;inset:0;z-index:500;display:grid;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(6px);padding:20px';
+    mask.style.cssText='position:fixed;inset:0;z-index:var(--z-ctx);display:grid;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(6px);padding:20px';
     const box=document.createElement('div');
     box.style.cssText='width:min(420px,92vw);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:20px 22px;font:14px/1.55 var(--font-body);color:var(--fg)';
     let done=false;
@@ -1410,8 +1427,9 @@ document.addEventListener('keydown',e=>{
     if(!selected&&current)selected='doc:'+current;
     $b('ins-del').click();
   }
-  if(e.key==='m'&&e.shiftKey){toggleMemo();}
-  if(e.key==='m'){sparkle(20);$('organize-btn').click();}
+  /* M=圈选整理工具态（仅 Studio 内，再按退出，spec §3.1）；⇧M=Memo 快记（e.key 随 Shift 变大写，必须 toLowerCase） */
+  if(e.key.toLowerCase()==='m'&&e.shiftKey){toggleMemo();return;}
+  if(e.key.toLowerCase()==='m'&&(mode==='studio'||mode==='organize')){setMode(mode==='organize'?'studio':'organize');return;}
   if(e.key==='1'){document.querySelector('[data-view=canvas]').click();}
   if(e.key==='2'){document.querySelector('[data-view=timeline]').click();}
   if(e.key==='3'){document.querySelector('[data-view=kanban]').click();}
@@ -2327,8 +2345,8 @@ $b('trash-empty').onclick=async()=>{
 function viewLabel(v){return v==='timeline'?'时间线':v==='kanban'?'看板':'画布'}
 let sbAiPrefix='';
 function setViewLabel(){
-  const el=$('sb-mode');if(!el)return;
-  el.textContent=(sbAiPrefix?sbAiPrefix+' · ':'')+viewLabel(view);
+  /* 视图名由顶栏 view-seg 呈现；这里只负责状态簇里的 AI/连接信息 */
+  const el=$('sb-ai');if(el)el.textContent=sbAiPrefix;
 }
 document.querySelectorAll('#view-seg button').forEach(b=>{
   b.setAttribute('aria-pressed',b.classList.contains('on')?'true':'false');
@@ -2394,7 +2412,7 @@ function applyThemePreset(){
   if(L['r-lg'])css+=`--r-lg:${L['r-lg']};--r-md:${L['r-md']||L['r-lg']};--r-sm:${L['r-sm']||L['r-md']||'12px'};`;
   css+='}';
   if(L['font-display'])css+=`\nbody,#chrome,.brand{font-family:${L['font-display']}}`;
-  if(L['font-mono'])css+=`\n.n-path,.tagchip,.insp-path,#statusbar{font-family:${L['font-mono']}}`;
+  if(L['font-mono'])css+=`\n.n-path,.tagchip,.insp-path,.sb-cluster{font-family:${L['font-mono']}}`;
   el.textContent=css;
   document.head.appendChild(el);
   const b=$('preset-btn');if(b)b.textContent=themePreset?themePreset.name:'主题';
@@ -3103,12 +3121,14 @@ async function renderCalendar(){
 $b('cal-prev').onclick=()=>{calM--;if(calM<0){calM=11;calY--}renderCalendar()};
 $b('cal-next').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderCalendar()};
 
-/* ───────── 模式框架 ───────── */
-/* 模式注册表：新模式的唯一入口。登记 { label, enter } 即生效；
-   #mode-seg 里加 <button data-mode="id"> 后，setMode 自动走这里分发。 */
+/* ───────── 模式框架（ui-redesign.md §3.1：三主模式收敛）───────── */
+/* 主模式只有三个：Studio（创作）/ 学习（研读）/ 展示（演示）——对应顶栏 seg；
+   整理 = Studio 的圈选工具态（M / 工具条，Esc 或再按 Studio 返回）；
+   Memo = 学习模式左栏 Slot + ⌘⇧M；RAG = ⌘K 检索浮层；线上 = 发布动作；Agent = 底栏对话。 */
+const MAIN_MODES=['studio','learn','present'];
 const MODES={
   studio:{label:'Studio',enter(){ $('d-body').classList.remove('view'); }},
-  organize:{label:'整理',enter(){
+  organize:{label:'整理',parent:'studio',enter(){
     document.querySelector('[data-view=kanban]')?.click();
     toast('整理模式：空白拖拽圈选，批量移动/打标签/删除');
   }},
@@ -3117,17 +3137,20 @@ const MODES={
     $('d-body').classList.add('view');
     toast('学习模式：正文阅读，Esc 返回 Studio');
   }},
-  memo:{label:'Memo',enter(){ openMemo(); }},
   present:{label:'展示',enter(){ openPresent(); }},
-  rag:{label:'RAG',enter(){ openPalette(); }},
-  online:{label:'线上',enter(){ $('pub-btn').click(); }},
-  agent:{label:'Agent',enter(){ toast('Agent 模式：对话优先，画布退居背景'); }},
 };
+/* 工具态不占模式位：Memo=⌘⇧M 快记条 + 学习 Slot；RAG=⌘K；线上=pub-btn；Agent=底栏 */
 function setMode(m){
-  mode=m;localStorage.setItem('thirdc_mode',m);
+  mode=m;
+  if(MAIN_MODES.includes(m))localStorage.setItem('thirdc_mode',m);
   document.body.dataset.mode=m;
-  document.querySelectorAll('#mode-seg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
-  const at=$('agent-toggle'); if(at)at.classList.toggle('on',m==='agent');
+  /* seg 只反映主模式；整理是 Studio 的工具态，seg 保持 Studio 点亮 */
+  const seg=m==='organize'?'studio':m;
+  document.querySelectorAll('#mode-seg button').forEach(b=>{
+    const on=b.dataset.mode===seg;
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-pressed',on?'true':'false');
+  });
   const def=MODES[m];
   if(def&&def.enter)def.enter();
 }
@@ -3140,16 +3163,22 @@ $('more-btn')&&$('more-btn').addEventListener('click',e=>{
 });
 document.addEventListener('click',e=>{const m=$('more-menu');if(m&&m.classList.contains('open')&&!m.contains(e.target)){m.classList.remove('open');syncMoreAria();}});
 $('more-menu')&&$('more-menu').addEventListener('click',()=>{$('more-menu').classList.remove('open');syncMoreAria();});
-/* 模式入口迁出顶栏：展示/整理/学习/RAG 进 ⋯，Memo 进左栏 widget，Agent 在对话框 */
-$('studio-mode-btn')&&($('studio-mode-btn').onclick=()=>setMode('studio'));
-$('present-btn')&&($('present-btn').onclick=()=>setMode('present'));
+/* 整理=Studio 工具态入口（⋯ 菜单 / 左栏按钮 / M 键）；RAG=⌘K；线上=发布面板；Agent=底栏 */
 $('organize-mode-btn')&&($('organize-mode-btn').onclick=()=>setMode('organize'));
-$('learn-mode-btn')&&($('learn-mode-btn').onclick=()=>setMode('learn'));
-$('rag-mode-btn')&&($('rag-mode-btn').onclick=()=>setMode('rag'));
-$('agent-toggle')&&($('agent-toggle').onclick=()=>setMode(mode==='agent'?'studio':'agent'));
-/* 点左上角 logo / ThirdC → 切换知识库 */
+/* Agent 对话优先：底栏常驻开关（画布压暗 + 对话区扩大），不是模式 */
+$('agent-toggle')&&($('agent-toggle').onclick=()=>{
+  const on=document.body.classList.toggle('agent');
+  $('agent-toggle').classList.toggle('on',on);
+  $('agent-toggle').setAttribute('aria-pressed',on?'true':'false');
+  toast(on?'Agent 对话优先：画布退居背景':'已回到画布');
+  if(on)$('say').focus();
+});
+/* ⌘K 搜索位：检索 / 命令 / RAG 的唯一入口 */
+$('search-btn')&&($('search-btn').onclick=()=>openPalette());
+/* 点左上角 3C 标 / 库名 → 切换知识库 */
 $('brand')&&($('brand').onclick=()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();});
-setMode(localStorage.getItem('thirdc_mode')||'studio');
+/* 启动恢复：只认三主模式；旧数据里的 agent/organize/rag 等一律回 Studio */
+(()=>{const saved=localStorage.getItem('thirdc_mode');setMode(MAIN_MODES.includes(saved)?saved:'studio');})();
 
 /* ───────── Memo 模式：热力图 + 日期/标签快查 ───────── */
 let memoData=null;
@@ -4197,6 +4226,7 @@ function maybeOnboard(){
 
 function applyStatus(s){
   const m=$('sb-stats'); if(m)m.textContent=`${s.docs} docs · ${s.indexed} indexed · ${s.assets} assets`;
+  const bn=$('brand-name'); if(bn&&s.vault)bn.textContent=s.vault;
   const n=$('v-name'); if(n&&s.vault)n.textContent=s.vault;
   if(s.vault)vaultName=s.vault;
   const d=$('v-docs'); if(d)d.textContent=s.docs;

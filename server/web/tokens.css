@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────────────────────────────────────
  * ThirdC Studio · tokens.css
- * 契约来源：OpenFlow 前台设计系统（oklch / 零 hex / 弹簧缓动 / 圆角三档 / 玻璃）
+ * 契约来源：OpenFlow 前台设计系统（oklch / 零 hex / 弹簧缓动 / 圆角四档 / 玻璃）
  *
  * 本版重点：**深色不再纯黑**——暗色底从 19% L 提到 26% L，层级用亮度差表达，
  * 而不是靠把背景压黑。亮色为暖纸感。默认跟随系统（data-theme=auto 由 JS 落定）。
@@ -37,8 +37,14 @@
   --blob-c: oklch(78% .11 200/.24);
   --shadow: 0 22px 56px -26px oklch(38% .05 80/.30);
   --shadow-sm: 0 10px 26px -14px oklch(38% .05 80/.22);
-  --r-lg: 26px; --r-md: 18px; --r-sm: 12px;
-  --chrome-h: 56px; --titlebar: 46px; --sb-w: 248px; --container: 1120px;
+  /* 圆角四 token（ui-redesign.md §2，别无他选）：内嵌小件 / 常规控件 / 容器 / 胶囊 */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-pill: 999px;
+  /* 外壳几何：顶栏通栏 48px；底栏（对话+状态合一）44px */
+  --chrome-h: 48px; --dock-h: 44px;
+  /* 层级九档（ui-redesign.md §2）：画布 < 侧栏 < 顶栏 < 底栏 < 抽屉 < 浮层 < 展示 < 通知 < 右键 */
+  --z-canvas:0; --z-rail:20; --z-chrome:30; --z-drawer:50;
+  --z-dock:40; --z-overlay:200; --z-present:300; --z-toast:400; --z-ctx:500;
+  --titlebar: 46px; --sb-w: 248px; --container: 1120px;
   --font-display: "Space Grotesk","PingFang SC","HarmonyOS Sans SC","MiSans","Segoe UI",system-ui,sans-serif;
   --font-body: "Space Grotesk",-apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","MiSans","Segoe UI",system-ui,sans-serif;
   --font-mono: "JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
