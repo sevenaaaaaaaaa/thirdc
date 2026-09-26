@@ -109,7 +109,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .slot-learn #toc{position:static;width:auto;flex:1;min-height:0;overflow-y:auto;border:none;border-radius:0;background:transparent;
   -webkit-backdrop-filter:none;backdrop-filter:none;padding:8px 8px 0;display:none}
 .slot-learn #toc.open{display:block}
-.slot-learn .rail-memo{margin:0 10px 10px;flex:0 0 auto}
+/* Memo 面板本体的定位/折叠样式见 #memo-slot（在 #rail 内绝对定位） */
 /* Studio Slot：镜头四档与「过滤文档」并为顶部一处过滤行 */
 .rail-filter{padding:2px 10px 8px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
 #rail-fold{position:absolute;top:8px;right:8px;z-index:2;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);
@@ -326,14 +326,43 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .conn-item .h{font-family:var(--font-mono);font-size:10px;color:var(--faint);word-break:break-all}
 .conn-result{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding:8px 10px;border-radius:var(--r-md);background:var(--hover);margin-top:6px;white-space:pre-wrap}
 /* ── 模式 ── */
-#mode-seg,#view-seg{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:3px;gap:2px}
-#mode-seg button,#view-seg button{height:30px;padding:0 12px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .25s var(--ease-spring)}
-#mode-seg button:hover,#view-seg button:hover{color:var(--fg);background:var(--glass)}
-#mode-seg button.on,#view-seg button.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+#mode-seg{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:3px;gap:2px}
+#mode-seg button{height:30px;padding:0 12px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .25s var(--ease-spring)}
+#mode-seg button:hover{color:var(--fg);background:var(--glass)}
+#mode-seg button.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
 /* 模式即布局（§1.4）：三主模式切换布局；整理=Studio 工具态；Agent=底栏常驻（对话优先态） */
 body.agent #dock .thread{max-height:72vh}
 body.agent #canvas{filter:saturate(.55) brightness(.82)}
 body[data-mode="organize"] #canvas{cursor:crosshair}
+
+/* ── Studio 视图胶囊（§3.1/P2）：视图切换属画布，不属全局导航 ── */
+#view-pill{position:fixed;top:calc(var(--chrome-h) + 12px);right:12px;z-index:var(--z-chrome);display:flex;align-items:center;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px;gap:2px;
+  box-shadow:var(--shadow-sm);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+#view-pill button{height:26px;padding:0 12px;border-radius:var(--r-pill);border:none;background:transparent;color:var(--muted);
+  font:500 12px var(--font-body);cursor:pointer;transition:all .2s var(--ease-spring)}
+#view-pill button:hover{color:var(--fg);background:var(--glass)}
+#view-pill button.on{background:var(--accent-soft);color:var(--accent)}
+body[data-mode="learn"] #view-pill,body[data-mode="present"] #view-pill{display:none}
+/* 检查器滑出时胶囊让位（不支持 :has 的老内核保持原位，仅临时遮挡） */
+@supports selector(body:has(*)){
+  body:has(#inspector:not(.closed)) #view-pill{right:296px}
+}
+/* Tab 收起/唤回底栏（§4.1：Studio 对话可整体让位） */
+#dock{transition:transform .3s var(--ease-spring)}
+body.dock-hidden #dock{transform:translateY(calc(100% + 12px))}
+
+/* ── 学习=文档工作台（§4.2/P2）：中央正文阅读，画布让位，Esc 返回 Studio ── */
+body[data-mode="learn"] #drawer{left:calc(var(--rail-x,270px) + 12px);width:auto}
+@media (max-width:900px){body[data-mode="learn"] #drawer{left:10px}}
+/* Memo Slot（§4.2）：学习模式默认折叠成一枚入口，点开滑出 */
+#memo-slot-btn{display:flex;align-items:center;justify-content:center;gap:6px;margin:0 10px 10px;height:32px;flex:0 0 auto;
+  border-radius:var(--r-md);border:1px dashed var(--border-strong);background:transparent;color:var(--muted);
+  font:600 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-out)}
+#memo-slot-btn:hover,#memo-slot-btn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+#memo-slot{position:absolute;left:10px;right:10px;bottom:10px;z-index:3;margin:0;visibility:hidden;
+  transform:translateY(calc(100% + 20px));transition:transform .32s var(--ease-spring),visibility 0s .32s;box-shadow:var(--shadow)}
+#memo-slot.open{visibility:visible;transform:none;transition:transform .32s var(--ease-spring)}
 
 /* ── 卡片物理：景深 + 悬浮 ── */
 #nodes{perspective:1400px}
@@ -404,12 +433,31 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 #agent-toggle.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 
 
-/* ── 展示模式（P2 完成全屏无 chrome；本层只保 iframe + 控制条）── */
+/* ── 展示模式（§4.3/P2）：全屏无 chrome；底部悬浮控制条，鼠标静止 2s 自动隐藏；
+      Gamma 式缩略图大纲栏可收起。全部只动 transform/opacity（PERF 纪律）── */
 #present-ov{position:fixed;inset:0;z-index:var(--z-present);background:var(--bg);display:none}
 #present-ov.open{display:block}
-#present-ov iframe{width:100%;height:calc(100% - 46px);border:none;background:var(--bg)}
-.present-bar{height:46px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--border);background:var(--surface)}
-.present-bar .t{font-family:var(--font-display);font-weight:700;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#present-ov iframe{width:100%;height:100%;border:none;background:var(--bg)}
+#p-bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:10px;
+  max-width:calc(100% - 32px);padding:8px 12px;border-radius:var(--r-pill);border:1px solid var(--border);
+  background:color-mix(in oklab,var(--surface-strong) 92%,transparent);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);
+  box-shadow:var(--shadow);transition:transform .35s var(--ease-spring),opacity .3s}
+#p-bar .t{font-family:var(--font-display);font-weight:700;max-width:26vw;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#p-thumbs{position:fixed;left:12px;top:12px;bottom:76px;width:200px;z-index:2;display:flex;flex-direction:column;gap:2px;overflow-y:auto;padding:8px;
+  border-radius:var(--r-lg);border:1px solid var(--border);background:color-mix(in oklab,var(--surface-strong) 92%,transparent);
+  -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:var(--shadow-sm);
+  transform:translateX(-12px);opacity:0;pointer-events:none;transition:transform .35s var(--ease-spring),opacity .3s}
+#present-ov.thumbs #p-thumbs{transform:none;opacity:1;pointer-events:auto}
+#p-thumbs h4{margin:0 0 6px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);flex:0 0 auto}
+.pt{display:flex;align-items:center;gap:8px;width:100%;padding:8px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;
+  color:var(--muted);font:500 12px var(--font-body);cursor:pointer;text-align:left;flex:0 0 auto}
+.pt:hover{background:var(--glass);color:var(--fg)}
+.pt.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+.pt .pt-n{font-family:var(--font-mono);font-size:10px;opacity:.7;flex:0 0 auto}
+.pt .pt-t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 鼠标静止：控制条与大纲一并退场，内容独占画面 */
+#present-ov.idle #p-bar{opacity:0;transform:translateX(-50%) translateY(16px);pointer-events:none}
+#present-ov.idle #p-thumbs{opacity:0;transform:translateX(-12px);pointer-events:none}
 
 @keyframes sparkle{0%{transform:scale(0);opacity:1}70%{opacity:.9}100%{transform:scale(1.6) translateY(-24px);opacity:0}}
 .sparkle{position:fixed;pointer-events:none;z-index:var(--z-present);width:8px;height:8px;border-radius:50%;background:var(--accent);animation:sparkle .9s var(--ease-out) both}
@@ -564,7 +612,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 /* ── 粗指针（触屏）：高频控件抬到 ≥40px，桌面 fine 指针不回归 ── */
 @media (pointer:coarse){
-  #chrome .icon-btn,#mode-seg button,#view-seg button{min-height:40px;min-width:40px;height:40px}
+  #chrome .icon-btn,#mode-seg button,#view-pill button{min-height:40px;min-width:40px;height:40px}
   .ab-verb,.toc-item,#rail-fold,.rail-lens .tab-pill,.rail-vault,.quick button,.rm-send{min-height:40px}
   .doc-tab{min-height:40px}
   .tree-leaf,.tree-row{min-height:40px}
@@ -576,7 +624,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 #chrome::-webkit-scrollbar{display:none}
 #chrome>*{flex-shrink:0}
 #chrome>.doc-tabs{flex:1 1 auto;min-width:0;flex-shrink:1}
-#mode-seg button,#view-seg button{padding:0 8px;font-size:12px;height:28px}
+#mode-seg button{padding:0 8px;font-size:12px;height:28px}
 #chrome .tabs{gap:3px}
 #chrome .tabs .tab-pill{padding:0 10px;font-size:12px}
 #chrome .icon-btn{width:28px;height:28px}
@@ -660,7 +708,8 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   </div>
   <div class="ob-keys">
     <span><kbd>⌘K</kbd> 命令与检索</span>
-    <span><kbd>Ctrl+Shift+M</kbd> 随手记</span>
+    <span><kbd>⌘⇧M</kbd> 随手记</span>
+    <span><kbd>Tab</kbd> 收起对话</span>
     <span><kbd>双击</kbd> 文件夹下钻</span>
     <span><kbd>拖空白</kbd> 平移</span>
   </div>
@@ -668,6 +717,14 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 <div id="canvas"><div id="viewport"><svg id="edges"></svg><div id="cols"></div><div id="axis"></div><div id="nodes"></div><div id="peers"></div></div></div>
 <div id="lasso"></div>
+<!-- Studio 视图胶囊（§3.1）：画布/时间线/看板只是 Studio 的排布方式，出了 Studio 无意义 -->
+<div id="view-pill">
+  <nav id="view-seg" title="视图（快捷键 1/2/3）">
+    <button data-view="canvas" class="on" aria-pressed="true">画布</button>
+    <button data-view="timeline" aria-pressed="false">时间线</button>
+    <button data-view="kanban" aria-pressed="false">看板</button>
+  </nav>
+</div>
 <div id="batchbar">
   <b id="batch-n">0</b>
   <button class="act" id="b-move">移动到…</button>
@@ -687,12 +744,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <span class="sp-txt">搜索文档、命令…</span><kbd>⌘K</kbd>
   </button>
-  <!-- Studio 视图与画布（P2 将降级为画布右上角视图胶囊） -->
-  <nav id="view-seg" title="视图（快捷键 1/2/3）">
-    <button data-view="canvas" class="on" aria-pressed="true">画布</button>
-    <button data-view="timeline" aria-pressed="false">时间线</button>
-    <button data-view="kanban" aria-pressed="false">看板</button>
-  </nav>
+  <!-- 画布身份（多画布切换） -->
   <button id="board-pill" title="切换画布（双击切知识库）"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <nav class="doc-tabs" id="doc-tabs"></nav>
   <!-- 模式区：三主模式（整理/RAG/线上/Memo/Agent 均为工具态，不再并列） -->
@@ -722,15 +774,16 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 <aside id="rail">
   <button id="rail-fold" title="收起侧栏" aria-label="收起侧栏"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
-  <!-- 学习 Slot：目录大纲 + Memo（热力图/标签/随手记） -->
+  <!-- 学习 Slot：目录大纲 + Memo（默认折叠成一枚入口，点开滑出，§4.2） -->
   <div class="rail-slot slot-learn">
     <div id="toc"><h4>目录</h4><div id="toc-list"></div></div>
-    <div class="rail-memo" id="rail-memo-w">
-      <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
-      <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
-      <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
-      <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
-    </div>
+    <button id="memo-slot-btn" aria-expanded="false" title="Memo：热力图 / 标签 / 随手记">📒 Memo</button>
+  </div>
+  <div class="rail-memo" id="memo-slot">
+    <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
+    <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
+    <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
+    <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
   </div>
   <!-- Studio Slot：过滤行（镜头四档）+ 文档树 + 动作 -->
   <div class="rail-slot slot-studio">
@@ -984,11 +1037,14 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div id="toast" role="status" aria-live="polite"></div>
 
 <div id="present-ov">
-  <div class="present-bar"><span class="t" id="p-title"></span><span class="badge ok" id="p-idx"></span>
-  <select class="style-sel" id="p-style" title="演示设计风格（50 经典）"><option value="">风格：默认</option></select>
-  <button class="act" id="p-prev">← 上一篇</button><button class="act" id="p-next">下一篇 →</button>
-  <button class="act" id="p-exit">退出 (Esc)</button></div>
   <iframe id="p-frame" sandbox="" title="展示"></iframe>
+  <aside id="p-thumbs" aria-label="幻灯片大纲"><h4>大纲</h4><div id="p-thumbs-list"></div></aside>
+  <div id="p-bar">
+    <button class="icon-btn" id="p-thumbs-toggle" title="大纲（幻灯片缩略图）" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+    <span class="t" id="p-title"></span><span class="badge ok" id="p-idx"></span>
+  <select class="style-sel" id="p-style" title="演示设计风格（50 经典）"><option value="">风格：默认</option></select>
+  <button class="act" id="p-prev" title="上一篇（←）">←</button><button class="act" id="p-next" title="下一篇（→）">→</button>
+  <button class="act" id="p-exit">退出 (Esc)</button></div>
 </div>
 <div id="share-overlay"><div class="share-card">
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">加密分享</div>
@@ -1104,7 +1160,10 @@ let known=new Set(),saveTimer=null;
 
 /* ── 主题：auto（默认，跟随系统）/ light / dark ── */
 let themePref=localStorage.getItem('thirdc_theme')||'auto';
-let mode=localStorage.getItem('thirdc_mode')||'studio';
+/* 启动即定模式：present 不做开机恢复（进展示需画布已加载）。
+   必须在这里归一——mode 与启动 setMode 的目标一致，才不会在脚本求值期触发 exit 钩子
+   （exit 会碰后文才初始化的 let 状态，TDZ 直接杀死整个脚本） */
+let mode=(()=>{const s=localStorage.getItem('thirdc_mode');return !s||s==='present'?'studio':s})();
 let multiSel=new Set();
 function systemTheme(){return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}
 function applyTheme(){
@@ -1426,6 +1485,18 @@ document.addEventListener('keydown',e=>{
     e.preventDefault();
     if(!selected&&current)selected='doc:'+current;
     $b('ins-del').click();
+  }
+  /* 展示模式：←/→ 翻页 */
+  if(mode==='present'){
+    if(e.key==='ArrowRight'||e.key==='PageDown'){e.preventDefault();$b('p-next').click();return;}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();$b('p-prev').click();return;}
+  }
+  /* Tab：收起/唤回底栏（§4.1 Studio 对话可整体让位；画布上下文才接管，输入框内不抢焦点键） */
+  if(e.key==='Tab'&&!anyFloatOpen()&&(mode==='studio'||mode==='organize')){
+    e.preventDefault();
+    const off=document.body.classList.toggle('dock-hidden');
+    toast(off?'对话栏已收起，Tab 唤回':'对话栏已展开');
+    return;
   }
   /* M=圈选整理工具态（仅 Studio 内，再按退出，spec §3.1）；⇧M=Memo 快记（e.key 随 Shift 变大写，必须 toLowerCase） */
   if(e.key.toLowerCase()==='m'&&e.shiftKey){toggleMemo();return;}
@@ -2561,6 +2632,9 @@ function closeTopFloat(){
   if(floatOpen('water-overlay')){closeFloat('water-overlay');return true;}
   if(floatOpen('onboard')){closeFloat('onboard');restoreOverlayFocus();return true;}
   if(floatOpen('present-ov')){closeFloat('present-ov');setMode('studio');return true;}
+  /* 学习模式的 Esc 语义：先收 Memo 滑出面板，再退出工作台回 Studio */
+  if(mode==='learn'&&$('memo-slot')&&$('memo-slot').classList.contains('open')){memoSlotSet(false);return true;}
+  if(mode==='learn'){setMode('studio');return true;}
   if(floatOpen('acct-ov')){closeFloat('acct-ov');restoreOverlayFocus();return true;}
   if(floatOpen('term-ov')){closeFloat('term-ov');restoreOverlayFocus();return true;}
   if(floatOpen('settings-ov')){closeFloat('settings-ov');restoreOverlayFocus();return true;}
@@ -2788,7 +2862,7 @@ function openOverlay(id){
     if(!el.getAttribute('role'))el.setAttribute('role','dialog');
     if(!el.hasAttribute('aria-modal'))el.setAttribute('aria-modal','true');
     if(!el.getAttribute('aria-label')){
-      const h=el.querySelector('h2,h3,.panel-head h3,.present-bar .t,.insp-title');
+      const h=el.querySelector('h2,h3,.panel-head h3,#p-bar .t,.insp-title');
       const lab=(h&&h.textContent||el.id||'').trim();
       if(lab)el.setAttribute('aria-label',lab);
     }
@@ -3126,21 +3200,30 @@ $b('cal-next').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderCalendar()};
    整理 = Studio 的圈选工具态（M / 工具条，Esc 或再按 Studio 返回）；
    Memo = 学习模式左栏 Slot + ⌘⇧M；RAG = ⌘K 检索浮层；线上 = 发布动作；Agent = 底栏对话。 */
 const MAIN_MODES=['studio','learn','present'];
+let learnPrevDrawerOpen=false;
 const MODES={
   studio:{label:'Studio',enter(){ $('d-body').classList.remove('view'); }},
   organize:{label:'整理',parent:'studio',enter(){
     document.querySelector('[data-view=kanban]')?.click();
-    toast('整理模式：空白拖拽圈选，批量移动/打标签/删除');
+    toast('整理模式：空白拖拽圈选，批量移动/打标签/删除（再按 M 返回）');
   }},
   learn:{label:'学习',enter(){
-    if(current){openDoc(current);}else{const d=graph.nodes.find(n=>n.kind!=='asset');if(d)openDoc(d.path);}
+    learnPrevDrawerOpen=$('drawer').classList.contains('open');
+    if(current){openDoc(current);}
+    else{const d=graph.nodes.find(n=>n.kind==='doc'||n.kind==='capture');if(d)openDoc(d.path);}
     $('d-body').classList.add('view');
-    toast('学习模式：正文阅读，Esc 返回 Studio');
+    toast('学习模式：文档工作台阅读，Esc 返回 Studio');
+  },exit(){
+    /* 还原进入前的抽屉状态：没开过就收回去；编辑态交还 Studio */
+    if(!learnPrevDrawerOpen){$('drawer').classList.remove('open');$('toc').classList.remove('open');$('toc-line').classList.remove('on');}
+    else $('d-body').classList.remove('view');
+    memoSlotSet(false);
   }},
-  present:{label:'展示',enter(){ openPresent(); }},
+  present:{label:'展示',enter(){ openPresent(); },exit(){ pTeardown(); }},
 };
 /* 工具态不占模式位：Memo=⌘⇧M 快记条 + 学习 Slot；RAG=⌘K；线上=pub-btn；Agent=底栏 */
 function setMode(m){
+  if(mode!==m){const prevDef=MODES[mode];if(prevDef&&prevDef.exit)prevDef.exit(m);}
   mode=m;
   if(MAIN_MODES.includes(m))localStorage.setItem('thirdc_mode',m);
   document.body.dataset.mode=m;
@@ -3177,8 +3260,9 @@ $('agent-toggle')&&($('agent-toggle').onclick=()=>{
 $('search-btn')&&($('search-btn').onclick=()=>openPalette());
 /* 点左上角 3C 标 / 库名 → 切换知识库 */
 $('brand')&&($('brand').onclick=()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();});
-/* 启动恢复：只认三主模式；旧数据里的 agent/organize/rag 等一律回 Studio */
-(()=>{const saved=localStorage.getItem('thirdc_mode');setMode(MAIN_MODES.includes(saved)?saved:'studio');})();
+/* 启动恢复：只认三主模式；旧数据里的 agent/organize/rag 等一律回 Studio。
+   present 不做开机恢复——进展示需要画布已加载，启动时必然空列表弹错 */
+(()=>{let saved=localStorage.getItem('thirdc_mode');if(saved==='present')saved='studio';setMode(MAIN_MODES.includes(saved)?saved:'studio');})();
 
 /* ───────── Memo 模式：热力图 + 日期/标签快查 ───────── */
 let memoData=null;
@@ -3240,6 +3324,13 @@ async function railMemoAdd(){
 }
 $('rm-send')&&($('rm-send').onclick=railMemoAdd);
 $('rm-input')&&$('rm-input').addEventListener('keydown',e=>{if(e.key==='Enter')railMemoAdd();});
+/* 学习模式 Memo Slot：默认折叠成一枚入口，点开滑出（§4.2） */
+function memoSlotSet(open){
+  $('memo-slot')?.classList.toggle('open',open);
+  $('memo-slot-btn')?.classList.toggle('on',open);
+  $('memo-slot-btn')?.setAttribute('aria-expanded',open?'true':'false');
+}
+$('memo-slot-btn')&&($('memo-slot-btn').onclick=()=>memoSlotSet(!$('memo-slot').classList.contains('open')));
 async function openMemo(){
   openOverlay('memo-ov');
   if(!memoData)$('memo-total').textContent='载入中…';
@@ -3503,15 +3594,34 @@ document.getElementById('rail-list').addEventListener('contextmenu',e=>{
   }
 });
 
-/* ───────── 展示模式 ───────── */
-let pIdx=0;
+/* ───────── 展示模式（§4.3/P2）：全屏 + 底部悬浮控制条 + Gamma 式大纲栏 ───────── */
+/* pIdx/pIdleTimer 用 var：boot 期间的 setMode 可能触发 exit→pTeardown，
+   早于本区块求值；var 有提升不 TDZ（let 会在该路径炸掉整个脚本） */
+var pIdx=0,pIdleTimer=null;
 function docList(){return graph.nodes.filter(n=>n.kind==='doc'||n.kind==='capture').map(n=>n.path)}
 async function openPresent(){
   const list=docList();
   if(!list.length){toast('没有可展示的文档','err');setMode('studio');return;}
   pIdx=Math.max(0,list.indexOf(current));
+  renderPThumbs();
   $('present-ov').classList.add('open');
+  /* 唯一的常驻监听只在展示期存在，退出即摘除（PERF 纪律：不新增常驻监听） */
+  $('present-ov').onmousemove=pWake;
+  pWake();
   await showPresent();
+}
+/* Gamma 式缩略图大纲：纵向卡片，点击跳页，可收起 */
+function renderPThumbs(){
+  const list=docList(),box=$('p-thumbs-list');
+  box.innerHTML='';
+  list.forEach((path,i)=>{
+    const n=graph.nodes.find(x=>x.path===path);
+    const el=document.createElement('button');el.className='pt';el.type='button';
+    el.innerHTML=`<span class="pt-n">${i+1}</span><span class="pt-t"></span>`;
+    el.querySelector('.pt-t').textContent=n?.title||path.split('/').pop();
+    el.onclick=()=>{pIdx=i;showPresent();};
+    box.appendChild(el);
+  });
 }
 async function showPresent(){
   const list=docList();
@@ -3520,13 +3630,34 @@ async function showPresent(){
     const d=await api('/doc?path='+encodeURIComponent(path));
     $('p-title').textContent=d.title||path;
     $('p-idx').textContent=`${pIdx+1}/${list.length}`;
+    $('p-thumbs-list').querySelectorAll('.pt').forEach((el,i)=>{
+      el.classList.toggle('on',i===pIdx);
+      if(i===pIdx)el.scrollIntoView({block:'nearest'});
+    });
     currentPresentHtml=d.html;
     applyPresentStyle();
   }catch(e){toast('展示加载失败：'+e.message,'err')}
 }
+/* 鼠标静止 2s：控制条与大纲退场（内容独占画面）；一动即回 */
+function pWake(){
+  $('present-ov').classList.remove('idle');
+  clearTimeout(pIdleTimer);
+  pIdleTimer=setTimeout(()=>$('present-ov').classList.add('idle'),2000);
+}
+function pTeardown(){
+  $('present-ov').classList.remove('open','idle','thumbs');
+  $('p-thumbs-toggle')?.setAttribute('aria-pressed','false');
+  clearTimeout(pIdleTimer);pIdleTimer=null;
+  const ov=$('present-ov');if(ov)ov.onmousemove=null;
+}
 $b('p-next').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx+1)%n;showPresent()}};
 $b('p-prev').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx-1+n)%n;showPresent()}};
-$b('p-exit').onclick=()=>{$('present-ov').classList.remove('open');setMode('studio')};
+$b('p-exit').onclick=()=>setMode('studio');
+$('p-thumbs-toggle')&&($('p-thumbs-toggle').onclick=()=>{
+  const on=$('present-ov').classList.toggle('thumbs');
+  $('p-thumbs-toggle').setAttribute('aria-pressed',on?'true':'false');
+  pWake();
+});
 
 /* ───────── 圈选（整理模式） ───────── */
 let lasso=null;
