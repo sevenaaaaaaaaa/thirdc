@@ -95,7 +95,7 @@ html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome nav,
 .ab-pv-actions{display:flex;gap:6px;margin-top:8px}
 
 /* ── 侧栏（Slot 化，ui-redesign.md §3.2：左栏=当前模式的导航，不做堆场）── */
-#rail{position:fixed;top:calc(var(--chrome-h) + 12px);left:10px;bottom:calc(var(--dock-h) + 8px);width:250px;z-index:var(--z-rail);display:flex;flex-direction:column;
+#rail{position:fixed;top:calc(var(--chrome-h) + 12px);left:10px;bottom:calc(var(--dock-h) + var(--bottom-nav-h,0px) + 8px);width:250px;z-index:var(--z-rail);display:flex;flex-direction:column;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(16px) saturate(150%);box-shadow:var(--shadow-sm);
   overflow:hidden;transition:transform .45s var(--ease-spring),opacity .3s}
 #rail.closed{transform:translateX(calc(-100% - 16px));opacity:0;pointer-events:none;visibility:hidden;transition:transform .45s var(--ease-spring),opacity .3s,visibility 0s .45s}
@@ -180,7 +180,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .tag{display:inline-flex;align-items:center;height:18px;padding:0 8px;border-radius:var(--r-pill);font-size:10px;font-family:var(--font-mono);background:var(--hover);color:var(--faint)}
 
 /* ── 检查器：默认收起，选中节点滑出（唯一家=右键菜单同源动作）── */
-#inspector{position:fixed;top:calc(var(--chrome-h) + 12px);right:10px;bottom:calc(var(--dock-h) + 8px);width:272px;z-index:var(--z-rail);display:flex;flex-direction:column;gap:10px;
+#inspector{position:fixed;top:calc(var(--chrome-h) + 12px);right:10px;bottom:calc(var(--dock-h) + var(--bottom-nav-h,0px) + 8px);width:272px;z-index:var(--z-rail);display:flex;flex-direction:column;gap:10px;
   padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(16px) saturate(150%);
   box-shadow:var(--shadow-sm);overflow:auto;transition:transform .45s var(--ease-spring),opacity .3s}
 #inspector.closed{transform:translateX(calc(100% + 16px));opacity:0;pointer-events:none;visibility:hidden;transition:transform .45s var(--ease-spring),opacity .3s,visibility 0s .45s}
@@ -196,7 +196,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .act svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 
 /* ── 底栏（ui-redesign.md §3.2）：对话输入条 + 右端状态簇，三层并一层，通栏贴底 ── */
-#dock{position:fixed;left:0;right:0;bottom:0;z-index:var(--z-dock);pointer-events:none}
+#dock{position:fixed;left:0;right:0;bottom:var(--bottom-nav-h,0px);z-index:var(--z-dock);pointer-events:none}
 #dock>*{pointer-events:auto}
 #dock .thread{display:flex;flex-direction:column;gap:8px;margin:0 auto 10px;width:min(780px,calc(100% - 24px));max-height:44vh;overflow:auto;padding:2px 4px}
 #dock .thread:empty{display:none;margin:0}
@@ -233,7 +233,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 @keyframes sb-spin{to{transform:rotate(360deg)}}
 
 /* ── 抽屉 / 面板 / 调色板 ── */
-#drawer{position:fixed;top:calc(var(--chrome-h) + 12px);right:10px;bottom:calc(var(--dock-h) + 8px);width:min(600px,44vw);z-index:var(--z-drawer);display:flex;flex-direction:column;
+#drawer{position:fixed;top:calc(var(--chrome-h) + 12px);right:10px;bottom:calc(var(--dock-h) + var(--bottom-nav-h,0px) + 8px);width:min(600px,44vw);z-index:var(--z-drawer);display:flex;flex-direction:column;
   background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden;
   transform:translateX(calc(100% + 20px));visibility:hidden;pointer-events:none;
   transition:transform .45s var(--ease-spring),visibility 0s .45s}
@@ -374,7 +374,7 @@ body[data-mode="learn"] #drawer{left:calc(var(--rail-x,270px) + 12px);width:auto
 .node.multi{box-shadow:0 0 0 3px var(--accent),var(--node-shadow)}
 /* 圈选矩形/批量操作条：画布层的画布工具（文档级节点，非 rail 子节点） */
 #lasso{position:fixed;z-index:var(--z-canvas);border:1.5px solid var(--accent);background:var(--accent-soft);display:none;pointer-events:none}
-#batchbar{position:fixed;left:50%;bottom:calc(var(--dock-h) + 12px);transform:translateX(-50%);z-index:var(--z-dock);display:none;align-items:center;gap:8px;
+#batchbar{position:fixed;left:50%;bottom:calc(var(--dock-h) + var(--bottom-nav-h,0px) + 12px);transform:translateX(-50%);z-index:var(--z-dock);display:none;align-items:center;gap:8px;
   padding:8px 14px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-strong);backdrop-filter:blur(18px);box-shadow:var(--shadow)}
 #batchbar b{font-family:var(--font-mono);font-size:12px;color:var(--accent)}
 body[data-mode="organize"] #batchbar.show{display:flex}
@@ -463,7 +463,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .sparkle{position:fixed;pointer-events:none;z-index:var(--z-present);width:8px;height:8px;border-radius:50%;background:var(--accent);animation:sparkle .9s var(--ease-out) both}
 @keyframes treeIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
 
-#gitpanel{position:fixed;left:10px;bottom:calc(var(--dock-h) + 8px);width:250px;z-index:var(--z-rail);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);display:none;padding:10px}
+#gitpanel{position:fixed;left:10px;bottom:calc(var(--dock-h) + var(--bottom-nav-h,0px) + 8px);width:250px;z-index:var(--z-rail);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);display:none;padding:10px}
 #gitpanel.open{display:block}
 #gitpanel .row{display:flex;gap:6px;margin-bottom:8px}
 #gitpanel input{flex:1;min-width:0;height:30px;padding:0 8px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12px var(--font-body);outline:none}
@@ -589,7 +589,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
   background-size:400% 100%;animation:shimmer 1.2s linear infinite;margin:8px 10px}
 @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
 .node.skel-node{width:var(--node-w);height:96px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--node-bg);opacity:.55}
-#toast{position:fixed;right:16px;bottom:calc(var(--dock-h) + 12px);z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;pointer-events:none}
+#toast{position:fixed;right:16px;bottom:calc(var(--dock-h) + var(--bottom-nav-h,0px) + 12px);z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface-strong);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);font-size:13px;max-width:330px;animation:nodeIn .35s var(--ease-spring) both}
 .toast.err{border-left-color:var(--danger)}
@@ -612,10 +612,10 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 /* ── 粗指针（触屏）：高频控件抬到 ≥40px，桌面 fine 指针不回归 ── */
 @media (pointer:coarse){
-  #chrome .icon-btn,#mode-seg button,#view-pill button{min-height:40px;min-width:40px;height:40px}
-  .ab-verb,.toc-item,#rail-fold,.rail-lens .tab-pill,.rail-vault,.quick button,.rm-send{min-height:40px}
-  .doc-tab{min-height:40px}
-  .tree-leaf,.tree-row{min-height:40px}
+  #chrome .icon-btn,#mode-seg button,#view-pill button{min-height:44px;min-width:44px;height:44px}
+  .ab-verb,.toc-item,#rail-fold,.rail-lens .tab-pill,.rail-vault,.quick button,.rm-send{min-height:44px}
+  .doc-tab{min-height:44px}
+  .tree-leaf,.tree-row{min-height:44px}
 }
 
 /* ───────── UX 增强：顶栏减密 / 点击反馈 / 右键菜单 / 风格选择 / chat 细化 ───────── */
@@ -676,6 +676,64 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 @keyframes thinkbar{from{background-position:-50% 0}to{background-position:150% 0}}
 .msg .meta{margin-top:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--faint)}
 .think-timer{font-family:var(--font-mono);font-size:10.5px;color:var(--faint);margin-top:4px}
+/* ───────── P3 多端断点（spec §5）：切换全部走 media query，无 JS 重排 ───────── */
+/* 1024–1439 PC 窄：三栏紧缩——左栏 250→220、搜索缩为图标 */
+@media (max-width:1439px){
+  #rail{width:220px}
+  .search-pill{width:auto;min-width:36px;flex:0 0 auto}
+  .search-pill .sp-txt,.search-pill kbd{display:none}
+  .search-pill svg{width:16px;height:16px;margin:0 3px}
+}
+/* ≤1024 Pad：左栏改覆盖式抽屉（默认收起由 JS 按宽决定）、检查器改底部抽屉 */
+@media (max-width:1024px){
+  #rail{box-shadow:var(--shadow)}
+  #inspector{left:10px;right:10px;top:auto;width:auto;max-height:44vh;
+    transform:translateY(calc(100% + 24px))}
+  #inspector.closed{transform:translateY(calc(100% + 24px));visibility:hidden}
+  #inspector:not(.closed){transform:none;visibility:visible}
+  @supports selector(body:has(*)){body:has(#inspector:not(.closed)) #view-pill{right:12px}}
+}
+/* 底部导航条（Pad 竖屏 / 移动）：模式区从顶栏迁到拇指位 */
+#mob-nav{position:fixed;left:0;right:0;bottom:0;z-index:var(--z-dock);display:none;align-items:stretch;justify-content:space-around;
+  height:calc(56px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);
+  background:color-mix(in oklab,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  border-top:1px solid var(--border)}
+#mob-nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:44px;
+  border:none;background:transparent;color:var(--muted);font:500 10.5px var(--font-body);cursor:pointer}
+#mob-nav button svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+#mob-nav button.on{color:var(--accent)}
+#mob-nav button:active{transform:scale(.94)}
+@media (max-width:767px),(min-width:768px) and (max-width:1024px) and (orientation:portrait){
+  :root{--bottom-nav-h:calc(56px + env(safe-area-inset-bottom,0px))}
+  #mob-nav{display:flex}
+  #mode-seg{display:none}
+  #hintbar{display:none}
+  .brand .bname{max-width:96px}
+  #board-pill{display:none}
+  #crumb{display:none} /* 窄屏与视图胶囊重叠；文件夹导航走左栏抽屉树 */
+  #dock .thread{max-height:68vh}
+  .sb-cluster #sb-stats,.sb-cluster #sb-peers,.sb-cluster #sb-user,.sb-cluster #sb-ai{display:none}
+}
+/* ⋯ 菜单里的展示入口：仅底部导航接管模式切换时出现（桌面由 seg 呈现） */
+#present-mm{display:none}
+@media (max-width:767px),(min-width:768px) and (max-width:1024px) and (orientation:portrait){
+  #present-mm{display:flex}
+}
+/* 统一触控规范（§5）：coarse 指针可点目标 ≥44；hover 效果在触屏全部禁用 */
+@media (pointer:coarse){
+  #chrome .icon-btn,#mode-seg button,#view-pill button,#mob-nav button{min-height:44px;min-width:44px;height:44px}
+  .ab-verb,.toc-item,#rail-fold,.rail-lens .tab-pill,.rail-vault,.rm-send,.search-pill,.pt{min-height:44px}
+  .doc-tab,.tree-leaf,.tree-row,.rail-act,.act,.mm-item,.send,#agent-toggle,#memo-bar .send{min-height:44px}
+  #p-bar .act,#p-bar .icon-btn,#p-thumbs-toggle{min-height:44px;min-width:44px}
+  [data-a="import"]{display:none} /* 桌面独占：本机目录导入，移动端无文件系统能力 */
+}
+@media (hover:none){
+  .icon-btn:hover,.act:hover,.rail-act:hover,.tab-pill:hover,.doc-tab:hover,.tree-leaf:hover,
+  .tree-row:hover,.rail-item:hover,.mm-item:hover,.ws-chip:hover,.ab-verb:hover,
+  #view-pill button:hover,#mode-seg button:hover,.brand:hover,.search-pill:hover,#board-pill:hover{transform:none}
+  .node:hover{transform:scale(var(--ds,1))} /* 触屏去掉悬浮抬升/倾斜，按压反馈仍在 */
+}
+
 /* ── 减少动效：系统开启后动画/过渡收敛 ── */
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0s!important}
@@ -760,6 +818,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </header>
 <div id="more-menu">
   <button class="mm-item" id="organize-mode-btn" title="Studio 工具态：空白拖拽圈选（M）">✨ 整理（圈选批量）</button>
+  <button class="mm-item" id="present-mm" title="全屏展示当前画布">🖼 展示模式</button>
   <div class="mm-sep"></div>
   <button class="mm-item" id="pub-btn" title="发布为 AI-HTML">⬆ 发布 / 线上</button>
   <button class="mm-item" id="design-btn" title="设计规范 / tokens">🎨 设计规范</button>
@@ -842,6 +901,13 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     </div>
   </div>
 </section>
+<!-- 底部导航（Pad 竖屏 / 移动，spec §5）：Studio/学习/Memo/Agent——Memo/Agent 是工具态入口 -->
+<nav id="mob-nav" aria-label="主导航">
+  <button data-mact="studio"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Studio</button>
+  <button data-mact="learn"><svg viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2Zm0 0a2 2 0 0 0 2 2h13"/></svg>学习</button>
+  <button data-mact="memo"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Memo</button>
+  <button data-mact="agent"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 7V4M9 13h.01M15 13h.01"/></svg>Agent</button>
+</nav>
 
 <aside id="drawer">
   <div class="drawer-head">
@@ -1322,8 +1388,9 @@ function fit(){
   if(!placed.length){vp={x:140,y:150,k:.85};return applyVP();}
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   placed.forEach(({x,y})=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x+NODE_W);y1=Math.max(y1,y+NODE_H);});
-  const pad=150,w=innerWidth-2*pad,h=innerHeight-2*pad-140;
-  const k=Math.min(1.15,Math.max(.25,Math.min(w/Math.max(1,x1-x0),h/Math.max(1,y1-y0))));
+  /* 窄屏自适应：pad 随宽收、k 下限抬高——列表流要可读，宁可超出靠平移 */
+  const pad=Math.min(150,Math.max(24,innerWidth*.1)),w=innerWidth-2*pad,h=innerHeight-2*pad-140;
+  const k=Math.min(1.15,Math.max(innerWidth<768?.55:.25,Math.min(w/Math.max(1,x1-x0),h/Math.max(1,y1-y0))));
   withAnim(()=>{vp.k=k;vp.x=pad-x0*k+Math.max(0,(w-(x1-x0)*k)/2);vp.y=pad-y0*k+90;applyVP();});
 }
 function focusNodes(ids){
@@ -1348,12 +1415,20 @@ const canvas=$('canvas');
 let pan=null,panMoved=false;
 canvas.addEventListener('pointerdown',e=>{
   if(e.target.closest('.node'))return;
-  pan={sx:e.clientX,sy:e.clientY,ox:vp.x,oy:vp.y};
+  /* P3：Pad/移动下点画布空白即收左栏抽屉（覆盖式抽屉的常规交互） */
+  if(innerWidth<=1024&&!$('rail').classList.contains('closed'))setRailClosed(true,true);
+  /* P3：移动端左缘右滑=开导航（复用 pan 手势流，不新增常驻监听） */
+  const edgeSwipe=innerWidth<=767&&e.clientX<=28&&$('rail').classList.contains('closed');
+  pan={sx:e.clientX,sy:e.clientY,ox:vp.x,oy:vp.y,edge:edgeSwipe};
   panMoved=false;
   canvas.classList.add('panning');canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove',e=>{
   if(!pan)return;
+  if(pan.edge&&e.clientX-pan.sx>48&&Math.abs(e.clientY-pan.sy)<60){
+    pan=null;panMoved=true;canvas.classList.remove('panning');
+    setRailClosed(false);return;
+  }
   if(Math.hypot(e.clientX-pan.sx,e.clientY-pan.sy)>4)panMoved=true;
   vp.x=pan.ox+(e.clientX-pan.sx);vp.y=pan.oy+(e.clientY-pan.sy);applyVP();queueDepth();
 });
@@ -1609,6 +1684,7 @@ async function loadGraph(force){
   layoutMissing();renderBrowser(b);renderGraph();
   if(!nodes.length)setCanvasState('empty',{});
   else setCanvasState('ready');
+  if(bootFitPending){bootFitPending=false;try{fit()}catch{}}
 }
 /* 面包屑 + 规则提示 */
 function renderBrowser(b){
@@ -1909,19 +1985,20 @@ function setRailClosed(closed,silent){
   r.classList.toggle('closed',closed);
   try{localStorage.setItem('thirdc_rail',closed?'closed':'open')}catch{}
   const openBtn=$('rail-open');if(openBtn)openBtn.style.display=closed?'grid':'none';
-  document.documentElement.style.setProperty('--rail-x',closed?'16px':'270px');
+  /* rail 宽 250（≥1440）/220（1024–1439，P3 紧缩）→ 开启偏移相应取值 */
+  document.documentElement.style.setProperty('--rail-x',closed?'16px':(innerWidth<1440?'240px':'270px'));
   if(!silent&&closed)toast('侧栏已收起，点左缘 › 展开','ok');
 }
 $('rail-fold')&&($('rail-fold').onclick=()=>setRailClosed(true));
 $('rail-open')&&($('rail-open').onclick=()=>setRailClosed(false));
 (function initRailState(){
   let pref=null;try{pref=localStorage.getItem('thirdc_rail')}catch{}
-  const narrow=innerWidth<=1100;
+  const narrow=innerWidth<=1024;
   setRailClosed(pref==='closed'||(pref==null&&narrow),true);
   /* 拖窗变窄：自动收起侧栏（仅从宽→窄跨过阈值时，不覆盖用户手动展开） */
   let wasNarrow=narrow;
   try{
-    matchMedia('(max-width:1100px)').addEventListener('change',e=>{
+    matchMedia('(max-width:1024px)').addEventListener('change',e=>{
       if(e.matches&&!wasNarrow)setRailClosed(true,true);
       wasNarrow=e.matches;
     });
@@ -2436,6 +2513,13 @@ document.querySelectorAll('#view-seg button').forEach(b=>{
     toast(hint,'ok');
   };
 });
+let bootFitPending=false;
+/* 移动端（§5）：画布改纵向列表流——boot 默认时间线，视图胶囊可切回画布。
+   一次性决策（不走 resize 监听，PERF 纪律） */
+if(matchMedia('(max-width:767px)').matches&&view==='canvas'){
+  const tb=document.querySelector('#view-seg button[data-view="timeline"]');
+  if(tb){tb.click();bootFitPending=true;}
+}
 async function loadBoards(){try{boards=(await api('/boards')).boards}catch{boards=['main']}}
 $b('board-pill').onclick=async()=>{await loadBoards();openOverlay('boards-ov');renderBoards();};
 function renderBoards(){
@@ -3031,6 +3115,7 @@ function toggleMemo(){
   const bar=$('memo-bar');
   const opening=!bar.classList.contains('open');
   bar.classList.toggle('open',opening);
+  document.querySelector('#mob-nav [data-mact="memo"]')?.classList.toggle('on',opening);
   if(opening){
     const now=new Date();
     $('memo-date').textContent=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -3234,6 +3319,10 @@ function setMode(m){
     b.classList.toggle('on',on);
     b.setAttribute('aria-pressed',on?'true':'false');
   });
+  /* 底部导航（移动）只反映主模式；Memo/Agent 是工具态，由各自开关同步 */
+  document.querySelectorAll('#mob-nav button').forEach(b=>{
+    b.classList.toggle('on',b.dataset.mact===seg);
+  });
   const def=MODES[m];
   if(def&&def.enter)def.enter();
 }
@@ -3258,6 +3347,17 @@ $('agent-toggle')&&($('agent-toggle').onclick=()=>{
 });
 /* ⌘K 搜索位：检索 / 命令 / RAG 的唯一入口 */
 $('search-btn')&&($('search-btn').onclick=()=>openPalette());
+/* 底部导航（Pad 竖屏/移动，spec §5）：Studio/学习=主模式；Memo=⌘⇧M 等价；Agent=聚焦对话 */
+document.querySelectorAll('#mob-nav button').forEach(b=>{
+  b.onclick=()=>{
+    const act=b.dataset.mact;
+    if(act==='studio'||act==='learn')setMode(act);
+    else if(act==='memo'){toggleMemo();}
+    else if(act==='agent'){$('say').focus();toast('输入即与知识库对话；🤖 按钮可切对话优先');}
+  };
+});
+/* 移动端（⋯ 菜单）展示入口：底部导航不载主模式时的补偿路径 */
+$('present-mm')&&($('present-mm').onclick=()=>setMode('present'));
 /* 点左上角 3C 标 / 库名 → 切换知识库 */
 $('brand')&&($('brand').onclick=()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();});
 /* 启动恢复：只认三主模式；旧数据里的 agent/organize/rag 等一律回 Studio。
