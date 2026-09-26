@@ -1,0 +1,6 @@
+xcuserdata/
+build/
+Externals/
+thirdc-release.keystore
+.android-env.sh
+sim-verify/

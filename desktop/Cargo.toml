@@ -8,6 +8,12 @@ license.workspace = true
 name = "thirdc-desktop"
 path = "src/main.rs"
 
+# 移动端（Android/iOS）构建需要库目标：cdylib 进 APK、staticlib 进 Xcode 工程
+[lib]
+name = "thirdc_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 kernel-core = { path = "../kernel/crates/kernel-core" }

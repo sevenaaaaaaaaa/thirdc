@@ -61,3 +61,9 @@ futures-sink = "=0.3.31"
 
 [profile.release]
 lto = "thin"
+
+# Xcode 27 SwiftPM 内化 @_cdecl 符号，swift-rs 1.0.8 的 globalize 只处理
+# 包名同名成员，SwiftRs.o 里的 3 个符号漏网 → App 链接 undefined。
+# vendored 放宽过滤（third_party/swift-rs），上游修复后可移除。
+[patch.crates-io]
+swift-rs = { path = "third_party/swift-rs" }

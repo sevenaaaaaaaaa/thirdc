@@ -1387,6 +1387,7 @@ function selectNode(id){
   const n=graph.nodes.find(x=>x.id===id);
   if(!n){$('inspector').classList.add('closed');return;}
   $('inspector').classList.remove('closed');
+  if(innerWidth<=1024)setRailClosed(true,true); /* 窄屏：检查器滑出时侧栏让位 */
   $('ins-title').textContent=n.title||n.path.split('/').pop();
   $('ins-path').textContent=n.path||'';
   const kinds={doc:'文档',capture:'采集',asset:'附件',query:'检索结果'};
@@ -1993,6 +1994,8 @@ $b('d-save').onclick=saveDoc;$b('d-close').onclick=()=>{$('drawer').classList.re
 function setRailClosed(closed,silent){
   const r=$('rail');if(!r)return;
   r.classList.toggle('closed',closed);
+  /* ≤1024 检查器是底部抽屉，与侧栏同层重叠：两者互斥让位，避免「＋ 新建」被盖住点不到 */
+  if(!closed&&innerWidth<=1024){const ins=$('inspector');if(ins)ins.classList.add('closed');}
   try{localStorage.setItem('thirdc_rail',closed?'closed':'open')}catch{}
   const openBtn=$('rail-open');if(openBtn)openBtn.style.display=closed?'grid':'none';
   /* rail 宽 250（≥1440）/220（1024–1439，P3 紧缩）→ 开启偏移相应取值 */

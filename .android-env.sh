@@ -1,0 +1,17 @@
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$JAVA_HOME/bin:$PATH"
+TC=$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/darwin-x86_64/bin
+export CC_aarch64_linux_android=$TC/aarch64-linux-android24-clang
+export CXX_aarch64_linux_android=$TC/aarch64-linux-android24-clang++
+export AR_aarch64_linux_android=$TC/llvm-ar
+export CC_armv7_linux_androideabi=$TC/armv7a-linux-androideabi24-clang
+export CXX_armv7_linux_androideabi=$TC/armv7a-linux-androideabi24-clang++
+export AR_armv7_linux_androideabi=$TC/llvm-ar
+export CC_i686_linux_android=$TC/i686-linux-android24-clang
+export CXX_i686_linux_android=$TC/i686-linux-android24-clang++
+export AR_i686_linux_android=$TC/llvm-ar
+export CC_x86_64_linux_android=$TC/x86_64-linux-android24-clang
+export CXX_x86_64_linux_android=$TC/x86_64-linux-android24-clang++
+export AR_x86_64_linux_android=$TC/llvm-ar
