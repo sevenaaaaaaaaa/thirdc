@@ -1081,6 +1081,15 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <input class="inp" id="acct-pass" type="password" placeholder="密码" autocomplete="current-password" style="margin-bottom:10px">
   <button class="act" id="acct-go" style="width:100%;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">登录并拉取到本地</button>
   <div id="acct-msg" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;text-align:center"></div>
+  <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+    <div style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">浏览器插件 / API</div>
+    <div id="acct-token-mask" style="font-family:var(--font-mono);font-size:11.5px;color:var(--muted);word-break:break-all;margin-bottom:8px">Token：—</div>
+    <div style="display:flex;gap:6px">
+      <button class="act" id="acct-copy-token" style="flex:1">📋 复制 API Token</button>
+      <button class="act" id="acct-copy-addr" style="flex:1">📋 复制插件地址</button>
+    </div>
+    <div id="acct-local-hint" style="display:none;font-size:11.5px;color:var(--faint);margin-top:8px;line-height:1.7">桌面端固定监听 <code style="font-family:var(--font-mono)">http://127.0.0.1:7717</code>——插件填此地址 + 上方 Token，即可离线直采（需桌面 App 正在运行）。</div>
+  </div>
   <button class="act" id="acct-logout" style="width:100%;margin-top:8px;border-color:var(--danger);color:var(--danger);display:none">退出当前账号</button>
   <button class="act" onclick="document.getElementById('acct-ov').style.display='none'" style="width:100%;margin-top:8px">关闭</button>
 </div></div>
@@ -4194,9 +4203,35 @@ function renderAcctInfo(){
   currentUser=rem.user||'';
   const su=document.getElementById('sb-user');
   if(su)su.textContent=linked?`👤 ${rem.user||'已连接'}`:'';
+  const tm=document.getElementById('acct-token-mask');
+  if(tm)tm.textContent=token?`Token：${token.slice(0,4)}…${token.slice(-4)}（${token.length} 位）`:'Token：未登录';
 }
+/* 剪贴板：安全上下文走 async API，否则退回 execCommand；都失败由调用方弹 uiPrompt 手动复制 */
+function copyText(t){
+  if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(t);
+  return new Promise((res,rej)=>{
+    const ta=document.createElement('textarea');ta.value=t;ta.style.cssText='position:fixed;top:-999px;opacity:0';
+    document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy')?res():rej(new Error('execCommand copy failed'))}
+    catch(e){rej(e)}finally{ta.remove()}
+  });
+}
+$('acct-copy-token')&&($('acct-copy-token').onclick=async()=>{
+  if(!token){toast('当前无 Token（未登录）','err');return}
+  try{await copyText(token);toast('Token 已复制，粘贴到插件配置即可','ok')}
+  catch(e){uiPrompt('手动复制 Token（Ctrl/Cmd+C）',token);}
+});
+$('acct-copy-addr')&&($('acct-copy-addr').onclick=async()=>{
+  const isDesk=document.documentElement.classList.contains('desktop');
+  const addr=isDesk?'http://127.0.0.1:7717':(location.origin+BASE);
+  try{await copyText(addr);toast('地址已复制：'+addr,'ok')}
+  catch(e){uiPrompt('手动复制地址（Ctrl/Cmd+C）',addr);}
+});
 function openAccount(){
   renderAcctInfo();
+  if(document.documentElement.classList.contains('desktop')){
+    const h=document.getElementById('acct-local-hint');if(h)h.style.display='block';
+  }
   const ov=document.getElementById('acct-ov'); if(!ov)return;
   const rem=remoteInfo();
   if(rem.server)document.getElementById('acct-server').value=rem.server;
