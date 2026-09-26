@@ -1,0 +1,64 @@
+# ThirdC 桌面端多平台打包：Windows（msi/nsis）+ Linux（deb/AppImage/rpm）+ macOS（app/dmg）
+# 触发：手动（Actions 页 Run workflow）或推 v* 标签（自动附到 GitHub Release）
+# 前端是纯静态 server/web，无需 node 构建；内核 reqwest 走 rustls，无 openssl 依赖
+name: desktop
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest # → .msi + setup.exe
+          - os: ubuntu-22.04 # → .deb + .AppImage + .rpm
+          - os: macos-14 # → .app + .dmg（aarch64）
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Linux 系统依赖（Tauri v2：webkit2gtk-4.1 等）
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: 安装 tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: 构建（bundle targets = all）
+        working-directory: desktop
+        run: cargo tauri build
+
+      - name: 收集产物
+        shell: bash
+        run: |
+          mkdir -p dist
+          find target/release/bundle -type f \( \
+            -name '*.msi' -o -name '*.exe' -o -name '*.AppImage' \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' \) \
+            -not -name 'rw.*' -exec cp {} dist/ \;
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThirdC-Desktop-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: 附到 GitHub Release（仅标签触发）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
