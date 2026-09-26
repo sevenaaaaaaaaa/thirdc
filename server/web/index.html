@@ -792,7 +792,8 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <button class="act" id="b-clear">取消</button>
 </div>
 
-<header id="chrome" data-tauri-drag-region>
+<!-- deep：子树空白区整体可拖（Tauri 2.11 语义），button/input 等可点元素自动豁免 -->
+<header id="chrome" data-tauri-drag-region="deep">
   <!-- 身份区：库名（Web 端与桌面红绿灯同位起排）+ ⌘K 检索 -->
   <button class="brand" id="brand" title="切换知识库 / 工作区">
     <span class="mark">3C</span><span class="bname" id="brand-name">ThirdC</span>
