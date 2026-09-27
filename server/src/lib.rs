@@ -3717,8 +3717,13 @@ async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
     // 写临时文件 → python3 提取
     let tmp = std::env::temp_dir().join(format!("thirdc-{}.{ext}", std::process::id()));
     std::fs::write(&tmp, &bytes).unwrap_or(());
-    let script = std::env::var("THIRDC_EXTRACT_SCRIPT")
-        .unwrap_or_else(|_| "scripts/extract_doc.py".into());
+    // 脚本定位：环境变量 > cwd > 可执行文件同级 src/（部署形态 /www/wwwroot/thirdc/bin/thirdc）
+    let script = std::env::var("THIRDC_EXTRACT_SCRIPT").ok().map(std::path::PathBuf::from)
+        .filter(|p| p.is_file())
+        .or_else(|| std::path::PathBuf::from("scripts/extract_doc.py").is_file().then(|| std::path::PathBuf::from("scripts/extract_doc.py")))
+        .or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("../src/scripts/extract_doc.py"))))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| std::path::PathBuf::from("scripts/extract_doc.py"));
     let out = tokio::process::Command::new("python3")
         .arg(&script).arg(&tmp)
         .output().await;
