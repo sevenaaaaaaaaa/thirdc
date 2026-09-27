@@ -55,6 +55,9 @@ pub fn is_html_rel(rel: &str) -> bool {
     l.ends_with(".html") || l.ends_with(".htm")
 }
 
+/// 原样文本（verbatim）文档类定义在 kernel-store（list_docs 的过滤层），此处 re-export。
+pub use kernel_store::{VERBATIM_EXTS, is_verbatim_rel};
+
 fn ae<E: std::fmt::Display>(e: E) -> SyncError {
     SyncError::Automerge(e.to_string())
 }

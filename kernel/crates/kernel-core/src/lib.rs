@@ -16,7 +16,7 @@ pub use kernel_store::{
     AiConfig, BrowserConfig, Cas, ConnectionConfig, PublishConfig, PublishTarget, StoreError, Vault,
     VaultConfig, events_dir, list_docs, new_doc_id, refs,
 };
-pub use kernel_sync::{OpLog, SyncError, is_html_rel};
+pub use kernel_sync::{OpLog, SyncError, VERBATIM_EXTS, is_html_rel, is_verbatim_rel};
 
 use kernel_store::index::Index;
 use std::fs;
@@ -333,8 +333,8 @@ impl Kernel {
         fs::write(&abs, md)?;
         self.log.import_file(&self.vault, rel, md)?;
         // 物化：把确定性序列化写回，保证文件即规范形态。
-        // HTML 一等文档保留作者原文（不被规范化改写），Markdown 走规范化。
-        if !is_html_rel(rel) {
+        // HTML 一等文档与 verbatim（代码/结构化文本）保留作者原文（不被规范化改写），Markdown 走规范化。
+        if !is_html_rel(rel) && !is_verbatim_rel(rel) {
             self.log.materialize_to_file(&self.vault, rel)?;
         }
         // 索引
@@ -993,6 +993,28 @@ mod tests {
         std::fs::remove_file(k.vault.root.join("Notes/x.md")).unwrap();
         k.sync_all().unwrap();
         assert_eq!(k.indexed_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn verbatim_docs_roundtrip_byte_exact() {
+        let dir = tempdir().unwrap();
+        let vault = Vault::init(dir.path(), "k").unwrap();
+        let mut k = Kernel::open(vault).unwrap();
+
+        // 代码内容含 Markdown 易变形结构（4 空格缩进=代码块、--- 分隔线、# 注释）
+        let py = "def f(x):\n    return x * 2\n\n# --- divider ---\nconfig = {'a': 1}\n";
+        k.put_doc("Notes/script.py", py).unwrap();
+        let on_disk = std::fs::read_to_string(k.vault.root.join("Notes/script.py")).unwrap();
+        assert_eq!(on_disk, py, "verbatim 文件必须字节级往返");
+
+        // HTML 一等文档同样原文保留
+        let html = "<!doctype html>\n<html><body><h1>Hi</h1></body></html>\n";
+        k.put_doc("Notes/page.html", html).unwrap();
+        let on_disk = std::fs::read_to_string(k.vault.root.join("Notes/page.html")).unwrap();
+        assert_eq!(on_disk, html);
+
+        // verbatim 文件可被检索、被 list_docs 收录
+        assert!(k.search("config").unwrap().iter().any(|(p, _)| p == "Notes/script.py"));
     }
 
     #[test]

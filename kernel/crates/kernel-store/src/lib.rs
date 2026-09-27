@@ -418,7 +418,19 @@ pub fn new_doc_id() -> String {
     ulid::Ulid::new().to_string()
 }
 
-/// 遍历 Notes/ 下所有 .md 文件（相对路径）。
+/// 原样文本（verbatim）文档：代码 / 结构化文本，字节级往返，不做 Markdown 规范化。
+pub const VERBATIM_EXTS: &[&str] = &[
+    "py", "js", "mjs", "cjs", "ts", "jsx", "tsx", "json", "jsonc", "yaml", "yml", "toml", "ini",
+    "cfg", "conf", "css", "scss", "less", "sh", "bash", "zsh", "fish", "rs", "go", "c", "h",
+    "cpp", "hpp", "java", "kt", "swift", "rb", "php", "sql", "xml", "csv", "tsv", "log", "txt",
+];
+
+pub fn is_verbatim_rel(rel: &str) -> bool {
+    let ext = rel.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    rel.contains('.') && VERBATIM_EXTS.contains(&ext.as_str())
+}
+
+/// 遍历 Notes/ 下所有文档文件（相对路径）：Markdown / HTML 一等文档 / verbatim 代码与结构化文本。
 pub fn list_docs(vault: &Vault) -> Result<Vec<PathBuf>, StoreError> {
     let mut out = Vec::new();
     for entry in walkdir::WalkDir::new(vault.notes_dir())
@@ -431,10 +443,14 @@ pub fn list_docs(vault: &Vault) -> Result<Vec<PathBuf>, StoreError> {
         if name.starts_with("._") || name == ".DS_Store" {
             continue;
         }
-        if p.is_file()
+        let is_doc = p.is_file()
             && p.extension()
-                .map_or(false, |e| e == "md" || e == "html" || e == "htm")
-        {
+                .map_or(false, |e| {
+                    let e = e.to_string_lossy();
+                    e == "md" || e == "html" || e == "htm"
+                        || VERBATIM_EXTS.contains(&e.as_ref())
+                });
+        if is_doc {
             out.push(p.strip_prefix(&vault.root).unwrap().to_path_buf());
         }
     }
