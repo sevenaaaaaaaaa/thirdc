@@ -916,7 +916,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <span class="path" id="d-path"></span>
     <select class="style-sel" id="d-style" title="阅读设计风格（50 经典）"><option value="">风格：默认</option></select>
     <button class="icon-btn" id="d-upload" title="上传附件（图片/PDF/DOCX）"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7-7 7 7"/></svg></button>
-    <input type="file" id="d-file" style="display:none" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.docx,.doc,.md,.html,.txt,.csv,.json">
+    <input type="file" id="d-file" style="display:none" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.docx,.doc,.xlsx,.pptx,.md,.txt,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.py,.js,.ts,.jsx,.tsx,.css,.scss,.sh,.rs,.go,.c,.h,.cpp,.java,.kt,.swift,.rb,.php,.sql,.log,.ini,.cfg,.conf">
     <button class="icon-btn" id="d-pub" title="发布"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     <button class="icon-btn" id="d-mode" title="编辑 / 预览" aria-pressed="false" aria-label="编辑或预览"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="icon-btn" id="d-toc" title="目录开关" aria-label="目录开关" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
@@ -1962,13 +1962,14 @@ async function openDoc(path){
     $('d-body').style.opacity=.55;
     const d=await api('/doc?path='+encodeURIComponent(path));
     current=path;dirty=false;currentFormat=d.format||'markdown';
-    $('d-path').textContent=path+(currentFormat==='html'?'  ·  HTML':'');
-    $('editor').value=currentFormat==='html'?d.source:d.markdown;
+    $('d-path').textContent=path+(currentFormat==='html'?'  ·  HTML':currentFormat==='text'?'  ·  '+path.split('.').pop().toUpperCase():'');
+    $('editor').value=currentFormat==='markdown'?d.markdown:d.source;
     currentLearnHtml=currentFormat==='html'?d.source:d.html;
     applyLearnStyle();
     dr.classList.add('open');selectNode('doc:'+path);
     buildToc(d.markdown);
-    if(!dr.classList.contains('wide')){const body=$('d-body');body.classList.remove('edit');body.classList.add('view');}
+    if(currentFormat==='text'){const body=$('d-body');body.classList.remove('view');body.classList.add('edit');}
+    else if(!dr.classList.contains('wide')){const body=$('d-body');body.classList.remove('edit');body.classList.add('view');}
     addDocTab(path);
   }catch(e){toast('打开失败：'+e.message,'err');}
   finally{dr.classList.remove('loading');$('d-body').style.opacity='';}
@@ -2055,7 +2056,11 @@ $b('d-expand').onclick=()=>{
   toast(wide?'已铺开：左侧编辑 · 右侧实时预览':'已收起为预览','ok');
 };
 
-/* ───────── 本地上传（图片/PDF/DOCX/HTML）───────── */
+/* 与内核 kernel-store::VERBATIM_EXTS 对齐：原样文本（字节级往返，不 Markdown 化） */
+const VERBATIM_EXTS=['py','js','mjs','cjs','ts','jsx','tsx','json','jsonc','yaml','yml','toml','ini','cfg','conf','css','scss','less','sh','bash','zsh','fish','rs','go','c','h','cpp','hpp','java','kt','swift','rb','php','sql','xml','csv','tsv','log','txt'];
+const kernelVerbatim=(ext)=>VERBATIM_EXTS.includes(ext);
+
+/* ───────── 本地上传（图片/HTML/代码文本/PDF/DOCX）───────── */
 $b('d-upload').onclick=()=>$('d-file').click();
 $('d-file').addEventListener('change',async e=>{
   for(const f of [...e.target.files]){
@@ -2069,23 +2074,41 @@ $('d-file').addEventListener('change',async e=>{
         t.value=t.value.slice(0,s0)+r.markdown+'\n'+t.value.slice(s0);dirty=true;
         toast(`图片入库 ${r.hash.slice(0,8)}…`,'ok');
       }catch(err){toast('图片上传失败：'+err.message,'err')}
-    } else if(['pdf','docx','doc'].includes(ext)){
-      // PDF/DOCX → 内容寻址存储 + 嵌入引用
+    } else if(['pdf','docx','doc','xlsx','pptx'].includes(ext)){
+      // PDF/DOCX → /ingest/file 转码：Markdown 代理文档（可检索）+ 原件入 Assets
       try{
-        const r=await api('/asset?name='+encodeURIComponent(f.name),{method:'POST',body:buf,headers:{'content-type':'application/octet-stream'}});
-        const embed=ext==='pdf'?`\n[📄 ${f.name}](${r.path})\n<embed src="${r.path}" type="application/pdf" width="100%" height="500px">\n`
-                  :`\n[📝 ${f.name}](${r.path})\n`;
+        let b64='';const chunk=0x8000;for(let i=0;i<buf.length;i+=chunk)b64+=String.fromCharCode(...buf.subarray(i,i+chunk));
+        const r=await api('/ingest/file',{method:'POST',json:{name:f.name,content_base64:btoa(b64)}});
         const t=$('editor'),s0=t.selectionStart;
+        const embed=`\n[📄 ${f.name}](${r.rel})\n`;
         t.value=t.value.slice(0,s0)+embed+t.value.slice(s0);dirty=true;
-        toast(`${ext.toUpperCase()} 已入库`,'ok');
-      }catch(err){toast('上传失败：'+err.message,'err')}
-    } else if(['md','html','txt','csv','json'].includes(ext)){
-      // 文本文件 → 新文档
+        toast(`${ext.toUpperCase()} 已转码入库（原文在 Assets）`,'ok');
+        await refreshAll();
+      }catch(err){toast('转码失败：'+err.message,'err')}
+    } else if(ext==='html'||ext==='htm'){
+      // HTML 一等文档：原文入库（内核保留原文，浏览器可预览），不转 Markdown
       try{
         const text=new TextDecoder().decode(buf);
         const slug=f.name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g,'-').replace(/^-|-$/g,'')||('upload-'+Date.now());
-        const path=`Notes/${slug}.md`;
-        await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:text,headers:{'content-type':'text/markdown'}});
+        await api('/doc?path='+encodeURIComponent(`Notes/${slug}.html`),{method:'PUT',body:text,headers:{'content-type':'text/html'}});
+        toast(`已导入 HTML 文档 ${f.name}`,'ok');
+        await refreshAll();
+      }catch(err){toast('导入失败：'+err.message,'err')}
+    } else if(kernelVerbatim(ext)){
+      // 代码/结构化文本：原样入库保留扩展名（字节级往返，不 Markdown 化）
+      try{
+        const text=new TextDecoder().decode(buf);
+        const slug=f.name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g,'-').replace(/^-|-$/g,'')||('upload-'+Date.now());
+        await api('/doc?path='+encodeURIComponent(`Notes/${slug}.${ext}`),{method:'PUT',body:text,headers:{'content-type':'text/plain'}});
+        toast(`已导入 ${f.name}（原样保留 .${ext}）`,'ok');
+        await refreshAll();
+      }catch(err){toast('导入失败：'+err.message,'err')}
+    } else if(['md','txt'].includes(ext)){
+      // Markdown / 纯文本 → 新文档
+      try{
+        const text=new TextDecoder().decode(buf);
+        const slug=f.name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g,'-').replace(/^-|-$/g,'')||('upload-'+Date.now());
+        await api('/doc?path='+encodeURIComponent(`Notes/${slug}.md`),{method:'PUT',body:text,headers:{'content-type':'text/markdown'}});
         toast(`已导入 ${f.name}`,'ok');
         await refreshAll();
       }catch(err){toast('导入失败：'+err.message,'err')}
@@ -2105,7 +2128,7 @@ $('editor').addEventListener('input',()=>{
     if(!current)return;
     try{
       const d=await api('/doc?path='+encodeURIComponent(current),{method:'PUT',body:$('editor').value,headers:{'content-type':'text/markdown'}});
-      $('preview').srcdoc=d.html;dirty=false;
+      if(currentFormat==='text')paintCodePreview();else $('preview').srcdoc=d.html;dirty=false;
     }catch{}
   },600);
 });
@@ -2114,7 +2137,7 @@ $('editor').addEventListener('blur',async()=>{
   if(!current||!dirty)return;
   try{
     const d=await api('/doc?path='+encodeURIComponent(current),{method:'PUT',body:$('editor').value,headers:{'content-type':'text/markdown'}});
-    $('preview').srcdoc=d.html;dirty=false;
+    if(currentFormat==='text')paintCodePreview();else $('preview').srcdoc=d.html;dirty=false;
     loadStatus().catch(()=>{});
   }catch(e){}
 });
@@ -3611,7 +3634,55 @@ function injectStyle(html,css){
   return html.includes('</head>')?html.replace('</head>',tag+'</head>'):tag+html;
 }
 function pickStyleId(sel){return sel.value||localStorage.getItem('thirdc_style_'+sel.id)||'';}
+/* 代码高亮：轻量 token 扫描（字符串 / 行注释 / 数字 / 关键词族），按扩展名选注释前缀 */
+const CODE_KWS=new Set('def function func fn class struct impl interface enum trait type import from package use pub return yield if else elif for while loop match case do then let var const val mut static final new self this super try except catch finally raise throw with as in not and or is None null nil true false True False async await lambda pass break continue global nonlocal typeof instanceof extends implements namespace using end select insert update delete where group by order'.split(' '));
+const CODE_LINE_COMMENT={py:'#',rb:'#',sh:'#',bash:'#',zsh:'#',fish:'#',yaml:'#',yml:'#',toml:'#',ini:'#',cfg:'#',conf:'#',sql:'--'};
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function hlCode(src,ext){
+  const lineC=CODE_LINE_COMMENT[ext]||'//';
+  const lineEsc=escHtml(lineC);
+  const re=new RegExp('"(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`|[A-Za-z_$][\\w$]*|\\b\\d+(?:\\.\\d+)?\\b','g');
+  let out='',last=0,m;
+  const push=(cls,t)=>{out+=cls?'<span class="'+cls+'">'+escHtml(t)+'</span>':escHtml(t);};
+  while((m=re.exec(src))){
+    const gap=src.slice(last,m.index);
+    // 间隙补扫行注释：换行只在段间还原（与原文一致），不额外添加
+    const lines=gap.split('\n');
+    lines.forEach((line,idx)=>{
+      const ci=line.indexOf(lineC);
+      if(ci>=0){push('',line.slice(0,ci));push('com',line.slice(ci));}
+      else push('',line);
+      if(idx<lines.length-1)out+='\n';
+    });
+    const t=m[0];
+    if(t.startsWith('"')||t.startsWith("'")||t.startsWith('`'))push('str',t);
+    else if(/^\d/.test(t))push('num',t);
+    else if(CODE_KWS.has(t))push('kw',t);
+    else{
+      const ci=t.indexOf(lineC);
+      if(ci>=0)push('com',t);else push('',t);
+    }
+    last=m.index+t.length;
+  }
+  push('',src.slice(last));
+  return out;
+}
+function codeViewHtml(src,ext){
+  const dark=document.documentElement.dataset.theme!=='light';
+  const bg=dark?'oklch(19% .012 260)':'oklch(97% .004 260)',fg=dark?'oklch(88% .01 260)':'oklch(24% .012 260)';
+  const kw=dark?'oklch(76% .13 300)':'oklch(52% .19 300)',str=dark?'oklch(80% .12 145)':'oklch(42% .12 145)';
+  const com=dark?'oklch(62% .015 260)':'oklch(52% .015 260)',num=dark?'oklch(80% .11 70)':'oklch(48% .13 55)';
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;background:${bg};color:${fg}}
+pre{margin:0;padding:18px 20px;font:12.5px/1.75 ui-monospace,'SF Mono',Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;tab-size:4}
+.kw{color:${kw};font-weight:600}.str{color:${str}}.com{color:${com};font-style:italic}.num{color:${num}}</style></head><body><pre><code>${hlCode(src,ext)}</code></pre></body></html>`;
+}
+function paintCodePreview(){
+  const ext=(current&&current.includes('.'))?current.split('.').pop().toLowerCase():'txt';
+  $('preview').srcdoc=codeViewHtml($('editor').value,ext);
+}
 function applyLearnStyle(){
+  if(currentFormat==='text'){paintCodePreview();return;}
   const id=pickStyleId($('d-style'));
   const p=STYLES.find(s=>s[0]===id);
   $('preview').srcdoc=injectStyle(currentLearnHtml,p?styleCss(p):'');
@@ -4004,6 +4075,9 @@ const AB_TEXT_VERBS=[
   {id:'summarize',label:'总结',rule:true},
   {id:'condense',label:'精简',rule:true},
   {id:'extract-node',label:'提取为节点',rule:true},
+  {id:'copy',label:'复制',rule:true},
+  {id:'ask-gemini',label:'问 Gemini',rule:true},
+  {id:'ask-doubao',label:'问 豆包',rule:true},
   {id:'rewrite',label:'改写',ai:true},
   {id:'expand',label:'扩写',ai:true},
   {id:'translate',label:'翻译',ai:true},
@@ -4086,6 +4160,17 @@ async function abRun(op){
   $('ab-list').querySelectorAll('.ab-verb').forEach(b=>b.disabled=false);
 }
 async function abRunText(op){
+  /* 本地动词：不经 /agent/apply，直接在浏览器完成 */
+  if(op==='copy'||op==='ask-gemini'||op==='ask-doubao'){
+    try{await navigator.clipboard.writeText(abSel.text);}catch(e){}
+    if(op==='copy'){toast('已复制选中文本','ok');}
+    else{
+      const site=op==='ask-gemini'?'https://gemini.google.com/app':'https://www.doubao.com/chat/';
+      window.open(site,'_blank');
+      toast('已复制选中文本——粘贴到对话框即可提问','ok');
+    }
+    abHide();return;
+  }
   const r=await api('/agent/apply',{method:'POST',json:{op,text:abSel.text,path:current}});
   if(op==='extract-node'){
     abApplyReplace(r.markdown);
@@ -4162,7 +4247,7 @@ $('ab-q')&&($('ab-q').addEventListener('keydown',e=>{
 $('ab-apply')&&($('ab-apply').onclick=()=>{const md=$('ab-preview').dataset.markdown||'';abApplyReplace(md);abHide();toast('已应用','ok');});
 $('ab-cancel')&&($('ab-cancel').onclick=()=>abHide());
 $('ab-retry')&&($('ab-retry').onclick=()=>{if(abSel&&abLastOp)abRun(abLastOp);});
-$('editor')&&$('editor').addEventListener('mouseup',()=>{setTimeout(()=>{const c=abCaptureContext();if(c&&c.kind==='text')abShow();},0);});
+$('editor')&&$('editor').addEventListener('mouseup',e=>{if(e.button!==0)return;setTimeout(()=>{const c=abCaptureContext();if(c&&c.kind==='text')abShow();},0);});
 document.addEventListener('pointerdown',e=>{
   const bar=$('actionbar');
   if(bar&&bar.classList.contains('on')&&!bar.contains(e.target)&&e.target!==$('editor'))abHide();

@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v31';
+const SHELL = 'thirdc-shell-v33';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -1181,7 +1181,13 @@ async fn get_doc(
     }
     let html = k.render_doc_html_with_views(&path).ok();
     let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
-    let format = if kernel_core::is_html_rel(&path) { "html" } else { "markdown" };
+    let format = if kernel_core::is_html_rel(&path) {
+        "html"
+    } else if kernel_core::is_verbatim_rel(&path) {
+        "text"
+    } else {
+        "markdown"
+    };
     match k.get_doc(&path) {
         Ok(model) => {
             let doc_tags = extract_tags(&kernel_core::to_markdown(&model));
@@ -1220,7 +1226,10 @@ async fn put_doc(
     };
     let mut k = st.kernel.lock().unwrap();
     match k.put_doc(&path, md) {
-        Ok(()) => Json(json!({ "written": path })).into_response(),
+        Ok(()) => {
+            let html = k.render_doc_html_with_views(&path).ok();
+            Json(json!({ "written": path, "html": html })).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
@@ -1613,6 +1622,38 @@ mod tests {
         let state = build_state(vault).unwrap();
         let token = state.token.clone();
         (router(state), token, dir)
+    }
+
+    #[test]
+    fn inline_html_project_folds_local_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("style.css"), "body{background:url(bg.png)}h1{color:red}").unwrap();
+        std::fs::write(root.join("bg.png"), b"\x89PNG fake").unwrap();
+        std::fs::write(root.join("app.js"), "console.log('hi')").unwrap();
+        std::fs::write(
+            root.join("index.html"),
+            "<!doctype html><head><link rel=\"stylesheet\" href=\"style.css\">\
+             <script src=\"app.js\"></script></head>\
+             <body><img src=\"assets/../bg.png\"><img src=\"https://x.com/a.png\">\
+             <a href=\"other.html\">next</a></body>",
+        )
+        .unwrap();
+
+        let out = inline_html_project(
+            &std::fs::read_to_string(root.join("index.html")).unwrap(),
+            root,
+            std::path::Path::new(""),
+        );
+
+        assert!(out.contains("<style>"), "css 应内联为 style：{out}");
+        assert!(out.contains("h1{color:red}"));
+        assert!(out.contains("data:image/png;base64"), "bg.png 应转 data URI：{out}");
+        assert!(out.contains("console.log('hi')"), "js 应内联：{out}");
+        assert!(!out.contains("<script src="), "script src 引用应消失");
+        assert!(out.contains("https://x.com/a.png"), "外链图片原样保留");
+        assert!(out.contains("href=\"other.html\""), "页面链接不动");
     }
 
     async fn body_json(resp: axum::response::Response) -> Value {
@@ -3669,8 +3710,8 @@ async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
         Err(e) => return err(StatusCode::BAD_REQUEST, format!("base64: {e}")).into_response(),
     };
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-    if !["pdf", "docx", "doc"].contains(&ext.as_str()) {
-        return err(StatusCode::BAD_REQUEST, "仅支持 pdf/docx").into_response();
+    if !["pdf", "docx", "doc", "xlsx", "pptx"].contains(&ext.as_str()) {
+        return err(StatusCode::BAD_REQUEST, "仅支持 pdf/docx/xlsx/pptx").into_response();
     }
 
     // 写临时文件 → python3 提取
@@ -4249,6 +4290,204 @@ fn read_import_index(root: &std::path::Path) -> serde_json::Map<String, Value> {
         .unwrap_or_default()
 }
 
+/* ───────── HTML 项目内联：把目录内相对引用折叠为自包含单文件 ───────── */
+
+/// 单资源内联上限：超过则保留原引用（防止误吞巨型文件）。
+const INLINE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+fn tag_attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+    for q in ['"', '\''] {
+        let pat = format!("{attr}={q}");
+        if let Some(i) = tag.find(&pat) {
+            let rest = &tag[i + pat.len()..];
+            if let Some(j) = rest.find(q) {
+                return Some(&rest[..j]);
+            }
+        }
+    }
+    None
+}
+
+/// 相对引用 → 源码树内的真实文件（拒绝绝对路径 / 协议引用 / 逃出源码树）。
+fn resolve_local_ref(src_root: &std::path::Path, html_dir: &std::path::Path, reference: &str) -> Option<std::path::PathBuf> {
+    let reference = reference.split(['?', '#']).next().unwrap_or(reference);
+    if reference.is_empty()
+        || reference.starts_with('/')
+        || reference.contains(':')
+        || reference.starts_with("..")
+    {
+        return None;
+    }
+    let base = src_root.join(html_dir);
+    let path = base.join(reference);
+    let canonical = path.canonicalize().ok()?;
+    let root_canonical = src_root.canonicalize().ok()?;
+    if !canonical.starts_with(&root_canonical) {
+        return None;
+    }
+    Some(canonical)
+}
+
+fn mime_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        _ => "application/octet-stream",
+    }
+}
+
+fn data_uri_for(path: &std::path::Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > INLINE_MAX_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+    use base64::Engine;
+    Some(format!(
+        "data:{};base64,{}",
+        mime_for_ext(&ext),
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+/// 内联 CSS 内的 url(...) 本地引用（图片 / 字体 → data URI）。
+fn inline_css_urls(css: &str, src_root: &std::path::Path, html_dir: &std::path::Path) -> String {
+    let mut out = String::with_capacity(css.len());
+    let bytes = css.as_bytes();
+    let mut i = 0;
+    while let Some(rel) = css[i..].find("url(") {
+        let start = i + rel + 4;
+        out.push_str(&css[i..start]);
+        let rest = &css[start..];
+        let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'');
+        let q_len = quote.map_or(0, |_| 1);
+        let body_end = rest[q_len..]
+            .find(quote.map(|c| c as char).unwrap_or(')'))
+            .map(|j| q_len + j)
+            .unwrap_or(rest.len());
+        let reference = rest[q_len..body_end].trim();
+        let after = &rest[body_end..];
+        if let Some(path) = resolve_local_ref(src_root, html_dir, reference) {
+            if let Some(uri) = data_uri_for(&path) {
+                out.push_str(&uri);
+                out.push_str(after.get(..1).unwrap_or(""));
+                i = start + body_end + 1;
+                let _ = bytes;
+                continue;
+            }
+        }
+        out.push_str(&rest[..body_end]);
+        i = start + body_end;
+    }
+    out.push_str(&css[i..]);
+    out
+}
+
+/// 把 HTML 项目（源码目录内的相对引用）内联为自包含单文件：
+/// `<link rel=stylesheet href=*.css>` → `<style>`；`<script src=*.js>` → 内联脚本；
+/// `<img src>` 与内联 CSS 的 `url()` → data URI。仅处理源码树内存在的相对路径，
+/// http(s) / data: / 绝对路径 / `..` 逃逸一律原样保留。
+fn inline_html_project(html: &str, src_root: &std::path::Path, html_dir: &std::path::Path) -> String {
+    let lower = html.to_lowercase();
+    let mut out = String::with_capacity(html.len() * 2);
+    let mut i = 0;
+    while i < html.len() {
+        // 找下一个候选标签（取三种里最靠前的）
+        let next = ["<link", "<script", "<img"]
+            .iter()
+            .filter_map(|t| lower[i..].find(t).map(|p| (i + p, *t)))
+            .min_by_key(|(p, _)| *p);
+        let (pos, kind) = match next {
+            Some(v) => v,
+            None => {
+                out.push_str(&html[i..]);
+                break;
+            }
+        };
+        out.push_str(&html[i..pos]);
+        if kind == "<script" {
+            // 整块 <script …>…</script>
+            let tag_end = lower[pos..].find('>').map(|j| pos + j + 1).unwrap_or(html.len());
+            let tag_text = &html[pos..tag_end.min(html.len())];
+            let close = lower[tag_end..].find("</script>").map(|j| tag_end + j);
+            match tag_attr_value(tag_text, "src")
+                .and_then(|src| resolve_local_ref(src_root, html_dir, src))
+                .filter(|p| p.extension().map_or(false, |e| e == "js" || e == "mjs"))
+            {
+                Some(path) if std::fs::metadata(&path).map(|m| m.len() <= INLINE_MAX_BYTES).unwrap_or(false) => {
+                    let js = std::fs::read_to_string(&path).unwrap_or_default();
+                    let attrs = tag_text
+                        .strip_prefix("<script")
+                        .unwrap_or("")
+                        .strip_suffix('>')
+                        .unwrap_or("")
+                        .replace(&format!("src=\"{}\"", tag_attr_value(tag_text, "src").unwrap_or("")), "");
+                    out.push_str("<script");
+                    out.push_str(&attrs);
+                    out.push('>');
+                    out.push_str(&js);
+                    out.push_str("</script>");
+                    i = close.map(|c| c + "</script>".len()).unwrap_or(html.len());
+                }
+                _ => {
+                    // 非 JS 或无法内联：原样抄整块
+                    let end = close.map(|c| c + 9).unwrap_or(html.len());
+                    out.push_str(&html[pos..end]);
+                    i = end;
+                }
+            }
+        } else {
+            // 自闭合风格标签 <link …> / <img …>
+            let tag_end = lower[pos..].find('>').map(|j| pos + j + 1).unwrap_or(html.len());
+            let tag_text = &html[pos..tag_end];
+            let attr = if kind == "<link" { "href" } else { "src" };
+            let is_asset = kind == "<img"
+                || (tag_text.to_lowercase().contains("stylesheet")
+                    && tag_attr_value(tag_text, "href").map_or(false, |h| h.ends_with(".css")));
+            let replaced = if is_asset {
+                tag_attr_value(tag_text, attr).and_then(|reference| resolve_local_ref(src_root, html_dir, reference))
+            } else {
+                None
+            };
+            match replaced {
+                Some(path) if kind == "<img" => {
+                    if let Some(uri) = data_uri_for(&path) {
+                        out.push_str(&tag_text.replace(
+                            &format!("{attr}=\"{}\"", tag_attr_value(tag_text, attr).unwrap_or("")),
+                            &format!("{attr}=\"{uri}\""),
+                        ));
+                    } else {
+                        out.push_str(tag_text);
+                    }
+                }
+                Some(path) => {
+                    // stylesheet link → <style>（并内联 CSS 内的 url()）
+                    match std::fs::read_to_string(&path) {
+                        Ok(css) => {
+                            out.push_str("<style>\n");
+                            out.push_str(&inline_css_urls(&css, src_root, html_dir));
+                            out.push_str("\n</style>");
+                        }
+                        Err(_) => out.push_str(tag_text),
+                    }
+                }
+                None => out.push_str(tag_text),
+            }
+            i = tag_end;
+        }
+    }
+    out
+}
+
 fn write_import_index(root: &std::path::Path, map: &serde_json::Map<String, Value>) {
     let dir = root.join(".thirdc");
     let _ = std::fs::create_dir_all(&dir);
@@ -4357,15 +4596,25 @@ async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs()).unwrap_or(0);
 
-            // 得到 (正文 md, 抽取器, 目标扩展名)
+            // 得到 (正文, 抽取器, 目标扩展名)。HTML 一等文档与 verbatim 代码/数据文本原样保留
+            // （扩展名即契约：.html 走内核原文保留路径，代码文件字节级往返）；其余提取文本转 md。
             let got: Option<(String, String, &str)> = match ext.as_str() {
                 "md" | "markdown" => Some((String::from_utf8_lossy(&bytes).into_owned(), "native".into(), "md")),
+                "html" | "htm" => {
+                    // HTML 一等文档 + 项目内联：目录内相对引用（css/js/图片）折叠为自包含单文件
+                    let raw = String::from_utf8_lossy(&bytes).into_owned();
+                    let html_dir = p.parent().unwrap().strip_prefix(src).unwrap_or(std::path::Path::new("")).to_path_buf();
+                    let inlined = inline_html_project(&raw, src, &html_dir);
+                    Some((inlined, "native+inline".into(), "html"))
+                }
                 "txt" => Some((plain_to_md(&String::from_utf8_lossy(&bytes)), "native".into(), "md")),
-                "html" | "htm" => match extract_text(&p) {
+                _ if kernel_core::VERBATIM_EXTS.contains(&ext.as_str()) => {
+                    Some((String::from_utf8_lossy(&bytes).into_owned(), "native".into(), &ext))
+                }
+                _ => match extract_text(&p) {
                     Some((t, x)) => Some((plain_to_md(&t), x, "md")),
                     None => Some((String::from_utf8_lossy(&bytes).into_owned(), "native".into(), "html")),
                 },
-                _ => extract_text(&p).map(|(t, x)| (plain_to_md(&t), x, "md")),
             };
             match got {
                 Some((body, extractor, outext)) => {
