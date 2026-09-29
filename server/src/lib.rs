@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v33';
+const SHELL = 'thirdc-shell-v35';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -225,6 +225,11 @@ self.addEventListener('fetch', e => {
         .route("/trash/restore", post(trash_restore))
         .route("/trash/purge", post(trash_purge))
         .route("/agent/recall", get(agent_recall))
+        .route("/ui-state", get(get_ui_state).put(put_ui_state))
+        .route("/plugins", get(plugins_list))
+        .route("/plugins/install", post(plugins_install))
+        .route("/plugins/toggle", post(plugins_toggle))
+        .route("/plugins/remove", post(plugins_remove))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -4565,6 +4570,244 @@ fn with_provenance(body_md: &str, src: &str, sha: &str, mtime: u64, extractor: &
 /// 导入本机目录到库：md/txt/html 直接入库；office/pdf/图片经抽取器转 md 入库；
 /// 其余格式计入待转码。用 sha256 去重并记录溯源。
 /// body: { path: "/abs/dir" }
+/* ───────── UI 状态同步（侧栏树展开 / 最近文档：存 .thirdc/ui-state.json，随库跨设备） ───────── */
+async fn get_ui_state(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let body = std::fs::read_to_string(root.join(".thirdc").join("ui-state.json")).unwrap_or_default();
+    let v: Value = serde_json::from_str(&body).unwrap_or(json!({ "updatedAt": 0 }));
+    Json(v).into_response()
+}
+
+async fn put_ui_state(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let v: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    if !v.is_object() {
+        return err(StatusCode::BAD_REQUEST, "body must be a json object").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let dir = root.join(".thirdc");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    match serde_json::to_string_pretty(&v) {
+        Ok(s) => match std::fs::write(dir.join("ui-state.json"), s) {
+            Ok(()) => Json(json!({ "ok": true })).into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        },
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/* ───────── 插件（Obsidian 式清单 + GitHub 链接安装；v0 仅声明式命令，不执行插件代码） ───────── */
+const PLUGIN_TARBALL_MAX: u64 = 25 * 1024 * 1024;
+const PLUGIN_TREE_MAX: u64 = 50 * 1024 * 1024;
+
+fn plugins_root(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(".thirdc").join("plugins")
+}
+
+fn read_plugin_manifest(dir: &std::path::Path) -> Option<Value> {
+    let s = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
+/// installed.json：name → { enabled, installedAt }（与上游 manifest 分离，避免污染更新）。
+fn read_installed(root: &std::path::Path) -> serde_json::Map<String, Value> {
+    std::fs::read_to_string(plugins_root(root).join("installed.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn write_installed(root: &std::path::Path, map: &serde_json::Map<String, Value>) {
+    let dir = plugins_root(root);
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(s) = serde_json::to_string_pretty(&Value::Object(map.clone())) {
+        let _ = std::fs::write(dir.join("installed.json"), s);
+    }
+}
+
+async fn plugins_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let installed = read_installed(&root);
+    let mut plugins = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(plugins_root(&root)) {
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            if !p.is_dir() { continue; }
+            if let Some(m) = read_plugin_manifest(&p) {
+                let name = m.get("id").and_then(|x| x.as_str()).unwrap_or_else(|| p.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")).to_string();
+                let state = installed.get(&name).cloned().unwrap_or(json!({"enabled": false}));
+                plugins.push(json!({
+                    "id": name,
+                    "name": m.get("name").cloned().unwrap_or(json!(name)),
+                    "version": m.get("version").cloned().unwrap_or(json!("0.0.0")),
+                    "description": m.get("description").cloned().unwrap_or(json!("")),
+                    "author": m.get("author").cloned().unwrap_or(json!("")),
+                    "homepage": m.get("homepage").cloned().unwrap_or(json!("")),
+                    "commands": m.get("contributions").and_then(|c| c.get("commands")).cloned().unwrap_or(json!([])),
+                    "enabled": state.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false),
+                    "installedAt": state.get("installedAt").cloned().unwrap_or(json!(null)),
+                }));
+            }
+        }
+    }
+    plugins.sort_by(|a, b| a.get("id").and_then(|x| x.as_str()).cmp(&b.get("id").and_then(|x| x.as_str())));
+    Json(json!({ "plugins": plugins })).into_response()
+}
+
+/// GitHub 仓库 → (api tarball url)。支持 …/tree/<branch>[/<subdir>] 指定分支与子目录。
+fn parse_github_repo(url: &str) -> Option<(String, String, Option<String>)> {
+    let u = url.trim().trim_end_matches('/');
+    let rest = u.strip_prefix("https://github.com/").or_else(|| u.strip_prefix("http://github.com/"))?;
+    let mut it = rest.split('/');
+    let owner = it.next()?.to_string();
+    let repo = it.next()?.trim_end_matches(".git").to_string();
+    if owner.is_empty() || repo.is_empty() { return None; }
+    let mut branch = None;
+    if it.next() == Some("tree") {
+        branch = it.next().map(|s| s.to_string());
+    }
+    Some((owner, repo, branch))
+}
+
+async fn plugins_install(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+    let (owner, repo, branch) = match parse_github_repo(&url) {
+        Some(v) => v,
+        None => return err(StatusCode::BAD_REQUEST, "需要 GitHub 仓库链接（https://github.com/owner/repo）").into_response(),
+    };
+    let api_url = match &branch {
+        Some(b) => format!("https://api.github.com/repos/{owner}/{repo}/tarball/refs/heads/{b}"),
+        None => format!("https://api.github.com/repos/{owner}/{repo}/tarball"),
+    };
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let out = match tokio::task::spawn_blocking(move || -> Result<Vec<String>, String> {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("thirdc-plugin-installer")
+            .timeout(std::time::Duration::from_secs(60))
+            .build().map_err(|e| e.to_string())?;
+        let resp = client.get(&api_url).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("GitHub 返回 {}", resp.status()));
+        }
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > PLUGIN_TARBALL_MAX {
+            return Err(format!("仓库压缩包超过 {}MB 上限", PLUGIN_TARBALL_MAX / 1024 / 1024));
+        }
+        let tmp = std::env::temp_dir().join(format!("thirdc-plug-{}-{}", std::process::id(), kernel_core::Cas::hash_hex(url.as_bytes())[..8].to_string()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+        let tgz = tmp.join("repo.tar.gz");
+        std::fs::write(&tgz, &bytes).map_err(|e| e.to_string())?;
+        let ex = tmp.join("extract");
+        std::fs::create_dir_all(&ex).map_err(|e| e.to_string())?;
+        let st2 = std::process::Command::new("tar").args(["-xzf", tgz.to_str().unwrap(), "-C", ex.to_str().unwrap()]).output().map_err(|e| e.to_string())?;
+        if !st2.status.success() {
+            return Err(format!("解压失败：{}", String::from_utf8_lossy(&st2.stderr).chars().take(200).collect::<String>()));
+        }
+        // GitHub tarball 有一层顶层目录 repo-<sha>/；定位 manifest（根或一层子目录，支持多插件仓库）
+        let mut top = None;
+        for e in std::fs::read_dir(&ex).map_err(|e| e.to_string())?.filter_map(|e| e.ok()) {
+            if e.path().is_dir() { top = Some(e.path()); break; }
+        }
+        let top = top.ok_or("压缩包为空")?;
+        let mut plugin_dirs: Vec<std::path::PathBuf> = Vec::new();
+        if top.join("manifest.json").is_file() {
+            plugin_dirs.push(top.clone());
+        } else {
+            for e in std::fs::read_dir(&top).map_err(|e| e.to_string())?.filter_map(|e| e.ok()) {
+                let p = e.path();
+                if p.is_dir() && p.join("manifest.json").is_file() { plugin_dirs.push(p); }
+            }
+        }
+        if plugin_dirs.is_empty() {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err("未找到 manifest.json（仓库根或一层子目录）".into());
+        }
+        let dest_root = plugins_root(&root);
+        std::fs::create_dir_all(&dest_root).map_err(|e| e.to_string())?;
+        let mut installed_names = Vec::new();
+        let mut installed_map = read_installed(&root);
+        for src in &plugin_dirs {
+            let m: Value = serde_json::from_str(&std::fs::read_to_string(src.join("manifest.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            let id = m.get("id").and_then(|x| x.as_str()).unwrap_or_else(|| src.file_name().and_then(|n| n.to_str()).unwrap_or("")).to_string();
+            if id.is_empty() || id.contains('/') || id.contains("..") {
+                continue;
+            }
+            let dest = dest_root.join(&id);
+            if dest.exists() {
+                let _ = std::fs::remove_dir_all(&dest);
+            }
+            std::fs::rename(src, &dest).map_err(|e| e.to_string())?;
+            installed_map.insert(id.clone(), json!({ "enabled": true, "installedAt": now_iso() }));
+            installed_names.push(id);
+        }
+        write_installed(&root, &installed_map);
+        let _ = std::fs::remove_dir_all(&tmp);
+        Ok(installed_names)
+    }).await {
+        Ok(r) => r,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    match out {
+        Ok(names) => Json(json!({ "ok": true, "installed": names })).into_response(),
+        Err(msg) => err(StatusCode::BAD_REQUEST, msg).into_response(),
+    }
+}
+
+async fn plugins_toggle(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let enabled = req.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
+    if name.is_empty() || name.contains('/') || name.contains("..") {
+        return err(StatusCode::BAD_REQUEST, "无效插件名").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    if !plugins_root(&root).join(&name).is_dir() {
+        return err(StatusCode::NOT_FOUND, "插件不存在").into_response();
+    }
+    let mut map = read_installed(&root);
+    let mut entry = map.get(&name).cloned().unwrap_or(json!({ "installedAt": now_iso() }));
+    entry["enabled"] = json!(enabled);
+    map.insert(name, entry);
+    write_installed(&root, &map);
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn plugins_remove(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    if name.is_empty() || name.contains('/') || name.contains("..") {
+        return err(StatusCode::BAD_REQUEST, "无效插件名").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let dir = plugins_root(&root).join(&name);
+    if !dir.is_dir() {
+        return err(StatusCode::NOT_FOUND, "插件不存在").into_response();
+    }
+    if let Err(e) = std::fs::remove_dir_all(&dir) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let mut map = read_installed(&root);
+    map.remove(&name);
+    write_installed(&root, &map);
+    Json(json!({ "ok": true })).into_response()
+}
+
 async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) { return e.into_response(); }
     if let Err(e) = desktop_guard(&st) { return e.into_response(); }

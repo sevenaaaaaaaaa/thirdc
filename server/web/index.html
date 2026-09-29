@@ -109,7 +109,51 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .slot-learn #toc{position:static;width:auto;flex:1;min-height:0;overflow-y:auto;border:none;border-radius:0;background:transparent;
   -webkit-backdrop-filter:none;backdrop-filter:none;padding:8px 8px 0;display:none}
 .slot-learn #toc.open{display:block}
-/* Memo 面板本体的定位/折叠样式见 #memo-slot（在 #rail 内绝对定位） */
+/* Memo 面板本体 = Widget 区的一个标签页（原浮动定位已并入 .rail-widget） */
+/* ── 侧栏 Widget 区：Memo / 日历 / 工具 三标签（Studio 与学习模式共用） ── */
+.rail-widget{flex:0 0 auto;border-top:1px solid var(--border);background:var(--surface)}
+.rw-tabs{display:flex;gap:2px;padding:5px 8px 0}
+.rw-tab{flex:1;height:26px;border:none;border-radius:var(--r-sm) var(--r-sm) 0 0;background:transparent;color:var(--faint);
+  font:600 11px var(--font-body);cursor:pointer;transition:all .15s var(--ease-out)}
+.rw-tab:hover{color:var(--fg);background:var(--glass)}
+.rw-tab.on{color:var(--accent);background:var(--accent-soft)}
+.rw-panes{max-height:230px;overflow:auto;padding:0 8px 8px}
+.rw-pane[hidden]{display:none}
+.rw-pane#memo-slot{position:static;visibility:visible;transform:none;box-shadow:none;margin:4px 2px 0;padding:8px 4px 2px;border:none;background:transparent}
+/* 迷你日历 */
+.mc-head{display:flex;align-items:center;gap:6px;padding:6px 2px 4px;font-size:12px}
+.mc-head b{flex:1;text-align:center;font-family:var(--font-display);color:var(--fg)}
+.mc-nav,.mc-full{width:24px;height:24px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface-strong);color:var(--muted);cursor:pointer;font-size:12px;line-height:1;padding:0}
+.mc-nav:hover,.mc-full:hover{color:var(--fg);border-color:var(--border-strong)}
+.mc-week,.mc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.mc-week span{text-align:center;font:600 9.5px var(--font-mono);color:var(--faint);padding:2px 0}
+.mc-cell{position:relative;height:24px;border-radius:var(--r-sm);display:grid;place-items:center;font:500 10.5px var(--font-mono);color:var(--muted);cursor:pointer;border:1px solid transparent}
+.mc-cell:hover{background:var(--glass);color:var(--fg)}
+.mc-cell.dim{color:var(--faint);opacity:.45;cursor:default}
+.mc-cell.today{border-color:var(--accent);color:var(--accent)}
+.mc-cell .dot-n{position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--accent)}
+.mc-cell .dot-n.cap{background:var(--type-capture)}
+/* 工具快捷入口栅格 */
+.rw-tools{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:6px 0 2px}
+.rw-tools button{display:flex;flex-direction:column;align-items:center;gap:2px;height:46px;padding:6px 2px;border-radius:var(--r-md);
+  border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;font:500 9.5px var(--font-body);transition:all .18s var(--ease-out)}
+.rw-tools button:hover{color:var(--fg);border-color:var(--border-strong);background:var(--surface-strong);transform:translateY(-1px)}
+.rw-tools button em{font-style:normal;font-size:13px;line-height:1}
+.rw-plug-head{margin:10px 2px 4px;font:600 10.5px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.rw-plug-cmd{display:block;width:100%;text-align:left;margin:0 0 4px;padding:7px 10px;border-radius:var(--r-md);border:1px solid var(--border);
+  background:var(--surface);color:var(--fg);font:500 11.5px var(--font-body);cursor:pointer;transition:all .16s var(--ease-out);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rw-plug-cmd:hover{border-color:var(--accent);background:var(--accent-soft)}
+.rw-plug-mgmt{display:block;width:100%;margin:4px 0 2px;padding:7px 10px;border-radius:var(--r-md);border:1px dashed var(--border-strong);
+  background:transparent;color:var(--muted);font:500 11.5px var(--font-body);cursor:pointer;transition:all .16s var(--ease-out)}
+.rw-plug-mgmt:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+/* ── 编辑器快捷工具栏（Markdown 编辑态显示） ── */
+#ed-toolbar{display:none;flex-wrap:wrap;gap:2px;align-items:center;padding:5px 10px;border-top:1px solid var(--border);background:var(--surface)}
+#ed-toolbar.on{display:flex}
+#ed-toolbar button{min-width:30px;height:26px;padding:0 6px;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;
+  color:var(--muted);font:600 11px var(--font-mono);cursor:pointer;transition:all .15s var(--ease-out)}
+#ed-toolbar button:hover{color:var(--fg);border-color:var(--border-strong);background:var(--surface-strong)}
+.edt-sep{width:1px;height:16px;background:var(--border);margin:0 3px}
 /* Studio Slot：镜头四档与「过滤文档」并为顶部一处过滤行 */
 .rail-filter{padding:2px 10px 8px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
 #rail-fold{position:absolute;top:8px;right:8px;z-index:2;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);
@@ -355,14 +399,11 @@ body.dock-hidden #dock{transform:translateY(calc(100% + 12px))}
 /* ── 学习=文档工作台（§4.2/P2）：中央正文阅读，画布让位，Esc 返回 Studio ── */
 body[data-mode="learn"] #drawer{left:calc(var(--rail-x,270px) + 12px);width:auto}
 @media (max-width:900px){body[data-mode="learn"] #drawer{left:10px}}
-/* Memo Slot（§4.2）：学习模式默认折叠成一枚入口，点开滑出 */
+/* Memo Slot 按钮（学习模式）：点击切到 Widget 区 Memo 标签 */
 #memo-slot-btn{display:flex;align-items:center;justify-content:center;gap:6px;margin:0 10px 10px;height:32px;flex:0 0 auto;
   border-radius:var(--r-md);border:1px dashed var(--border-strong);background:transparent;color:var(--muted);
   font:600 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-out)}
 #memo-slot-btn:hover,#memo-slot-btn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
-#memo-slot{position:absolute;left:10px;right:10px;bottom:10px;z-index:3;margin:0;visibility:hidden;
-  transform:translateY(calc(100% + 20px));transition:transform .32s var(--ease-spring),visibility 0s .32s;box-shadow:var(--shadow)}
-#memo-slot.open{visibility:visible;transform:none;transition:transform .32s var(--ease-spring)}
 
 /* ── 卡片物理：景深 + 悬浮 ── */
 #nodes{perspective:1400px}
@@ -396,6 +437,9 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .tree-folder.open>.tree-kids{display:block}
 .tree-leaf{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:var(--r-md);cursor:grab;color:var(--fg);transition:background .16s var(--ease-out)}
 .tree-leaf:hover{background:var(--glass)}
+.tree-leaf.on{background:var(--surface-strong);color:var(--accent);font-weight:600}
+.tree-leaf.locate{animation:locateFlash 1.5s var(--ease-out)}
+@keyframes locateFlash{0%,55%{background:var(--accent-soft);color:var(--accent)}100%{background:transparent}}
 .tree-leaf.on{background:var(--surface-strong);box-shadow:inset 2px 0 0 var(--accent)}
 .tree-leaf .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .tagchip{display:inline-flex;align-items:center;height:18px;padding:0 8px;border-radius:var(--r-pill);font:600 10px var(--font-mono);color:var(--on-accent);flex:0 0 auto}
@@ -834,16 +878,10 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 <aside id="rail">
   <button id="rail-fold" title="收起侧栏" aria-label="收起侧栏"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
-  <!-- 学习 Slot：目录大纲 + Memo（默认折叠成一枚入口，点开滑出，§4.2） -->
+  <!-- 学习 Slot：目录大纲（Memo/日历/工具在下方共用 Widget 区） -->
   <div class="rail-slot slot-learn">
     <div id="toc"><h4>目录</h4><div id="toc-list"></div></div>
-    <button id="memo-slot-btn" aria-expanded="false" title="Memo：热力图 / 标签 / 随手记">📒 Memo</button>
-  </div>
-  <div class="rail-memo" id="memo-slot">
-    <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
-    <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
-    <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
-    <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
+    <button id="memo-slot-btn" aria-expanded="true" title="Memo：热力图 / 标签 / 随手记">📒 Memo</button>
   </div>
   <!-- Studio Slot：过滤行（镜头四档）+ 文档树 + 动作 -->
   <div class="rail-slot slot-studio">
@@ -860,6 +898,41 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <div class="rail-actions">
       <button class="rail-act accent" id="rail-new" title="新建文档">＋ 新建 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">N</kbd></button>
       <button class="rail-act" id="organize-btn" title="按标签聚类，一键搬移文档">✨ 自动整理</button>
+    </div>
+  </div>
+  <!-- 工具 Widget 区（Studio/学习共用，三标签）：Memo · 日历 · 插件快捷入口 -->
+  <div class="rail-widget" id="rail-widget">
+    <nav class="rw-tabs" role="tablist">
+      <button class="rw-tab" data-rw="memo" role="tab">📒 Memo</button>
+      <button class="rw-tab" data-rw="cal" role="tab">📅 日历</button>
+      <button class="rw-tab" data-rw="tools" role="tab">🧰 工具</button>
+    </nav>
+    <div class="rw-panes">
+      <div class="rw-pane rail-memo" id="memo-slot" data-pane="memo">
+        <div class="rm-head"><b>Memo</b><span class="rm-total" id="rm-total">—</span><button class="rm-full" id="rm-full">全功能 ›</button></div>
+        <div class="rm-heat" id="rm-heat" title="点击进入全功能 Memo"></div>
+        <div class="rm-tags" id="rm-tags"><span class="rm-empty">暂无标签</span></div>
+        <div class="rm-add"><input id="rm-input" placeholder="随手记… Enter 保存"><button class="rm-send" id="rm-send" title="保存">＋</button></div>
+      </div>
+      <div class="rw-pane" id="rw-cal" data-pane="cal" hidden>
+        <div class="mc-head"><button class="mc-nav" id="mc-prev" title="上一月">‹</button><b id="mc-title"></b><button class="mc-nav" id="mc-next" title="下一月">›</button><button class="mc-full" id="mc-full" title="整月视图">⤢</button></div>
+        <div class="mc-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div class="mc-grid" id="mc-grid"></div>
+      </div>
+      <div class="rw-pane" id="rw-tools" data-pane="tools" hidden>
+        <div class="rw-tools">
+          <button id="rt-topic" title="输入主题，自动从维基/HN/arXiv 建库">⚡<span>采集主题</span></button>
+          <button id="rt-web" title="网页 URL → Markdown 入库">🌐<span>网页本地化</span></button>
+          <button id="rt-conn" title="MCP 连接器：探测 / 采集">🔌<span>连接器</span></button>
+          <button id="rt-pub" title="发布为 AI-HTML 静态站">⬆<span>发布</span></button>
+          <button id="rt-design" title="导入 / 管理设计规范">🎨<span>设计规范</span></button>
+          <button id="rt-cal" title="整月内容日历">📅<span>日历</span></button>
+          <button id="rt-trash" title="已删除文档可恢复">🗑<span>回收站</span></button>
+          <button id="rt-road" title="功能可见性契约">🗺<span>路线图</span></button>
+        </div>
+        <div class="rw-plug-head">插件</div>
+        <div id="rw-plugins"></div>
+      </div>
     </div>
   </div>
 </aside>
@@ -923,6 +996,26 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <button class="icon-btn" id="d-expand" title="铺开：编辑 + 实时预览" aria-pressed="false" aria-label="铺开预览"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
     <button class="icon-btn" id="d-save" title="保存 ⌘S"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg></button>
     <button class="icon-btn" id="d-close" title="关闭 Esc"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div id="ed-toolbar" role="toolbar" aria-label="格式工具栏">
+    <button data-md="h1" title="一级标题">H1</button>
+    <button data-md="h2" title="二级标题">H2</button>
+    <span class="edt-sep"></span>
+    <button data-md="bold" title="加粗"><b>B</b></button>
+    <button data-md="italic" title="斜体"><i>I</i></button>
+    <button data-md="strike" title="删除线"><s>S</s></button>
+    <span class="edt-sep"></span>
+    <button data-md="ul" title="无序列表">•–</button>
+    <button data-md="ol" title="有序列表">1.</button>
+    <button data-md="quote" title="引用">❝</button>
+    <button data-md="code" title="行内代码">&lt;/&gt;</button>
+    <span class="edt-sep"></span>
+    <button data-md="link" title="插入链接">🔗</button>
+    <button data-md="table" title="插入表格">▦</button>
+    <button data-md="hr" title="分隔线">—</button>
+    <button id="edt-img" title="上传图片 / 附件">🖼</button>
+    <span class="edt-sep"></span>
+    <button data-md="slash" title="更多插入（表格视图 / 锚点 / 标签…）">/</button>
   </div>
   <div class="drawer-body" id="d-body"><textarea id="editor" spellcheck="false"></textarea><iframe id="preview" sandbox="allow-scripts" title="AI-HTML"></iframe></div>
 </aside>
@@ -1006,6 +1099,17 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div class="overlay" id="road-ov"><div class="panel">
   <div class="panel-head"><h3>路线图</h3><span class="badge warn">功能可见性契约</span><button class="icon-btn" data-close="road-ov" title="关闭" aria-label="关闭路线图">✕</button></div>
   <div class="panel-body road" id="road-list"></div>
+</div></div>
+
+<div class="overlay" id="plugins-ov"><div class="panel">
+  <div class="panel-head"><h3>插件</h3><span class="badge plan">GitHub 导入 · 声明式命令</span><button class="icon-btn" data-close="plugins-ov" title="关闭" aria-label="关闭插件面板">✕</button></div>
+  <div class="panel-body">
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <input class="inp" id="plugin-install-url" placeholder="https://github.com/owner/repo（根或一层子目录含 manifest.json）" style="margin:0;flex:1">
+      <button class="act" id="plugin-install-go" style="height:38px;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">安装</button>
+    </div>
+    <div id="plugin-list"></div>
+  </div>
 </div></div>
 
 <div class="toc-line" id="toc-line"></div>
@@ -1692,7 +1796,8 @@ async function loadGraph(force){
   }));
   graph={nodes,edges:[]};
   board={nodes:{}};   // 分层视图不持久化位置，自动排布
-  layoutMissing();renderBrowser(b);renderGraph();
+  layoutMissing();renderBrowser(b);renderGraph();refreshMiniCal();
+  saveTreeUI({ browsePath: typeof browsePath==='string'?browsePath:'Notes' });
   if(!nodes.length)setCanvasState('empty',{});
   else setCanvasState('ready');
   if(bootFitPending){bootFitPending=false;try{fit()}catch{}}
@@ -1736,71 +1841,148 @@ function maybeEmptyVault(t){
 
 function tagColor(t){let h=0;for(const c of t)h=(h*31+c.codePointAt(0))%360;const dark=document.documentElement.dataset.theme==='dark';return `oklch(${dark?'72%':'52%'} .14 ${h})`}
 let treeState=JSON.parse(localStorage.getItem('thirdc_tree')||'{}');
-/* 用 /tree 的结构渲染（无文件标题）：文件夹秒开，文件展开时按需加载 */
+/* ── 树 UI 状态：展开集合 + 最近文档 + 浏览位置；本地即时 + /ui-state 随库跨设备 ── */
+let treeUI = Object.assign({ expanded: [], lastDoc: null, browsePath: 'Notes', updatedAt: 0 }, JSON.parse(localStorage.getItem('thirdc_treestate') || '{}'));
+let treeUIPutTimer = null;
+function saveTreeUI(patch){
+  Object.assign(treeUI, patch);
+  treeUI.updatedAt = Date.now();
+  try{ localStorage.setItem('thirdc_treestate', JSON.stringify(treeUI)); }catch{}
+  clearTimeout(treeUIPutTimer);
+  treeUIPutTimer = setTimeout(()=>{ api('/ui-state', { method:'PUT', json: treeUI }).catch(()=>{}); }, 800);
+}
+function treeExpandedAdd(path){
+  if(!treeUI.expanded.includes(path)){ treeUI.expanded.push(path); saveTreeUI({}); }
+}
+function treeExpandedRemove(path){
+  treeUI.expanded = treeUI.expanded.filter(p => p !== path && !p.startsWith(path + '/'));
+  saveTreeUI({});
+}
+/* 用 /tree 的结构渲染（无文件标题）：文件夹秒开，文件展开时按需加载（构建函数模块级，供定位/自动展开复用） */
+function treeDocsOf(path){
+  const fd=window.__fullDocs||[];
+  return fd.filter(d=>d.path.startsWith(path+'/') && !d.path.slice(path.length+1).includes('/'));
+}
+function treeLeaf(d){
+  const el=document.createElement('div');el.className='tree-leaf'+(current===d.path?' on':'');el.draggable=true;el.title=d.path;el.dataset.tpath=d.path;
+  el.tabIndex=0;el.setAttribute('role','button');
+  const tags=(d.tags||[]).slice(0,3).map(x=>`<span class="tagchip" style="background:${tagColor(x)}">${x}</span>`).join('');
+  el.innerHTML=`<span class="nm"></span>${tags}`;
+  el.querySelector('.nm').textContent=d.title||d.path.split('/').pop();
+  el.onclick=()=>openDoc(d.path);
+  el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openDoc(d.path);}};
+  el.ondragstart=e=>{e.dataTransfer.setData('text/thirdc-path',d.path)};
+  return el;
+}
+async function treeLoadKids(f,r,path){
+  const kids=document.createElement('div');kids.className='tree-kids';
+  (path.node?.dirs||[]).forEach(ch=>kids.appendChild(treeNode(ch.name,ch.count,{path:ch.path,node:ch})));
+  // 文件：有缓存就直接列，否则拉该文件夹（只这一层）
+  const local=treeDocsOf(path.path);
+  if(local.length){local.forEach(d=>kids.appendChild(treeLeaf(d)))}
+  else{
+    const loading=document.createElement('div');loading.className='tree-row';
+    loading.innerHTML='<span class="nm" style="color:var(--faint)">载入文件…</span>';kids.appendChild(loading);
+    api('/browse?path='+encodeURIComponent(path.path)).then(b=>{
+      loading.remove();
+      const cached=JSON.parse(localStorage.getItem('thirdc_dir_'+path.path)||'null')||b;
+      (cached.docs||[]).forEach(d=>kids.appendChild(treeLeaf(d)));
+    }).catch(()=>loading.remove());
+  }
+  f.appendChild(kids);f.dataset.loaded='1';
+}
+function treeNode(name,count,path){
+  const f=document.createElement('div');f.className='tree-folder';
+  if((treeUI.expanded||[]).includes(path.path))f.classList.add('open');
+  const r=document.createElement('div');r.className='tree-row';r.dataset.tpath=path.path;r._tnode=path;
+  r.tabIndex=0;r.setAttribute('role','button');r.setAttribute('aria-expanded',f.classList.contains('open')?'true':'false');
+  r.innerHTML=`<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nm"></span><span class="ct">${count}</span>`;
+  r.querySelector('.nm').textContent=name;
+  r.onclick=async()=>{
+    const willOpen=!f.classList.contains('open');f.classList.toggle('open',willOpen);
+    r.setAttribute('aria-expanded',willOpen?'true':'false');
+    if(willOpen){
+      if(!f.dataset.loaded)await treeLoadKids(f,r,path);
+      treeExpandedAdd(path.path);
+    } else treeExpandedRemove(path.path);
+  };
+  r.ondragover=e=>{e.preventDefault();r.classList.add('drop-hot')};
+  r.ondragleave=()=>r.classList.remove('drop-hot');
+  r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();r.click();}};
+  r.ondrop=async e=>{
+    e.preventDefault();r.classList.remove('drop-hot');
+    const from=e.dataTransfer.getData('text/thirdc-path');if(!from)return;
+    const fname=from.split('/').pop();const to=`Notes/${path.path.replace(/^Notes\//,'')}/${fname}`;
+    if(to===from)return;
+    try{await api('/doc/move',{method:'POST',json:{from,to}});toast(`${from} → ${to}`,'ok');await refreshAll();if(current===from)openDoc(to);}
+    catch(err){toast('移动失败：'+err.message,'err');}
+  };
+  f.appendChild(r);return f;
+}
 function renderTreeFromTree(t){
   const box=$('rail-list');box.innerHTML='';
-  const q=($('rail-search').value||'').trim().toLowerCase();
-  const fullDocs=window.__fullDocs||[];   // 后台补全后可用
-  function docsOf(path){
-    return fullDocs.filter(d=>d.path.startsWith(path+'/') && !d.path.slice(path.length+1).includes('/'));
-  }
-  function leaf(d){
-    const el=document.createElement('div');el.className='tree-leaf'+(current===d.path?' on':'');el.draggable=true;el.title=d.path;
-    el.tabIndex=0;el.setAttribute('role','button');
-    const tags=(d.tags||[]).slice(0,3).map(x=>`<span class="tagchip" style="background:${tagColor(x)}">${x}</span>`).join('');
-    el.innerHTML=`<span class="nm"></span>${tags}`;
-    el.querySelector('.nm').textContent=d.title||d.path.split('/').pop();
-    el.onclick=()=>openDoc(d.path);
-    el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openDoc(d.path);}};
-    el.ondragstart=e=>{e.dataTransfer.setData('text/thirdc-path',d.path)};
-    return el;
-  }
-  function row(name,count,path){
-    const f=document.createElement('div');f.className='tree-folder';
-    const r=document.createElement('div');r.className='tree-row';
-    r.tabIndex=0;r.setAttribute('role','button');r.setAttribute('aria-expanded','false');
-    r.innerHTML=`<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nm"></span><span class="ct">${count}</span>`;
-    r.querySelector('.nm').textContent=name;
-    r.onclick=async()=>{
-      const willOpen=!f.classList.contains('open');f.classList.toggle('open',willOpen);
-      r.setAttribute('aria-expanded',willOpen?'true':'false');
-      if(r.querySelector('.chev'))r.querySelector('.chev').style.transform=willOpen?'rotate(90deg)':'';
-      if(willOpen&&!f.dataset.loaded){
-        const kids=document.createElement('div');kids.className='tree-kids';
-        (path.node?.dirs||[]).forEach(ch=>kids.appendChild(row(ch.name,ch.count,{path:ch.path,node:ch})));
-        // 文件：有缓存就直接列，否则拉该文件夹（只这一层）
-        const local=docsOf(path.path);
-        if(local.length){local.forEach(d=>kids.appendChild(leaf(d)))}
-        else{
-          const loading=document.createElement('div');loading.className='tree-row';
-          loading.innerHTML='<span class="nm" style="color:var(--faint)">载入文件…</span>';kids.appendChild(loading);
-          api('/browse?path='+encodeURIComponent(path.path)).then(b=>{
-            loading.remove();
-            const cached=JSON.parse(localStorage.getItem('thirdc_dir_'+path.path)||'null')||b;
-            (cached.docs||[]).forEach(d=>kids.appendChild(leaf(d)));
-          }).catch(()=>loading.remove());
-        }
-        f.appendChild(kids);f.dataset.loaded='1';
-      }
-    };
-    r.ondragover=e=>{e.preventDefault();r.classList.add('drop-hot')};
-    r.ondragleave=()=>r.classList.remove('drop-hot');
-    r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();r.click();}};
-    r.ondrop=async e=>{
-      e.preventDefault();r.classList.remove('drop-hot');
-      const from=e.dataTransfer.getData('text/thirdc-path');if(!from)return;
-      const fname=from.split('/').pop();const to=`Notes/${path.path.replace(/^Notes\//,'')}/${fname}`;
-      if(to===from)return;
-      try{await api('/doc/move',{method:'POST',json:{from,to}});toast(`${from} → ${to}`,'ok');await refreshAll();if(current===from)openDoc(to);}
-      catch(err){toast('移动失败：'+err.message,'err');}
-    };
-    const w=document.createElement('div');w.appendChild(r);
-    f.appendChild(w);return f;
-  }
-  (t.dirs||[]).forEach(d=>box.appendChild(row(d.name,d.count,{path:d.path,node:d})));
+  (t.dirs||[]).forEach(d=>box.appendChild(treeNode(d.name,d.count,{path:d.path,node:d})));
   // 根目录直属文件（有缓存就列）
-  docsOf('Notes').filter(d=>!d.path.slice(6).includes('/')).forEach(d=>box.appendChild(leaf(d)));
+  treeDocsOf('Notes').filter(d=>!d.path.slice(6).includes('/')).forEach(d=>box.appendChild(treeLeaf(d)));
   if(!t.dirs?.length&&!t.files)box.innerHTML='<div style="padding:14px;color:var(--faint);font-size:12px">还没有文件夹</div>';
+  autoExpandTree().then(()=>{
+    /* 展开完成后：定位到当前/最近文档 */
+    if((mode==='studio'||mode==='organize')&&treeUI.lastDoc)locateInTree(treeUI.lastDoc);
+  });
+}
+/* 展开集合恢复：无已保存集合时默认展开一级；恢复过程中把展开结果登记进状态（下次按此恢复） */
+async function autoExpandTree(){
+  const saved=new Set(treeUI.expanded||[]);
+  const noState=!(treeUI.expanded||[]).length;
+  for(let pass=0;pass<10;pass++){
+    const rows=[...document.querySelectorAll('#rail-list .tree-row')];
+    let acted=false;
+    for(const r of rows){
+      const p=r.dataset.tpath;if(!p)continue;
+      /* 首次使用（无保存状态）只展开一级；之后严格按保存的集合恢复 */
+      const want=(pass===0&&noState)||saved.has(p);
+      const f=r.closest('.tree-folder');
+      if(!f)continue;
+      if(want&&(!f.classList.contains('open')||!f.dataset.loaded)){
+        f.classList.add('open');r.setAttribute('aria-expanded','true');
+        if(!f.dataset.loaded)await treeLoadKids(f,r,r._tnode);
+        treeExpandedAdd(p);
+        acted=true;
+      }
+    }
+    if(!acted)break;
+  }
+}
+/* 定位当前文档：逐层展开祖先文件夹，滚动到位并闪烁高亮 */
+async function locateInTree(path){
+  if(!path)return;
+  const parts=path.split('/').slice(0,-1);
+  let prefix='';
+  for(const part of parts){
+    prefix=prefix?prefix+'/'+part:part;
+    if(prefix==='Notes')continue;   // 根不渲染为行，从一级目录开始
+    const r=[...document.querySelectorAll('#rail-list .tree-row')].find(x=>x.dataset.tpath===prefix);
+    if(!r)break;
+    const f=r.closest('.tree-folder');
+    if(!f)break;
+    if(!f.classList.contains('open')||!f.dataset.loaded){
+      f.classList.add('open');r.setAttribute('aria-expanded','true');
+      if(!f.dataset.loaded)await treeLoadKids(f,r,r._tnode);
+      treeExpandedAdd(prefix);
+    }
+  }
+  /* 文件列表可能由 /browse 异步填充：轮询等 leaf 出现（最多 2.5s）再滚动高亮 */
+  let leafEl=null;
+  for(let i=0;i<25;i++){
+    leafEl=[...document.querySelectorAll('#rail-list .tree-leaf')].find(x=>x.dataset.tpath===path);
+    if(leafEl)break;
+    await new Promise(r=>setTimeout(r,100));
+  }
+  if(leafEl){
+    leafEl.scrollIntoView({block:'nearest'});
+    leafEl.classList.add('on','locate');
+    setTimeout(()=>leafEl.classList.remove('locate'),1600);
+  }
 }
 /* 后台静默补全：拉全量文档标题/标签，更新侧栏与检索本地库 */
 async function loadDocsFull(){
@@ -1970,7 +2152,9 @@ async function openDoc(path){
     buildToc(d.markdown);
     if(currentFormat==='text'){const body=$('d-body');body.classList.remove('view');body.classList.add('edit');}
     else if(!dr.classList.contains('wide')){const body=$('d-body');body.classList.remove('edit');body.classList.add('view');}
-    addDocTab(path);
+    addDocTab(path);syncEditorToolbar();
+    /* 侧栏树定位到当前文档并记住（随库同步到其他设备） */
+    if(mode==='studio'||mode==='organize'){saveTreeUI({lastDoc:path});locateInTree(path);}
   }catch(e){toast('打开失败：'+e.message,'err');}
   finally{dr.classList.remove('loading');$('d-body').style.opacity='';}
 }
@@ -1983,21 +2167,34 @@ async function saveDoc(){
   }catch(e){toast('保存失败：'+e.message,'err');}
 }
 async function newDoc(){
-  const title=await uiPrompt('新文档标题','未命名');if(!title)return;
-  const slug=title.replace(/[^\p{L}\p{N}]+/gu,'-').replace(/^-|-$/g,'').toLowerCase()||('note-'+Date.now());
-  const path='Notes/'+slug+'.md';
-  try{await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:'# '+title+'\n\n',headers:{'content-type':'text/markdown'}});
-    await refreshAll();openDoc(path);toast('已创建 '+path,'ok');
+  /* 目标目录跟随当前画布上下文（browsePath）；支持「子目录/标题」语法 */
+  const dir=(typeof browsePath==='string'&&browsePath.startsWith('Notes/')&&browsePath!=='Notes')?browsePath.slice(6):'';
+  const title=await uiPrompt(`新文档标题（保存到 Notes/${dir ? dir + '/' : ''}；可写 子目录/标题 指定位置）`, '未命名');
+  if(!title)return;
+  const parts=title.split('/').map(s=>s.trim()).filter(Boolean);
+  const name=parts.pop()||'未命名';
+  const sub=parts.map(s=>s.replace(/[^\p{L}\p{N}\u4e00-\u9fa5_ -]+/gu,'-').trim()).filter(Boolean).join('/');
+  const slug=name.replace(/[^\p{L}\p{N}\u4e00-\u9fa5]+/gu,'-').replace(/^-|-$/g,'').toLowerCase()||('note-'+Date.now());
+  const path='Notes/'+(sub?sub+'/':'')+slug+'.md';
+  try{
+    await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:'# '+name+'\n\n',headers:{'content-type':'text/markdown'}});
+    await refreshAll();
+    await openDoc(path);
+    /* 新文档默认进编辑态 + 工具栏，位置在 toast 与抽屉路径里都可确认 */
+    const body=$('d-body');if(body&&!body.classList.contains('edit'))$('d-mode').click();
+    syncEditorToolbar();
+    toast(`已创建：${path}`,'ok');
   }catch(e){toast('创建失败：'+e.message,'err');}
 }
 $b('d-save').onclick=saveDoc;$b('d-close').onclick=()=>{$('drawer').classList.remove('open');$('toc').classList.remove('open');$('toc-line').classList.remove('on')};
 /* ── 侧栏折叠（记忆状态；窄窗默认收起，用 #rail-open 唤出） ── */
-function setRailClosed(closed,silent){
+function setRailClosed(closed,silent,persist=true){
   const r=$('rail');if(!r)return;
   r.classList.toggle('closed',closed);
   /* ≤1024 检查器是底部抽屉，与侧栏同层重叠：两者互斥让位，避免「＋ 新建」被盖住点不到 */
   if(!closed&&innerWidth<=1024){const ins=$('inspector');if(ins)ins.classList.add('closed');}
-  try{localStorage.setItem('thirdc_rail',closed?'closed':'open')}catch{}
+  /* 只有用户显式点击才持久化；boot/resize 的自动态不写存储（换屏宽各自取合理默认） */
+  if(persist){try{localStorage.setItem('thirdc_rail2',closed?'closed':'open')}catch{}}
   const openBtn=$('rail-open');if(openBtn)openBtn.style.display=closed?'grid':'none';
   /* rail 宽 250（≥1440）/220（1024–1439，P3 紧缩）→ 开启偏移相应取值 */
   document.documentElement.style.setProperty('--rail-x',closed?'16px':(innerWidth<1440?'240px':'270px'));
@@ -2006,14 +2203,15 @@ function setRailClosed(closed,silent){
 $('rail-fold')&&($('rail-fold').onclick=()=>setRailClosed(true));
 $('rail-open')&&($('rail-open').onclick=()=>setRailClosed(false));
 (function initRailState(){
-  let pref=null;try{pref=localStorage.getItem('thirdc_rail')}catch{}
+  let pref=null;try{pref=localStorage.getItem('thirdc_rail2')}catch{}
   const narrow=innerWidth<=1024;
-  setRailClosed(pref==='closed'||(pref==null&&narrow),true);
+  /* 宽屏默认展开、窄屏默认收起；持久化值只在用户显式点击后存在，并覆盖默认 */
+  setRailClosed(pref==='closed'||(pref!=='open'&&narrow),true,false);
   /* 拖窗变窄：自动收起侧栏（仅从宽→窄跨过阈值时，不覆盖用户手动展开） */
   let wasNarrow=narrow;
   try{
     matchMedia('(max-width:1024px)').addEventListener('change',e=>{
-      if(e.matches&&!wasNarrow)setRailClosed(true,true);
+      if(e.matches&&!wasNarrow)setRailClosed(true,true,false);
       wasNarrow=e.matches;
     });
   }catch{}
@@ -2044,6 +2242,7 @@ $b('d-mode').onclick=()=>{
   if(b.classList.contains('view')){b.classList.remove('view');b.classList.add('edit');}
   else{b.classList.add('view');b.classList.remove('edit');}
   const mb=$('d-mode');if(mb)mb.setAttribute('aria-pressed',b.classList.contains('edit')?'true':'false');
+  syncEditorToolbar();
 };
 /* 铺开：盖在画布区域之上（非嵌入），左编辑右实时预览 */
 $b('d-expand').onclick=()=>{
@@ -2053,8 +2252,70 @@ $b('d-expand').onclick=()=>{
   else{b.classList.remove('edit');b.classList.add('view');}
   syncTocOpen();
   const xb=$('d-expand');if(xb)xb.setAttribute('aria-pressed',wide?'true':'false');
+  syncEditorToolbar();
   toast(wide?'已铺开：左侧编辑 · 右侧实时预览':'已收起为预览','ok');
 };
+
+/* ── 编辑器快捷工具栏（Markdown 编辑态显示；text/html 格式隐藏） ── */
+function syncEditorToolbar(){
+  const tb=$('ed-toolbar');if(!tb)return;
+  const dr=$('drawer');
+  const editing=dr.classList.contains('open')&&(dr.classList.contains('wide')||$('d-body').classList.contains('edit'));
+  const show=editing&&currentFormat==='markdown';
+  tb.classList.toggle('on',show);
+}
+function edSel(){
+  const ed=$('editor');
+  return {ed,s:ed.selectionStart,e:ed.selectionEnd,val:ed.value,sel:ed.value.slice(ed.selectionStart,ed.selectionEnd)};
+}
+function edSplice(ed,s,e,text,selStart,selEnd){
+  ed.value=ed.value.slice(0,s)+text+ed.value.slice(e);
+  ed.focus();
+  ed.setSelectionRange(selStart!=null?selStart:s+text.length,selEnd!=null?selEnd:s+text.length);
+  ed.dispatchEvent(new Event('input',{bubbles:true}));dirty=true;
+}
+function mdWrap(mark,ph){
+  const {ed,s,e,sel}=edSel();
+  const body=sel||ph;
+  edSplice(ed,s,e,mark+body+mark,s+mark.length,s+mark.length+body.length);
+}
+function mdLine(prefix,ordered){
+  const {ed,s,e,val,sel}=edSel();
+  const ls=val.lastIndexOf('\n',s-1)+1;
+  const le=e+(val.slice(e).indexOf('\n')===-1?val.length-e:val.slice(e).indexOf('\n'));
+  const block=sel||val.slice(ls,le)||'';
+  const lines=block.split('\n').map((l,i)=>{
+    const clean=l.replace(/^(\s*)(#{1,6} |> |- |\d+\. )/,'$1');
+    const n=ordered?`${i+1}. `:prefix;
+    return clean.trim()?clean.replace(/^(\s*)/,`$1${n}`):clean;
+  }).join('\n');
+  edSplice(ed,ls,le,lines,ls,ls+lines.length);
+}
+function mdBlock(text){
+  const {ed,s}=edSel();
+  edSplice(ed,s,s,`\n${text}\n`);
+}
+document.querySelectorAll('#ed-toolbar [data-md]').forEach(b=>{
+  b.onclick=()=>{
+    if(currentFormat!=='markdown')return;
+    switch(b.dataset.md){
+      case 'h1':mdLine('# ');break;
+      case 'h2':mdLine('## ');break;
+      case 'bold':mdWrap('**','加粗文字');break;
+      case 'italic':mdWrap('*','斜体文字');break;
+      case 'strike':mdWrap('~~','删除文字');break;
+      case 'ul':mdLine('- ',false);break;
+      case 'ol':mdLine('',true);break;
+      case 'quote':mdLine('> ',false);break;
+      case 'code':mdWrap('`','代码');break;
+      case 'link':{const {ed,s,e,sel}=edSel();const label=sel||'链接文字';const text=`[${label}](https://链接地址)`;edSplice(ed,s,e,text,s+1,s+1+label.length);break}
+      case 'table':mdBlock('| 列一 | 列二 | 列三 |\n| --- | --- | --- |\n|  |  |  |');break;
+      case 'hr':mdBlock('---');break;
+      case 'slash':{const ed=$('editor');ed.focus();document.execCommand('insertText',false,'/');break}
+    }
+  };
+});
+$('edt-img')&&($('edt-img').onclick=()=>$('d-file').click());
 
 /* 与内核 kernel-store::VERBATIM_EXTS 对齐：原样文本（字节级往返，不 Markdown 化） */
 const VERBATIM_EXTS=['py','js','mjs','cjs','ts','jsx','tsx','json','jsonc','yaml','yml','toml','ini','cfg','conf','css','scss','less','sh','bash','zsh','fish','rs','go','c','h','cpp','hpp','java','kt','swift','rb','php','sql','xml','csv','tsv','log','txt'];
@@ -3460,13 +3721,156 @@ async function railMemoAdd(){
 }
 $('rm-send')&&($('rm-send').onclick=railMemoAdd);
 $('rm-input')&&$('rm-input').addEventListener('keydown',e=>{if(e.key==='Enter')railMemoAdd();});
-/* 学习模式 Memo Slot：默认折叠成一枚入口，点开滑出（§4.2） */
-function memoSlotSet(open){
-  $('memo-slot')?.classList.toggle('open',open);
-  $('memo-slot-btn')?.classList.toggle('on',open);
-  $('memo-slot-btn')?.setAttribute('aria-expanded',open?'true':'false');
+/* ── 侧栏 Widget 区（Studio/学习共用）：Memo · 日历 · 工具 三标签 ── */
+function setWidgetTab(tab){
+  document.querySelectorAll('.rw-tab').forEach(b=>b.classList.toggle('on',b.dataset.rw===tab));
+  document.querySelectorAll('.rw-pane').forEach(p=>{
+    const on=p.dataset.pane===tab;
+    p.hidden=!on;
+    if(on&&p.dataset.pane==='memo'&&!memoData)loadMemo().catch(()=>{});
+    if(on&&p.dataset.pane==='cal')renderMiniCal();
+    if(on&&p.dataset.pane==='tools')renderPluginsWidget();
+  });
+  try{localStorage.setItem('thirdc_rwtab',tab)}catch{}
 }
-$('memo-slot-btn')&&($('memo-slot-btn').onclick=()=>memoSlotSet(!$('memo-slot').classList.contains('open')));
+document.querySelectorAll('.rw-tab').forEach(b=>{b.onclick=()=>setWidgetTab(b.dataset.rw);});
+(function initWidgetTab(){
+  let tab='memo';try{tab=localStorage.getItem('thirdc_rwtab')||'memo'}catch{}
+  if(!['memo','cal','tools'].includes(tab))tab='memo';
+  setWidgetTab(tab);
+})();
+/* 学习模式 Memo 入口：确保侧栏展开并切到 Memo 标签 */
+function memoSlotSet(){
+  if($('rail').classList.contains('closed'))setRailClosed(false,true);
+  setWidgetTab('memo');
+  $('memo-slot-btn')?.setAttribute('aria-expanded','true');
+}
+$('memo-slot-btn')&&($('memo-slot-btn').onclick=()=>memoSlotSet());
+
+/* 迷你日历：与整月视图共用 calY/calM 与文档 mtime 数据 */
+function renderMiniCal(){
+  const grid=$('mc-grid');if(!grid)return;
+  $('mc-title').textContent=`${calY} 年 ${calM+1} 月`;
+  grid.innerHTML='';
+  const first=new Date(calY,calM,1);
+  const lead=(first.getDay()+6)%7;             // 周一为第一列
+  const days=new Date(calY,calM+1,0).getDate();
+  const docs=graph.nodes.filter(n=>n.kind!=='asset'&&n.mtime);
+  const byDay={};
+  docs.forEach(n=>{
+    const d=new Date(n.mtime*1000);
+    if(d.getFullYear()===calY&&d.getMonth()===calM){(byDay[d.getDate()]=byDay[d.getDate()]||[]).push(n);}
+  });
+  const today=new Date();today.setHours(0,0,0,0);
+  for(let i=0;i<lead;i++)grid.appendChild(Object.assign(document.createElement('span'),{className:'mc-cell dim'}));
+  for(let d=1;d<=days;d++){
+    const cell=document.createElement('div');cell.className='mc-cell';cell.textContent=d;
+    const dt=new Date(calY,calM,d);
+    if(dt.getTime()===today.getTime())cell.classList.add('today');
+    const list=byDay[d]||[];
+    if(list.length){
+      const dot=document.createElement('i');dot.className='dot-n'+(list.some(n=>n.kind==='capture')?' cap':'');
+      dot.title=list.map(n=>n.title||n.path).join('\n');cell.appendChild(dot);
+    }
+    cell.onclick=async()=>{
+      const dayDocs=byDay[d]||[];
+      if(!dayDocs.length){toast('当天没有文档改动','ok');return}
+      if(dayDocs.length===1)openDoc(dayDocs[0].path);
+      else{
+        const names=dayDocs.map(n=>n.title||n.path.split('/').pop()).join('\n');
+        const pick=await uiPrompt(`该日 ${dayDocs.length} 篇：\n${names}\n\n输入序号打开（1-${dayDocs.length}）：`);
+        if(pick){const idx=parseInt(pick)-1;if(dayDocs[idx])openDoc(dayDocs[idx].path)}
+      }
+    };
+    grid.appendChild(cell);
+  }
+}
+$('mc-prev')&&($('mc-prev').onclick=()=>{calM--;if(calM<0){calM=11;calY--}renderMiniCal()});
+$('mc-next')&&($('mc-next').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderMiniCal()});
+$('mc-full')&&($('mc-full').onclick=()=>openCalendar());
+/* 文档图变化后刷新迷你日历（有则刷，静默） */
+function refreshMiniCal(){if($('mc-grid')&&!$('rw-cal').hidden)renderMiniCal()}
+
+/* 工具快捷入口：全部复用既有面板/命令，不引入第二套逻辑 */
+$('rt-topic')&&($('rt-topic').onclick=()=>{const c=CMDS.find(c=>c[0]==='采集主题（快速建库）');c&&c[2]()});
+$('rt-web')&&($('rt-web').onclick=()=>{const c=CMDS.find(c=>c[0]==='网页本地化');c&&c[2]()});
+$('rt-conn')&&($('rt-conn').onclick=()=>openConnPanel());
+$('rt-pub')&&($('rt-pub').onclick=()=>$('pub-btn').click());
+$('rt-design')&&($('rt-design').onclick=()=>openDesign());
+$('rt-cal')&&($('rt-cal').onclick=()=>openCalendar());
+$('rt-trash')&&($('rt-trash').onclick=()=>openTrash());
+$('rt-road')&&($('rt-road').onclick=()=>{renderRoad();openOverlay('road-ov')});
+
+/* ── 插件（Obsidian 式 manifest + GitHub 链接安装；命令为声明式，不执行插件代码） ── */
+async function renderPluginsWidget(){
+  const box=$('rw-plugins');if(!box)return;
+  try{
+    const r=await api('/plugins');
+    const on=(r.plugins||[]).filter(p=>p.enabled);
+    box.innerHTML='';
+    on.forEach(p=>(p.commands||[]).forEach(c=>{
+      if(!c||!c.title)return;
+      const b=document.createElement('button');
+      b.className='rw-plug-cmd';b.title=c.description||c.id||'';
+      b.textContent=`${p.name} · ${c.title}`;
+      b.onclick=()=>runPluginCommand(p,c);
+      box.appendChild(b);
+    }));
+    const mgmt=document.createElement('button');
+    mgmt.className='rw-plug-mgmt';
+    mgmt.textContent=on.length?'⚙ 管理插件':'＋ 从 GitHub 安装插件';
+    mgmt.onclick=openPluginsPanel;
+    box.appendChild(mgmt);
+  }catch(e){box.innerHTML='<div class="rm-empty">插件列表加载失败</div>'}
+}
+async function runPluginCommand(p,c){
+  try{
+    if(c.type==='open-url'){window.open(c.payload,'_blank');}
+    else if(c.type==='insert-snippet'){
+      if(!current){toast('先打开一篇文档','err');return}
+      const ed=$('editor');ed.focus();
+      document.execCommand('insertText',false,(c.payload||'')+'\n');
+      toast('已插入「'+(c.title||'片段')+'」','ok');
+    }
+    else if(c.type==='http-post'){
+      const r=await fetch(c.payload,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(c.body||{})});
+      toast('插件请求已发送（'+r.status+'）','ok');
+    }
+    else toast('暂不支持的命令类型：'+(c.type||'未知'),'err');
+  }catch(e){toast('插件命令失败：'+e.message,'err')}
+}
+function openPluginsPanel(){ openOverlay('plugins-ov'); renderPluginsPanel(); }
+async function renderPluginsPanel(){
+  const list=$('plugin-list');if(!list)return;
+  try{
+    const r=await api('/plugins');
+    list.innerHTML='';
+    if(!(r.plugins||[]).length)list.innerHTML='<div class="dv-meta">还没有插件。粘贴 GitHub 仓库链接安装——仓库根或一层子目录含 manifest.json 即可（支持多插件仓库）。</div>';
+    (r.plugins||[]).forEach(p=>{
+      const el=document.createElement('div');el.className='conn-item';
+      el.innerHTML=`<div class="t"></div>
+        <button class="act" data-toggle>${p.enabled?'停用':'启用'}</button><button class="act danger" data-del>删除</button>`;
+      el.querySelector('.t').innerHTML=`${p.name} <span class="h" style="font-family:var(--font-mono);font-size:10px">v${p.version}</span><div class="h">${p.description||''}</div>`;
+      el.querySelector('[data-toggle]').onclick=async()=>{await api('/plugins/toggle',{method:'POST',json:{name:p.id,enabled:!p.enabled}});renderPluginsPanel();renderPluginsWidget();};
+      el.querySelector('[data-del]').onclick=async()=>{
+        if(!(await uiConfirm(`删除插件 ${p.name}？`,{ok:'删除'})))return;
+        await api('/plugins/remove',{method:'POST',json:{name:p.id}});renderPluginsPanel();renderPluginsWidget();
+      };
+      list.appendChild(el);
+    });
+  }catch(e){list.innerHTML='<div class="dv-meta">加载失败：'+e.message+'</div>'}
+}
+$('plugin-install-go')&&($('plugin-install-go').onclick=async()=>{
+  const url=$('plugin-install-url').value.trim();if(!url)return;
+  const btn=$('plugin-install-go');btn.disabled=true;btn.textContent='安装中…';
+  try{
+    const r=await api('/plugins/install',{method:'POST',json:{url}});
+    toast('已安装：'+(r.installed||[]).join(', '),'ok');
+    $('plugin-install-url').value='';
+    renderPluginsPanel();renderPluginsWidget();
+  }catch(e){toast('安装失败：'+e.message,'err')}
+  btn.disabled=false;btn.textContent='安装';
+});
 async function openMemo(){
   openOverlay('memo-ov');
   if(!memoData)$('memo-total').textContent='载入中…';
@@ -4653,6 +5057,26 @@ function bootDone(){
   loadRail().catch(()=>{});
   loadGraph().then(()=>{ bootStep(82,'画布就绪'); dismiss(); }).catch(()=>dismiss());
   Promise.all([loadStatus().catch(()=>{}),loadMeta().catch(()=>{})]).then(()=>{renderRailVaults();renderRailMemo();});
+  /* 恢复上次位置（本地即时）+ 拉取跨设备 UI 状态（新者胜）：树展开 / 最近文档 / 浏览位置 */
+  setTimeout(async()=>{
+    try{
+      if(treeUI.browsePath&&treeUI.browsePath!==browsePath){browsePath=treeUI.browsePath;await loadGraph();}
+      if(treeUI.lastDoc&&mode!=='learn'&&mode!=='present')locateInTree(treeUI.lastDoc);
+    }catch{}
+  },600);
+  setTimeout(async()=>{
+    try{
+      const r=await api('/ui-state');
+      if(r&&r.updatedAt&&r.updatedAt>(treeUI.updatedAt||0)){
+        treeUI=Object.assign(treeUI,{expanded:r.expanded||[],lastDoc:r.lastDoc||null,browsePath:r.browsePath||'Notes',updatedAt:r.updatedAt});
+        try{localStorage.setItem('thirdc_treestate',JSON.stringify(treeUI))}catch{}
+        renderTreeFromTree(cacheGet('tree')||{dirs:[]});
+        if(r.browsePath&&r.browsePath!==browsePath){browsePath=r.browsePath;await loadGraph();}
+        if(r.lastDoc&&mode!=='learn'&&mode!=='present')locateInTree(r.lastDoc);
+        toast('已同步其他设备的界面位置','ok');
+      }
+    }catch{}
+  },1500);
   applyVP();
   setTimeout(()=>initPresence(),1400);
   setTimeout(()=>maybeOnboard(),700);
