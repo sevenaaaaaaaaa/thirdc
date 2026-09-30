@@ -1,4 +1,4 @@
-# 插件系统规范（v0 + v1 视图已上线）
+# 插件系统规范（v0 + v1 视图 + v2 工具贡献已上线）
 
 > 设计参照：**Obsidian**（清单式 manifest、库内目录、启停管理、社区分发）× **Agent harness 工具思路**（能力声明、宿主注入、最小权限）。
 > 原则延续本仓库契约：**文件真相**（插件落盘为普通目录）、**入口唯一家**（Widget 工具区 + 插件面板）、**无构建步骤**。
@@ -69,7 +69,7 @@
 |---|---|---|
 | **v0（已上线）** | 声明式命令（snippet / url / http-post） | 插件代码不执行；tarball 25MB、解压 50MB 上限；manifest 字段白名单；`id` 防路径穿越 |
 | **v1（已上线）** | 视图扩展：`contributions.views` 声明 HTML 入口，经 `/plugins/view/{id}/{file}` 服务（宿主注入 RPC 垫片 `window.thirdc.*`），专用沙箱 iframe 渲染（`sandbox` 无同源——父页面与插件互不可达，实测合成点击也无法穿透）。RPC：`getDocument / insertText / saveDocument / toast / setViewTitle`，宿主按 manifest `permissions` 逐项校验（`doc:read` / `doc:write` / `editor:insert`），装前面板展示权限 | RPC 校验失败一律拒绝并回报原因；插件文件静态供给（防路径穿越）；无任意代码执行面 |
-| **v2** | Agent 工具贡献：`contributions.tools` 注册为内核工具（agent 工具循环可见，同 harness 思路——能力即声明，宿主注入执行） | 每工具独立开关；审计进 `events/` |
+| **v2（已上线）** | Agent 工具贡献：`contributions.tools` 声明工具（`http` 模板化调用外部 API / `kb-search` 库内检索），注册进 agent 工具循环（`plugin_<pid>_<tid>`，仅 AI 对话模式可选）。宿主代执行：SSRF 防护（拒绝内网/回环）、10s 超时、结果 1500 字截断、审计落 `.thirdc/events/plugin-tools.jsonl`；工具级独立启停（面板操作，installed.json `tools` 覆盖表） | 插件代码不执行；http 仅 http(s) 且 `{参数}` 必须全部提供；命令模式（无模型）不加载插件工具 |
 | **v3** | 社区索引：官方 JSON 注册表（仓库地址 + 审核标记），插件面板内一键浏览安装（Obsidian 社区插件模式） |
 
 ### 视图 manifest 示例
@@ -92,6 +92,23 @@ await thirdc.saveDocument(markdown);          // 需 doc:write
 await thirdc.toast('提示');                   // 恒可用
 await thirdc.setViewTitle('新标题');           // 恒可用
 ```
+
+### 工具 manifest 示例（v2）
+
+```json
+"contributions": {
+  "tools": [
+    { "id": "kbtag", "title": "按标签检索库", "description": "检索知识库并返回相关文档",
+      "type": "kb-search" },
+    { "id": "wtime", "title": "世界时间", "description": "查询指定时区当前时间",
+      "type": "http", "method": "GET", "url": "https://worldtimeapi.org/api/timezone/{zone}",
+      "args": { "zone": { "type": "string", "description": "时区名", "required": true } } }
+  ]
+}
+```
+
+- 工具名注册为 `plugin_<插件id>_<工具id>`，仅出现在 AI 对话的工具列表（模型自主选用；命令模式不加载）。
+- `http` 工具：`{参数}` 模板替换进 URL（percent-encoded），未出现在 URL 的参数并入 POST body；每次执行写审计。
 
 ## 六、测试与验收
 

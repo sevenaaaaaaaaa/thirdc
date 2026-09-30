@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v36';
+const SHELL = 'thirdc-shell-v38';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -226,6 +226,7 @@ self.addEventListener('fetch', e => {
         .route("/trash/purge", post(trash_purge))
         .route("/agent/recall", get(agent_recall))
         .route("/ui-state", get(get_ui_state).put(put_ui_state))
+        .route("/comments", get(comments_get).post(comments_update))
         .route("/plugins", get(plugins_list))
         .route("/plugins/install", post(plugins_install))
         .route("/plugins/toggle", post(plugins_toggle))
@@ -1628,6 +1629,78 @@ mod tests {
         let state = build_state(vault).unwrap();
         let token = state.token.clone();
         (router(state), token, dir)
+    }
+
+    #[tokio::test]
+    async fn comments_crud_and_path_guard() {
+        let (app, token, _dir) = test_router();
+        let auth = format!("Bearer {token}");
+        let app = app.clone();
+        // 先建一篇文档
+        let _ = app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/doc?path=Notes/c.md")
+                    .header("authorization", &auth)
+                    .method("PUT")
+                    .header("content-type", "text/markdown")
+                    .body(Body::from("# C"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let add = |body: String| {
+            let app = app.clone();
+            let auth = auth.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .uri("/comments")
+                        .header("authorization", &auth)
+                        .method("POST")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        // add
+        let resp = add(r#"{"path":"Notes/c.md","op":"add","start":5,"end":9,"quote":"正文","author":"小明","text":"这里要扩写"}"#.to_string()).await;
+        assert_eq!(resp.status(), 200);
+        let v = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let v: Value = serde_json::from_slice(&v).unwrap();
+        let id = v["comments"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(v["comments"][0]["author"], "小明");
+        // reply
+        let resp = add(format!(r#"{{"path":"Notes/c.md","op":"reply","id":"{id}","author":"小红","text":"同意"}}"#)).await;
+        assert_eq!(resp.status(), 200);
+        // resolve
+        let resp = add(format!(r#"{{"path":"Notes/c.md","op":"resolve","id":"{id}","resolved":true}}"#)).await;
+        assert_eq!(resp.status(), 200);
+        let v: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap()).unwrap();
+        assert_eq!(v["comments"][0]["resolved"], true);
+        assert_eq!(v["comments"][0]["replies"].as_array().unwrap().len(), 1);
+        // delete
+        let resp = add(format!(r#"{{"path":"Notes/c.md","op":"delete","id":"{id}"}}"#)).await;
+        assert_eq!(resp.status(), 200);
+        // 越权路径拒绝
+        let resp = add(r#"{"path":"../etc/passwd","op":"add"}"#.to_string()).await;
+        assert_eq!(resp.status(), 400);
+        // GET
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/comments?path=Notes/c.md")
+                    .header("authorization", &auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap()).unwrap();
+        assert_eq!(v["comments"].as_array().unwrap().len(), 0);
     }
 
     #[test]
@@ -3216,7 +3289,7 @@ async fn ws_loop(st: Arc<AppState>, socket: axum::extract::ws::WebSocket) {
                 let Ok(v) = serde_json::from_str::<Value>(&t) else { continue };
                 let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
                 // 只广播白名单类型，防止乱灌
-                if matches!(ty, "cursor" | "select" | "note") {
+                if matches!(ty, "cursor" | "select" | "note" | "state" | "caret") {
                     hub.broadcast(&json!({ "type": ty, "from": id, "data": v }));
                 }
             }
@@ -4654,6 +4727,8 @@ async fn plugins_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl Int
                     "homepage": m.get("homepage").cloned().unwrap_or(json!("")),
                     "commands": m.get("contributions").and_then(|c| c.get("commands")).cloned().unwrap_or(json!([])),
                     "views": m.get("contributions").and_then(|c| c.get("views")).cloned().unwrap_or(json!([])),
+                    "tools": m.get("contributions").and_then(|c| c.get("tools")).cloned().unwrap_or(json!([])),
+                    "toolsDisabled": state.get("tools").cloned().unwrap_or(json!({})),
                     "permissions": m.get("permissions").cloned().unwrap_or(json!([])),
                     "enabled": state.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false),
                     "installedAt": state.get("installedAt").cloned().unwrap_or(json!(null)),
@@ -4775,6 +4850,7 @@ async fn plugins_toggle(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
     let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
     let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
     let enabled = req.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
+    let tool = req.get("tool").and_then(|n| n.as_str()).unwrap_or("").to_string();
     if name.is_empty() || name.contains('/') || name.contains("..") {
         return err(StatusCode::BAD_REQUEST, "无效插件名").into_response();
     }
@@ -4783,9 +4859,16 @@ async fn plugins_toggle(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
         return err(StatusCode::NOT_FOUND, "插件不存在").into_response();
     }
     let mut map = read_installed(&root);
-    let mut entry = map.get(&name).cloned().unwrap_or(json!({ "installedAt": now_iso() }));
-    entry["enabled"] = json!(enabled);
-    map.insert(name, entry);
+    if !tool.is_empty() {
+        // 工具级开关：installed.json 的 tools 覆盖表
+        let entry = map.entry(name).or_insert(json!({ "enabled": true, "installedAt": now_iso() }));
+        let tm = entry.as_object_mut().unwrap().entry("tools").or_insert(json!({}));
+        tm.as_object_mut().unwrap().insert(tool, json!(enabled));
+    } else {
+        let mut entry = map.get(&name).cloned().unwrap_or(json!({ "installedAt": now_iso() }));
+        entry["enabled"] = json!(enabled);
+        map.insert(name, entry);
+    }
     write_installed(&root, &map);
     Json(json!({ "ok": true })).into_response()
 }
@@ -4894,6 +4977,115 @@ async fn plugins_view_file(
             }
         }
         Err(_) => err(StatusCode::NOT_FOUND, "文件不存在").into_response(),
+    }
+}
+
+/* ───────── 选区锚定评论（UX-6 v2）：存 .thirdc/comments/<path>.json，随库同步 ───────── */
+
+fn comments_path(root: &std::path::Path, doc: &str) -> Option<std::path::PathBuf> {
+    if !is_safe_doc_path(doc) {
+        return None;
+    }
+    Some(root.join(".thirdc").join("comments").join(format!("{doc}.json")))
+}
+
+fn comments_read(root: &std::path::Path, doc: &str) -> Vec<Value> {
+    let Some(p) = comments_path(root, doc) else { return Vec::new() };
+    std::fs::read_to_string(p)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("comments").cloned())
+        .and_then(|c| c.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| c)
+        .collect()
+}
+
+fn comments_write(root: &std::path::Path, doc: &str, list: &[Value]) -> Result<(), std::io::Error> {
+    let Some(p) = comments_path(root, doc) else {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad path"));
+    };
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(p, serde_json::to_string_pretty(&json!({ "comments": list })).unwrap_or_default())
+}
+
+async fn comments_get(State(st): State<Arc<AppState>>, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let doc = q.get("path").cloned().unwrap_or_default();
+    if !is_safe_doc_path(&doc) {
+        return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    Json(json!({ "path": doc, "comments": comments_read(&root, &doc) })).into_response()
+}
+
+/// POST /comments/update：op = add | reply | resolve | delete
+async fn comments_update(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let doc = req.get("path").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let op = req.get("op").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if !is_safe_doc_path(&doc) {
+        return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+    }
+    let mut list = {
+        let root = { st.kernel.lock().unwrap().vault.root.clone() };
+        comments_read(&root, &doc)
+    };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    match op.as_str() {
+        "add" => {
+            let id = format!("c{}{}", now, &kernel_core::Cas::hash_hex(serde_json::to_string(&req).unwrap_or_default().as_bytes())[..6]);
+            list.push(json!({
+                "id": id,
+                "start": req.get("start").and_then(|x| x.as_u64()).unwrap_or(0),
+                "end": req.get("end").and_then(|x| x.as_u64()).unwrap_or(0),
+                "quote": req.get("quote").cloned().unwrap_or(json!("")),
+                "author": req.get("author").cloned().unwrap_or(json!("协作者")),
+                "ts": now,
+                "resolved": false,
+                "replies": [],
+            }));
+        }
+        "reply" => {
+            let id = req.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let text = req.get("text").cloned().unwrap_or(json!(""));
+            let author = req.get("author").cloned().unwrap_or(json!("协作者"));
+            let Some(c) = list.iter_mut().find(|c| c.get("id").and_then(|x| x.as_str()) == Some(id)) else {
+                return err(StatusCode::NOT_FOUND, "评论不存在").into_response();
+            };
+            if let Some(arr) = c.get_mut("replies").and_then(|x| x.as_array_mut()) {
+                arr.push(json!({ "author": author, "text": text, "ts": now }));
+            }
+        }
+        "resolve" => {
+            let id = req.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let resolved = req.get("resolved").and_then(|x| x.as_bool()).unwrap_or(true);
+            let Some(c) = list.iter_mut().find(|c| c.get("id").and_then(|x| x.as_str()) == Some(id)) else {
+                return err(StatusCode::NOT_FOUND, "评论不存在").into_response();
+            };
+            c["resolved"] = json!(resolved);
+        }
+        "delete" => {
+            let id = req.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let before = list.len();
+            list.retain(|c| c.get("id").and_then(|x| x.as_str()) != Some(id));
+            if list.len() == before {
+                return err(StatusCode::NOT_FOUND, "评论不存在").into_response();
+            }
+        }
+        _ => return err(StatusCode::BAD_REQUEST, "op 必须是 add/reply/resolve/delete").into_response(),
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    match comments_write(&root, &doc, &list) {
+        Ok(()) => Json(json!({ "ok": true, "comments": list })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
 

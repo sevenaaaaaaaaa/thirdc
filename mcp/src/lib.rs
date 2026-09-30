@@ -37,9 +37,10 @@ impl McpServer {
             .map_err(|(_, m)| m)
     }
 
-    /// 工具定义转换为 OpenAI function calling 格式。
-    pub fn tools_for_llm(&self) -> Value {        let defs = tool_definitions();
-        let arr: Vec<Value> = defs
+    /// 工具定义转换为 OpenAI function calling 格式（含已启用插件的 contributions.tools）。
+    pub fn tools_for_llm(&self) -> Value {
+        let defs = tool_definitions();
+        let mut arr: Vec<Value> = defs
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -55,6 +56,7 @@ impl McpServer {
                 })
             })
             .collect();
+        arr.extend(self.plugin_tools_for_llm());
         Value::Array(arr)
     }
 
@@ -119,6 +121,9 @@ impl McpServer {
     fn tools_call(&self, params: &Value) -> Result<Value, (i32, String)> {
         let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
+        if name.starts_with("plugin_") {
+            return self.call_plugin_tool(name, args).map_err(|e| (-32602, e));
+        }
         match name {
             "search_vault" => self.t_search_vault(args),
             "search_semantic" => self.t_search_semantic(args),
@@ -746,6 +751,75 @@ mod tests {
         (McpServer::open(vault).unwrap(), dir)
     }
 
+    /// 在临时库中安装一个带 tools 的示例插件（manifest + installed 登记）。
+    fn seed_tool_plugin(dir: &tempfile::TempDir, tool_url: &str, tools_disabled: Value) -> String {
+        let pdir = dir.path().join(".thirdc/plugins/demo-tools");
+        std::fs::create_dir_all(&pdir).unwrap();
+        std::fs::write(
+            pdir.join("manifest.json"),
+            json!({
+                "id": "demo-tools", "name": "示例工具包", "version": "1.0.0",
+                "contributions": { "tools": [
+                    { "id": "lookup", "title": "外部查询", "description": "查询外部接口",
+                      "type": "http", "method": "GET", "url": tool_url,
+                      "args": { "kw": { "type": "string", "description": "关键词", "required": true } } },
+                    { "id": "find", "title": "库内检索", "type": "kb-search" }
+                ]}
+            }).to_string(),
+        ).unwrap();
+        std::fs::create_dir_all(dir.path().join(".thirdc/events")).unwrap();
+        std::fs::write(
+            dir.path().join(".thirdc/plugins/installed.json"),
+            json!({ "demo-tools": { "enabled": true, "installedAt": "t", "tools": tools_disabled } }).to_string(),
+        ).unwrap();
+        "demo-tools".to_string()
+    }
+
+    #[test]
+    fn plugin_tools_register_and_kbsearch_roundtrip() {
+        let (s, dir) = server();
+        seed_tool_plugin(&dir, "https://example.com/api?q={kw}", json!({}));
+        // 注册可见
+        let defs = s.plugin_tools();
+        assert_eq!(defs.len(), 2);
+        assert!(defs.iter().any(|(n, d, _)| n == "plugin_demo-tools_find" && d.contains("示例工具包")));
+        assert!(s.tools_for_llm().as_array().unwrap().iter().any(|t| t["function"]["name"] == "plugin_demo-tools_find"));
+        // 往库中写一篇文档 → kb-search 命中
+        s.call_tool_public("write_doc", json!({ "path": "Notes/t.md", "markdown": "# T\n\n插件工具测试内容 xyzzy\n" })).unwrap();
+        let r = s.call_tool_public("plugin_demo-tools_find", json!({ "query": "xyzzy" })).unwrap();
+        assert_eq!(r["hits"].as_array().unwrap().len(), 1);
+        // 审计落盘
+        let audit = std::fs::read_to_string(dir.path().join(".thirdc/events/plugin-tools.jsonl")).unwrap();
+        assert!(audit.contains("plugin_demo-tools_find"));
+    }
+
+    #[test]
+    fn plugin_tool_disabled_and_unknown_rejected() {
+        let (s, dir) = server();
+        // 内网 URL：lookup 未停用但会被 SSRF 拒；find 被工具级停用 → 先于 URL 校验被拒
+        seed_tool_plugin(&dir, "http://127.0.0.1:7700/x?q={kw}", json!({ "find": false }));
+        let e1 = s.call_tool_public("plugin_demo-tools_find", json!({ "query": "x" })).unwrap_err();
+        assert!(e1.contains("停用"), "got: {e1}");
+        let e2 = s.call_tool_public("plugin_demo-tools_lookup", json!({ "kw": "x" })).unwrap_err();
+        assert!(e2.contains("内网"), "got: {e2}");
+        // 不存在的工具名
+        assert!(s.call_tool_public("plugin_nope_missing", json!({})).is_err());
+    }
+
+    #[test]
+    fn plugin_tool_http_ssrf_guard_and_templating() {
+        let (s, dir) = server();
+        // 内网地址在调用前被拒（URL 模板已正确填充才能到达 guard）
+        seed_tool_plugin(&dir, "http://127.0.0.1:7700/x?q={kw}", json!({}));
+        let err = s.call_tool_public("plugin_demo-tools_lookup", json!({ "kw": "a b" })).unwrap_err();
+        assert!(err.contains("内网"), "got: {err}");
+        // 未提供的 {参数} 被识别
+        let (s2, dir2) = server();
+        seed_tool_plugin(&dir2, "https://example.com/api?q={kw}&extra={missing}", json!({}));
+        let err2 = s2.call_tool_public("plugin_demo-tools_lookup", json!({ "kw": "a" })).unwrap_err();
+        assert!(err2.contains("missing"), "got: {err2}");
+    }
+
     fn call(s: &McpServer, method: &str, params: Value) -> Value {
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
         let raw = s.handle(&req.to_string()).expect("should respond");
@@ -1088,6 +1162,282 @@ for line in sys.stdin:
 }
 
 /// 对话式 agent：LLM（OpenAI 兼容）驱动内核工具；未配置模型时退化为命令模式。
+/* ───────── 插件工具（v2）：contributions.tools 声明 → agent 可调用 ─────────
+   harness 思路：能力即声明，宿主代执行。v2 支持两种声明式工具：
+   - http：模板化调用外部 API（{arg} 占位符；SSRF 防护 + 10s 超时 + 1MB 截断）
+   - kb-search：库内检索（可限定标签）
+   插件代码不执行；每次执行写审计 .thirdc/events/plugin-tools.jsonl */
+
+pub const PLUGIN_TOOL_PREFIX: &str = "plugin_";
+
+impl McpServer {
+    fn plugins_dir(&self) -> Option<std::path::PathBuf> {
+        let k = self.kernel.lock().ok()?;
+        Some(k.vault.root.join(".thirdc").join("plugins"))
+    }
+
+    fn plugin_installed(&self) -> serde_json::Map<String, Value> {
+        let Some(dir) = self.plugins_dir() else { return Default::default() };
+        std::fs::read_to_string(dir.join("installed.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default()
+    }
+
+    /// 汇总已启用插件的 tools 声明（含工具级停用检查），name = plugin_<pid>_<tid>。
+    pub fn plugin_tools(&self) -> Vec<(String, String, Value)> {
+        let mut out = Vec::new();
+        let Some(dir) = self.plugins_dir() else { return out };
+        let installed = self.plugin_installed();
+        let Ok(rd) = std::fs::read_dir(&dir) else { return out };
+        for e in rd.filter_map(|e| e.ok()) {
+            let pdir = e.path();
+            if !pdir.is_dir() { continue; }
+            let Ok(mraw) = std::fs::read_to_string(pdir.join("manifest.json")) else { continue };
+            let Ok(m) = serde_json::from_str::<Value>(&mraw) else { continue };
+            let pid = m.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            if pid.is_empty() || pid.contains('_') { continue; }
+            let Some(st) = installed.get(&pid) else { continue };
+            if st.get("enabled").and_then(|x| x.as_bool()) != Some(true) { continue }
+            let tool_overrides = st.get("tools").and_then(|x| x.as_object()).cloned().unwrap_or_default();
+            let pname = m.get("name").and_then(|x| x.as_str()).unwrap_or(&pid).to_string();
+            let Some(tools) = m.get("contributions").and_then(|c| c.get("tools")).and_then(|x| x.as_array()) else { continue };
+            for t in tools {
+                let tid = t.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                if tid.is_empty() || tid.contains('_') { continue }
+                if tool_overrides.get(tid).and_then(|x| x.as_bool()) == Some(false) { continue }
+                let name = format!("{PLUGIN_TOOL_PREFIX}{pid}_{tid}");
+                let desc = format!(
+                    "【插件 {}】{}",
+                    pname,
+                    t.get("description").and_then(|x| x.as_str()).unwrap_or_else(|| t.get("title").and_then(|x| x.as_str()).unwrap_or(tid))
+                );
+                let schema = match t.get("type").and_then(|x| x.as_str()) {
+                    Some("kb-search") => json!({
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "检索关键词" },
+                            "limit": { "type": "integer", "description": "返回条数（默认 5）" }
+                        },
+                        "required": ["query"]
+                    }),
+                    _ => {
+                        // http：args 声明 → JSON schema
+                        let mut props = serde_json::Map::new();
+                        let mut required = Vec::new();
+                        if let Some(a) = t.get("args").and_then(|x| x.as_object()) {
+                            for (k, v) in a {
+                                props.insert(k.clone(), v.clone());
+                                if v.get("required").and_then(|x| x.as_bool()) == Some(true) {
+                                    required.push(json!(k));
+                                }
+                            }
+                        }
+                        json!({ "type": "object", "properties": props, "required": required })
+                    }
+                };
+                out.push((name, desc, schema));
+            }
+        }
+        out
+    }
+
+    pub fn plugin_tools_for_llm(&self) -> Vec<Value> {
+        self.plugin_tools()
+            .into_iter()
+            .map(|(name, desc, schema)| json!({
+                "type": "function",
+                "function": { "name": name, "description": desc, "parameters": schema }
+            }))
+            .collect()
+    }
+
+    fn plugin_tool_audit(&self, line: Value) {
+        let Some(dir) = self.plugins_dir() else { return };
+        let ev = dir.join("..").join("events");
+        let _ = std::fs::create_dir_all(&ev);
+        let mut s = line.to_string();
+        s.push('\n');
+        let _ = std::fs::OpenOptions::new().create(true).append(true).open(ev.join("plugin-tools.jsonl")).and_then(|mut f| std::io::Write::write_all(&mut f, s.as_bytes()));
+    }
+
+    /// 执行插件工具（宿主代执行；声明式，不运行插件代码）。
+    pub fn call_plugin_tool(&self, name: &str, args: Value) -> Result<Value, String> {
+        let mut hit: Option<(String, Value)> = None; // (plugin_id, tool json)
+        'outer: {
+            let Some(dir) = self.plugins_dir() else { break 'outer };
+            let installed = self.plugin_installed();
+            let Ok(rd) = std::fs::read_dir(&dir) else { break 'outer };
+            for e in rd.filter_map(|e| e.ok()) {
+                let pdir = e.path();
+                if !pdir.is_dir() { continue }
+                let Ok(mraw) = std::fs::read_to_string(pdir.join("manifest.json")) else { continue };
+                let Ok(m) = serde_json::from_str::<Value>(&mraw) else { continue };
+                let pid = m.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let Some(st) = installed.get(&pid) else { continue };
+                if st.get("enabled").and_then(|x| x.as_bool()) != Some(true) { continue }
+                let overrides = st.get("tools").and_then(|x| x.as_object()).cloned().unwrap_or_default();
+                let Some(tools) = m.get("contributions").and_then(|c| c.get("tools")).and_then(|x| x.as_array()) else { continue };
+                for t in tools {
+                    let tid = t.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                    if format!("{PLUGIN_TOOL_PREFIX}{pid}_{tid}") == name
+                        && overrides.get(tid).and_then(|x| x.as_bool()) != Some(false)
+                    {
+                        hit = Some((pid.clone(), t.clone()));
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        let Some((pid, tool)) = hit else {
+            return Err(format!("未知或已停用的插件工具：{name}"));
+        };
+        let ttype = tool.get("type").and_then(|x| x.as_str()).unwrap_or("http").to_string();
+        let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let result = match ttype.as_str() {
+            "kb-search" => self.plugin_tool_kb_search(&args),
+            "http" => self.plugin_tool_http(&args, &tool),
+            other => Err(format!("不支持的插件工具类型：{other}")),
+        };
+        let ok = result.is_ok();
+        self.plugin_tool_audit(json!({
+            "ts": started, "plugin": pid, "tool": name, "type": ttype, "ok": ok,
+            "args": args,
+        }));
+        result
+    }
+
+    fn plugin_tool_kb_search(&self, args: &Value) -> Result<Value, String> {
+        let query = args.get("query").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        if query.is_empty() {
+            return Err("缺少 query".into());
+        }
+        let limit = args.get("limit").and_then(|x| x.as_u64()).unwrap_or(5).clamp(1, 20) as usize;
+        let hits = self
+            .with_kernel(|k| k.search(&query).map_err(|e| anyhow::anyhow!(e)))
+            .map_err(|(_, m)| m)?
+            .into_iter()
+            .take(limit)
+            .collect::<Vec<_>>();
+        Ok(json!({ "query": query, "hits": hits.iter().map(|(p, r)| json!({ "path": p, "rank": r })).collect::<Vec<_>>() }))
+    }
+
+    fn plugin_tool_http(&self, args: &Value, tool: &Value) -> Result<Value, String> {
+        let raw_url = tool.get("url").and_then(|x| x.as_str()).unwrap_or("");
+        if !raw_url.starts_with("http://") && !raw_url.starts_with("https://") {
+            return Err("url 必须是 http(s)".into());
+        }
+        // 模板替换：{key} → urlencoded(args[key])
+        let mut url = raw_url.to_string();
+        let mut body_extra = serde_json::Map::new();
+        if let Some(a) = args.as_object() {
+            for (k, v) in a {
+                let placeholder = format!("{{{k}}}");
+                let textval = match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                if url.contains(&placeholder) {
+                    url = url.replace(&placeholder, &urlencode(&textval));
+                } else {
+                    body_extra.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        // 收集未被替换的 {占位符}
+        let missing: Vec<String> = {
+            let mut v = Vec::new();
+            let mut rest = url.as_str();
+            while let Some(i) = rest.find('{') {
+                if let Some(j) = rest[i..].find('}') {
+                    v.push(rest[i + 1..i + j].to_string());
+                    rest = &rest[i + j + 1..];
+                } else { break }
+            }
+            v.retain(|p| !p.is_empty());
+            v
+        };
+        if !missing.is_empty() {
+            return Err(format!("url 存在未提供的参数：{}", missing.join(", ")));
+        }
+        if url.len() > 2000 {
+            return Err("url 过长".into());
+        }
+        ssrf_guard(&url)?;
+        let method = tool.get("method").and_then(|x| x.as_str()).unwrap_or("GET").to_uppercase();
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("thirdc-plugin-tool")
+            .timeout(std::time::Duration::from_secs(10))
+            .build().map_err(|e| e.to_string())?;
+        let mut req = match method.as_str() {
+            "POST" => {
+                let mut body = tool.get("body").cloned().unwrap_or(json!({}));
+                if let Some(bm) = body.as_object_mut() {
+                    for (k, v) in body_extra.clone() { bm.insert(k, v); }
+                }
+                client.post(&url).json(&body)
+            }
+            _ => client.get(&url),
+        };
+        if let Some(hdrs) = tool.get("headers").and_then(|x| x.as_object()) {
+            for (k, v) in hdrs {
+                if let (Some(k), Some(vs)) = (Some(k.as_str()), v.as_str()) {
+                    req = req.header(k.to_string(), vs.to_string());
+                }
+            }
+        }
+        let resp = req.send().map_err(|e| format!("请求失败：{e}"))?;
+        let status = resp.status();
+        let text = resp.text().map_err(|e| e.to_string())?;
+        let truncated: String = text.chars().take(1500).collect();
+        if !status.is_success() {
+            return Err(format!("HTTP {status}：{truncated}"));
+        }
+        Ok(json!({ "status": status.as_u16(), "text": truncated, "truncated": text.chars().count() > 1500 }))
+    }
+}
+
+/// 极简 percent-encoding（保留 RFC3986 unreserved）。
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(*b as char),
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+/// SSRF 防护：拒绝内网 / 回环目标。
+fn ssrf_guard(url: &str) -> Result<(), String> {
+    let host = url
+        .strip_prefix("https://").or_else(|| url.strip_prefix("http://"))
+        .and_then(|r| r.split('/').next())
+        .and_then(|h| h.rsplit('@').next())
+        .and_then(|h| h.split(':').next())
+        .unwrap_or("")
+        .trim_start_matches('[')
+        .to_lowercase();
+    let blocked = host.is_empty()
+        || host == "localhost" || host.ends_with(".localhost") || host == "::1" || host == "0.0.0.0"
+        || host.starts_with("127.") || host.starts_with("10.")
+        || host.starts_with("192.168.") || host.starts_with("169.254.");
+    if blocked {
+        return Err(format!("禁止访问内网地址：{host}"));
+    }
+    let octets: Vec<&str> = host.split('.').collect();
+    if octets.len() == 4 && octets.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+        if let (Ok(a), Ok(b)) = (octets[0].parse::<u8>(), octets[1].parse::<u8>()) {
+            if a == 172 && (16..=31).contains(&b) {
+                return Err(format!("禁止访问内网地址：{host}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub mod agent {
     use crate::McpServer;
     use kernel_core::AiConfig;
