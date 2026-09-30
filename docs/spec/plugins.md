@@ -1,4 +1,4 @@
-# 插件系统规范（v0）
+# 插件系统规范（v0 + v1 视图已上线）
 
 > 设计参照：**Obsidian**（清单式 manifest、库内目录、启停管理、社区分发）× **Agent harness 工具思路**（能力声明、宿主注入、最小权限）。
 > 原则延续本仓库契约：**文件真相**（插件落盘为普通目录）、**入口唯一家**（Widget 工具区 + 插件面板）、**无构建步骤**。
@@ -68,9 +68,30 @@
 | 阶段 | 能力 | 边界 |
 |---|---|---|
 | **v0（已上线）** | 声明式命令（snippet / url / http-post） | 插件代码不执行；tarball 25MB、解压 50MB 上限；manifest 字段白名单；`id` 防路径穿越 |
-| **v1** | 视图扩展：插件自带 HTML 片段渲染进专用 iframe 沙箱（同 A2UI 的 postMessage RPC 模式），可读当前文档文本、写入光标 | 无网络白名单不出；iframe `sandbox` 无同源；宿主 API 面按能力逐项授予（obsidian 式 `permissions` 字段，装前展示） |
+| **v1（已上线）** | 视图扩展：`contributions.views` 声明 HTML 入口，经 `/plugins/view/{id}/{file}` 服务（宿主注入 RPC 垫片 `window.thirdc.*`），专用沙箱 iframe 渲染（`sandbox` 无同源——父页面与插件互不可达，实测合成点击也无法穿透）。RPC：`getDocument / insertText / saveDocument / toast / setViewTitle`，宿主按 manifest `permissions` 逐项校验（`doc:read` / `doc:write` / `editor:insert`），装前面板展示权限 | RPC 校验失败一律拒绝并回报原因；插件文件静态供给（防路径穿越）；无任意代码执行面 |
 | **v2** | Agent 工具贡献：`contributions.tools` 注册为内核工具（agent 工具循环可见，同 harness 思路——能力即声明，宿主注入执行） | 每工具独立开关；审计进 `events/` |
 | **v3** | 社区索引：官方 JSON 注册表（仓库地址 + 审核标记），插件面板内一键浏览安装（Obsidian 社区插件模式） |
+
+### 视图 manifest 示例
+
+```json
+"permissions": ["doc:read", "editor:insert"],
+"contributions": {
+  "views": [
+    { "id": "panel", "title": "速记面板", "entry": "view.html", "permissions": ["doc:read", "editor:insert"] }
+  ]
+}
+```
+
+插件页面内直接调用（垫片已注入）：
+
+```js
+const doc = await thirdc.getDocument();      // 需 doc:read
+await thirdc.insertText('文本');              // 需 editor:insert
+await thirdc.saveDocument(markdown);          // 需 doc:write
+await thirdc.toast('提示');                   // 恒可用
+await thirdc.setViewTitle('新标题');           // 恒可用
+```
 
 ## 六、测试与验收
 

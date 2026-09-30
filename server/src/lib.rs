@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v35';
+const SHELL = 'thirdc-shell-v36';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -230,6 +230,7 @@ self.addEventListener('fetch', e => {
         .route("/plugins/install", post(plugins_install))
         .route("/plugins/toggle", post(plugins_toggle))
         .route("/plugins/remove", post(plugins_remove))
+        .route("/plugins/view/{id}/{file}", get(plugins_view_file))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -4652,6 +4653,8 @@ async fn plugins_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl Int
                     "author": m.get("author").cloned().unwrap_or(json!("")),
                     "homepage": m.get("homepage").cloned().unwrap_or(json!("")),
                     "commands": m.get("contributions").and_then(|c| c.get("commands")).cloned().unwrap_or(json!([])),
+                    "views": m.get("contributions").and_then(|c| c.get("views")).cloned().unwrap_or(json!([])),
+                    "permissions": m.get("permissions").cloned().unwrap_or(json!([])),
                     "enabled": state.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false),
                     "installedAt": state.get("installedAt").cloned().unwrap_or(json!(null)),
                 }));
@@ -4806,6 +4809,92 @@ async fn plugins_remove(State(st): State<Arc<AppState>>, h: HeaderMap, body: Byt
     map.remove(&name);
     write_installed(&root, &map);
     Json(json!({ "ok": true })).into_response()
+}
+
+/* ── 插件视图（v1）：manifest.contributions.views 声明的 HTML 经沙箱 iframe 渲染，
+      宿主注入 RPC 垫片，按 manifest.permissions 逐项授权（doc:read / doc:write / editor:insert） ── */
+
+const PLUGIN_VIEW_SHIM: &str = r#"<script>
+(function(){
+  var seq=0,pending={};
+  function rpc(call,args){
+    return new Promise(function(res,rej){
+      var id=++seq;pending[id]={res:res,rej:rej};
+      parent.postMessage({source:'thirdc-plugin',call:call,id:id,args:args||{}},'*');
+      setTimeout(function(){if(pending[id]){delete pending[id];rej(new Error('host timeout'))}},8000);
+    });
+  }
+  window.thirdc={
+    getDocument:function(){return rpc('getDocument')},
+    insertText:function(t){return rpc('insertText',{text:String(t==null?'':t)})},
+    saveDocument:function(md){return rpc('saveDocument',{markdown:String(md==null?'':md)})},
+    toast:function(m){return rpc('toast',{message:String(m==null?'':m)})},
+    setViewTitle:function(t){return rpc('setViewTitle',{title:String(t==null?'':t)})}
+  };
+  addEventListener('message',function(e){
+    var d=e.data||{};
+    if(d.source==='thirdc-host'&&pending[d.id]){pending[d.id][d.ok?'res':'rej'](d.ok?d.result:new Error(d.error||'host error'));delete pending[d.id];}
+  });
+})();
+</script>"#;
+
+fn plugin_content_type(file: &str) -> &'static str {
+    let ext = file.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "md" | "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn plugins_view_file(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    axum::extract::Path((id, file)): axum::extract::Path<(String, String)>,
+) -> impl IntoResponse {
+    // iframe src 带不了 header：query token 兜底（与前端 asset-file 的 ?token= 用法一致）
+    if check_token(&st, &h).is_err() && q.get("token").map(|t| t != &st.token).unwrap_or(true) {
+        return err(StatusCode::UNAUTHORIZED, "invalid or missing token").into_response();
+    }
+    if id.is_empty() || id.contains('/') || id.contains("..") || file.is_empty() || file.contains("..") || file.contains('\\') {
+        return err(StatusCode::BAD_REQUEST, "无效路径").into_response();
+    }
+    let root = { st.kernel.lock().unwrap().vault.root.clone() };
+    let base = plugins_root(&root).join(&id);
+    if !base.is_dir() {
+        return err(StatusCode::NOT_FOUND, "插件不存在").into_response();
+    }
+    let path = base.join(&file);
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let ct = plugin_content_type(&file);
+            if file.ends_with(".html") || file.ends_with(".htm") {
+                // HTML 入口：注入 RPC 垫片（<head> 后，或文档最前）
+                let html = String::from_utf8_lossy(&bytes).into_owned();
+                let shimmed = if let Some(i) = html.to_lowercase().find("<head>") {
+                    let split = i + "<head>".len();
+                    format!("{}{}{}", &html[..split], PLUGIN_VIEW_SHIM, &html[split..])
+                } else {
+                    format!("{}{}", PLUGIN_VIEW_SHIM, html)
+                };
+                ([(axum::http::header::CONTENT_TYPE, ct.to_string())], shimmed).into_response()
+            } else {
+                ([(axum::http::header::CONTENT_TYPE, ct.to_string())], bytes).into_response()
+            }
+        }
+        Err(_) => err(StatusCode::NOT_FOUND, "文件不存在").into_response(),
+    }
 }
 
 async fn desktop_import(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {

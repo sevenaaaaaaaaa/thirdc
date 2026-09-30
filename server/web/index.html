@@ -1112,6 +1112,16 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   </div>
 </div></div>
 
+<div id="plugview-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
+<div style="width:min(560px,94vw);height:min(640px,88vh);display:flex;flex-direction:column;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)">
+    <span class="badge ok">插件视图</span><b id="plugview-title" style="font-family:var(--font-display);flex:1"></b>
+    <button class="icon-btn" id="plugview-close" title="关闭 (Esc)">✕</button>
+  </div>
+  <iframe id="plugview-frame" sandbox="allow-scripts allow-forms allow-modals" style="flex:1;border:none;background:var(--bg)" title="插件视图"></iframe>
+</div>
+</div>
+
 <div class="toc-line" id="toc-line"></div>
 <div id="gitpanel">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -3018,6 +3028,7 @@ function closeTopFloat(){
   if(mode==='learn'){setMode('studio');return true;}
   if(floatOpen('acct-ov')){closeFloat('acct-ov');restoreOverlayFocus();return true;}
   if(floatOpen('term-ov')){closeFloat('term-ov');restoreOverlayFocus();return true;}
+  if($('plugview-ov')&&$('plugview-ov').style.display==='grid'){closePluginView();return true;}
   if(floatOpen('settings-ov')){closeFloat('settings-ov');restoreOverlayFocus();return true;}
   if(floatOpen('share-overlay')){closeFloat('share-overlay');return true;}
   if(floatOpen('cal-ov')){closeFloat('cal-ov');return true;}
@@ -3808,14 +3819,24 @@ async function renderPluginsWidget(){
     const r=await api('/plugins');
     const on=(r.plugins||[]).filter(p=>p.enabled);
     box.innerHTML='';
-    on.forEach(p=>(p.commands||[]).forEach(c=>{
-      if(!c||!c.title)return;
-      const b=document.createElement('button');
-      b.className='rw-plug-cmd';b.title=c.description||c.id||'';
-      b.textContent=`${p.name} · ${c.title}`;
-      b.onclick=()=>runPluginCommand(p,c);
-      box.appendChild(b);
-    }));
+    on.forEach(p=>{
+      (p.commands||[]).forEach(c=>{
+        if(!c||!c.title)return;
+        const b=document.createElement('button');
+        b.className='rw-plug-cmd';b.title=c.description||c.id||'';
+        b.textContent=`${p.name} · ${c.title}`;
+        b.onclick=()=>runPluginCommand(p,c);
+        box.appendChild(b);
+      });
+      (p.views||[]).forEach(v=>{
+        if(!v||!v.title)return;
+        const b=document.createElement('button');
+        b.className='rw-plug-cmd';b.title=(v.permissions||[]).length?('权限：'+v.permissions.join(' / ')):'';
+        b.textContent=`🖼 ${p.name} · ${v.title}`;
+        b.onclick=()=>openPluginView(p,v);
+        box.appendChild(b);
+      });
+    });
     const mgmt=document.createElement('button');
     mgmt.className='rw-plug-mgmt';
     mgmt.textContent=on.length?'⚙ 管理插件':'＋ 从 GitHub 安装插件';
@@ -3823,6 +3844,67 @@ async function renderPluginsWidget(){
     box.appendChild(mgmt);
   }catch(e){box.innerHTML='<div class="rm-empty">插件列表加载失败</div>'}
 }
+
+/* ── 插件视图（v1）：沙箱 iframe + postMessage RPC，权限按 manifest 逐项校验 ── */
+let plugViewCtx=null;   // { pluginId, viewId, permissions:Set }
+const PLUGIN_VIEW_PERMS={
+  'doc:read':'读取当前文档内容',
+  'doc:write':'保存修改当前文档',
+  'editor:insert':'向编辑器光标处插入文字',
+};
+function plugViewHasPerm(perm){return !!(plugViewCtx&&plugViewCtx.permissions.has(perm));}
+function openPluginView(p,v){
+  plugViewCtx={pluginId:p.id,viewId:v.id||v.title,permissions:new Set(v.permissions||[])};
+  $('plugview-title').textContent=`${p.name} · ${v.title}`;
+  $('plugview-frame').src=`/plugins/view/${encodeURIComponent(p.id)}/${encodeURIComponent(v.entry||'view.html')}?token=${encodeURIComponent(token||'')}`;
+  $('plugview-ov').style.display='grid';
+}
+function closePluginView(){
+  $('plugview-ov').style.display='none';
+  $('plugview-frame').src='about:blank';
+  plugViewCtx=null;
+}
+$('plugview-close')&&($('plugview-close').onclick=closePluginView);
+addEventListener('message',e=>{
+  const d=e.data||{};
+  if(d.source!=='thirdc-plugin')return;
+  const frame=$('plugview-frame');
+  if(!plugViewCtx||!frame||e.source!==frame.contentWindow)return;
+  const reply=(ok,result,error)=>{try{e.source.postMessage({source:'thirdc-host',id:d.id,ok,result,error},'*')}catch{}};
+  const deny=()=>reply(false,null,`无权限：${d.call}（manifest 需声明对应 permissions）`);
+  (async()=>{
+    switch(d.call){
+      case 'getDocument':{
+        if(!plugViewHasPerm('doc:read'))return deny();
+        if(!current)return reply(false,null,'当前没有打开的文档');
+        return reply(true,{path:current,title:(document.getElementById('d-path')?.textContent||'').split('  ·  ')[0],markdown:$('editor').value});
+      }
+      case 'insertText':{
+        if(!plugViewHasPerm('editor:insert'))return deny();
+        if(!current)return reply(false,null,'当前没有打开的文档');
+        const ed=$('editor');
+        const pos=ed.selectionStart??ed.value.length;
+        const text=d.args.text||'';
+        ed.value=ed.value.slice(0,pos)+text+ed.value.slice(ed.selectionEnd??pos);
+        dirty=true;
+        ed.dispatchEvent(new Event('input',{bubbles:true}));
+        return reply(true,{at:pos});
+      }
+      case 'saveDocument':{
+        if(!plugViewHasPerm('doc:write'))return deny();
+        if(!current)return reply(false,null,'当前没有打开的文档');
+        await api('/doc?path='+encodeURIComponent(current),{method:'PUT',body:d.args.markdown||'',headers:{'content-type':'text/markdown'}});
+        const dd=await api('/doc?path='+encodeURIComponent(current));
+        $('preview').srcdoc=currentFormat==='text'?codeViewHtml($('editor').value,(current.split('.').pop()||'').toLowerCase()):dd.html;
+        loadStatus().catch(()=>{});
+        return reply(true,{saved:current});
+      }
+      case 'toast':return (toast(d.args.message||'','ok'),reply(true,{}));
+      case 'setViewTitle':return ($('plugview-title').textContent=$('plugview-title').textContent.split(' · ')[0]+' · '+(d.args.title||''),reply(true,{}));
+      default:return reply(false,null,'未知调用：'+d.call);
+    }
+  })().catch(err=>reply(false,null,err.message));
+});
 async function runPluginCommand(p,c){
   try{
     if(c.type==='open-url'){window.open(c.payload,'_blank');}
@@ -3850,7 +3932,9 @@ async function renderPluginsPanel(){
       const el=document.createElement('div');el.className='conn-item';
       el.innerHTML=`<div class="t"></div>
         <button class="act" data-toggle>${p.enabled?'停用':'启用'}</button><button class="act danger" data-del>删除</button>`;
-      el.querySelector('.t').innerHTML=`${p.name} <span class="h" style="font-family:var(--font-mono);font-size:10px">v${p.version}</span><div class="h">${p.description||''}</div>`;
+      const perms=(p.permissions||[]).map(x=>PLUGIN_VIEW_PERMS[x]||x);
+      el.querySelector('.t').innerHTML=`${p.name} <span class="h" style="font-family:var(--font-mono);font-size:10px">v${p.version}</span><div class="h">${p.description||''}</div>`
+        +(perms.length?`<div class="h" style="color:var(--warn)">权限：${perms.join(' / ')}</div>`:'');
       el.querySelector('[data-toggle]').onclick=async()=>{await api('/plugins/toggle',{method:'POST',json:{name:p.id,enabled:!p.enabled}});renderPluginsPanel();renderPluginsWidget();};
       el.querySelector('[data-del]').onclick=async()=>{
         if(!(await uiConfirm(`删除插件 ${p.name}？`,{ok:'删除'})))return;
