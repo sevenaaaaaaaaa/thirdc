@@ -958,6 +958,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
           <button id="rt-cal" title="整月内容日历">📅<span>日历</span></button>
           <button id="rt-trash" title="已删除文档可恢复">🗑<span>回收站</span></button>
           <button id="rt-road" title="功能可见性契约">🗺<span>路线图</span></button>
+          <button id="rt-matrix" title="芭乐派产品矩阵：Conflow / WebsFlow / PayFlow / InFlow">🌐<span>生态矩阵</span></button>
         </div>
         <div class="rw-plug-head">插件</div>
         <div id="rw-plugins"></div>
@@ -1132,8 +1133,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <div class="panel-body road" id="road-list"></div>
 </div></div>
 
-<div class="overlay" id="plugins-ov"><div class="panel">
-  <div class="panel-head"><h3>插件</h3><span class="badge plan">GitHub 导入 · 声明式命令</span><button class="icon-btn" data-close="plugins-ov" title="关闭" aria-label="关闭插件面板">✕</button></div>
+<div class="overlay" id="plugins-ov"><div class="panel">  <div class="panel-head"><h3>插件</h3><span class="badge plan">GitHub 导入 · 声明式命令</span><button class="icon-btn" data-close="plugins-ov" title="关闭" aria-label="关闭插件面板">✕</button></div>
   <div class="panel-body">
     <div style="display:flex;gap:6px;margin-bottom:12px">
       <input class="inp" id="plugin-install-url" placeholder="https://github.com/owner/repo（根或一层子目录含 manifest.json）" style="margin:0;flex:1">
@@ -1144,6 +1144,11 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 
 <div class="peers-pop" id="peers-pop"></div>
+
+<div class="overlay" id="matrix-ov"><div class="panel" style="width:min(680px,94vw)">
+  <div class="panel-head"><h3>生态矩阵</h3><span class="badge plan">芭乐派产品矩阵</span><button class="icon-btn" data-close="matrix-ov" title="关闭" aria-label="关闭生态矩阵">✕</button></div>
+  <div class="panel-body" id="matrix-list"></div>
+</div></div>
 
 <div class="overlay" id="comments-ov"><div class="panel">
   <div class="panel-head"><h3>评论</h3><span class="badge plan" id="cm-doc"></span><button class="icon-btn" data-close="comments-ov" title="关闭" aria-label="关闭评论面板">✕</button></div>
@@ -2777,6 +2782,8 @@ const ROAD=[
   ['时间线 / 看板透镜','同一画布切换排布方式','plan'],
   ['协作光标','画布 + 文档内光标/选区、在线列表、选区锚定评论','ok'],
   ['插件系统','manifest + GitHub 安装；命令 / 沙箱视图 / agent 工具贡献','ok'],
+  ['社区索引','官方 registry 浏览 + 一键安装','ok'],
+  ['生态矩阵','Conflow / WebsFlow / PayFlow / InFlow 接入框架','plan'],
   ['连接器管理','MCP 连接健康度、采集调度','plan'],
   ['发布目标','对象存储 / GitHub Pages / 国内合规钩子','plan'],
 ];
@@ -4045,6 +4052,67 @@ $('rt-design')&&($('rt-design').onclick=()=>openDesign());
 $('rt-cal')&&($('rt-cal').onclick=()=>openCalendar());
 $('rt-trash')&&($('rt-trash').onclick=()=>openTrash());
 $('rt-road')&&($('rt-road').onclick=()=>{renderRoad();openOverlay('road-ov')});
+$('rt-matrix')&&($('rt-matrix').onclick=()=>openMatrix());
+
+/* ── 生态矩阵（芭乐派产品矩阵）：接入方式声明 + 配置指引 + 连接检测 ── */
+const MATRIX=[
+  { id:'openflow', name:'OpenFlow', emoji:'📊', role:'图表与架构流——知识库画布与架构图互导', status:'live',
+    how:'设计契约同源（oklch · 弹簧缓动 · 玻璃拟态），设计规范经「设计规范」面板互通；架构图生成走 MCP 连接器。',
+    cfg:'[[connections]]\nname = "openflow"\ncommand = "openflow"\nargs = ["mcp"]' },
+  { id:'conflow', name:'Conflow', emoji:'💬', role:'对话流——把 Agent 对话沉淀为可检索知识', status:'planned',
+    how:'发布后经 MCP 连接器接入，对话记录自动采集入库。',
+    cfg:'[[connections]]\nname = "conflow"\ncommand = "conflow"\nargs = ["mcp"]' },
+  { id:'websflow', name:'WebsFlow', emoji:'🕸️', role:'网页流——批量网页采集与本地化', status:'planned',
+    how:'MCP 连接器接入后，资源批量拉取入库（同连接器「采集」）。',
+    cfg:'[[connections]]\nname = "websflow"\ncommand = "websflow"\nargs = ["serve"]' },
+  { id:'payflow', name:'PayFlow', emoji:'💰', role:'变现流——知识内容的商业化分发', status:'planned',
+    how:'以插件工具（type: http）接入支付/分发 API，agent 可直接调用。',
+    cfg:'# PayFlow 发布后，做一个带 tools 的插件即可接入：\n# { "type": "http", "url": "https://your.payflow.api/{order}" }' },
+  { id:'inflow', name:'InFlow', emoji:'🌊', role:'采集流——本机输入流与三方同步', status:'planned',
+    how:'桌面端已开放本机采集端口（127.0.0.1:7717 + Token），InFlow 直连即可。',
+    cfg:'# InFlow → 桌面端本机接口\n# POST http://127.0.0.1:7717/asset  (x-thirdc-token)' },
+];
+async function openMatrix(){
+  openOverlay('matrix-ov');
+  let connNames=[];
+  try{ connNames=((await api('/connections')).connections||[]).map(c=>c.name); }catch{}
+  const box=$('matrix-list');box.innerHTML='';
+  MATRIX.forEach(m=>{
+    const configured=m.connect==='mcp'&&connNames.includes(m.id);
+    const stBadge=m.status==='live'?'<span class="badge ok">已互通</span>':configured?'<span class="badge ok">已连接</span>':'<span class="badge plan">规划中</span>';
+    const el=document.createElement('div');el.className='conn-item';el.style.flexWrap='wrap';
+    el.innerHTML=`<div class="t" style="flex:1 1 100%"><span style="font-size:15px">${m.emoji}</span> <b>${m.name}</b> ${stBadge}
+      <div class="h" style="font-size:12px;color:var(--fg);margin-top:2px">${m.role}</div>
+      <div class="h" style="margin-top:4px">${m.how}</div>
+      <pre style="margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg-soft);border:1px solid var(--border);font:10.5px/1.6 var(--font-mono);white-space:pre-wrap;user-select:all">${m.cfg}</pre></div>
+      <div style="display:flex;gap:6px;flex:1 1 100%;margin-top:8px">
+        <button class="act" data-copy style="height:28px">📋 复制配置</button>
+        ${m.connect==='mcp'?'<button class="act" data-check style="height:28px">检测连接</button>':''}
+      </div>`;
+    el.querySelector('[data-copy]').onclick=async ev=>{
+      ev.stopPropagation();
+      try{await navigator.clipboard.writeText(m.cfg);toast('配置已复制——粘贴到 thirdc.toml','ok')}catch(e){toast('复制失败','err')}
+    };
+    const chk=el.querySelector('[data-check]');
+    if(chk)chk.onclick=async ev=>{
+      ev.stopPropagation();
+      chk.disabled=true;chk.textContent='检测中…';
+      try{
+        const names=((await api('/connections')).connections||[]).map(c=>c.name);
+        if(!names.includes(m.id)){toast('thirdc.toml 里还没有 '+m.id+' 的连接','err')}
+        else{
+          const pr=await api('/conn/probe',{method:'POST',json:{name:m.id}});
+          toast(m.id+' 在线：'+(pr.tools||[]).length+' 个工具','ok');
+        }
+      }catch(e){toast('检测失败：'+e.message,'err')}
+      chk.disabled=false;chk.textContent='检测连接';
+    };
+    box.appendChild(el);
+  });
+  const tip=document.createElement('div');tip.className='dv-meta';
+  tip.textContent='矩阵产品经 MCP 连接器或插件工具两种协议接入；状态由各产品发布节奏决定，接入框架（连接器 / 插件工具 / 本机采集端口）已就绪。';
+  box.appendChild(tip);
+}
 
 /* ── 插件（Obsidian 式 manifest + GitHub 链接安装；命令为声明式，不执行插件代码） ── */
 async function renderPluginsWidget(){
@@ -4191,7 +4259,38 @@ async function renderPluginsPanel(){
       };
       list.appendChild(el);
     });
+    renderPluginIndex(list);
   }catch(e){list.innerHTML='<div class="dv-meta">加载失败：'+e.message+'</div>'}
+}
+/* 社区索引（v3）：官方 registry 浏览 + 一键安装 */
+async function renderPluginIndex(list){
+  let idx;
+  try{ idx=await fetch(BASE+'/plugin-index').then(r=>r.json()); }catch{ return }
+  const installedIds=new Set((await api('/plugins').catch(()=>({plugins:[]}))).plugins.map(p=>p.id));
+  const sec=document.createElement('div');
+  sec.innerHTML=`<div class="rw-plug-head" style="margin-top:14px">社区索引 · 官方 registry</div>`;
+  list.appendChild(sec);
+  (idx.plugins||[]).forEach(p=>{
+    const done=installedIds.has(p.id);
+    const el=document.createElement('div');el.className='conn-item';
+    el.innerHTML=`<div class="t"></div><button class="act" data-inst style="height:28px">${done?'已安装':'安装'}</button>`;
+    el.querySelector('.t').innerHTML=`${p.name} ${p.verified?'<span class="badge ok" style="height:18px;font-size:9px">已验证</span>':''} <span class="h" style="font-family:var(--font-mono);font-size:10px">${p.repo}${p.path?'/'+p.path:''}</span><div class="h">${p.description||''}</div>`
+      +((p.tags||[]).length?`<div class="h">${p.tags.map(t=>'#'+t).join(' ')}</div>`:'');
+    const btn=el.querySelector('[data-inst]');
+    btn.onclick=async()=>{
+      if(done)return;
+      btn.disabled=true;btn.textContent='安装中…';
+      try{
+        const rr=await api('/plugins/install',{method:'POST',json:{url:'https://github.com/'+p.repo,path:p.path||''}});
+        toast('已安装：'+(rr.installed||[]).join(', '),'ok');
+        renderPluginsPanel();renderPluginsWidget();
+      }catch(e){toast('安装失败：'+e.message,'err');btn.disabled=false;btn.textContent='安装';}
+    };
+    list.appendChild(el);
+  });
+  const tip=document.createElement('div');tip.className='dv-meta';
+  tip.textContent='收录你的插件：向本仓库提交 PR 修改 plugin-index.json（repo + path，目录含 manifest.json 即可）。';
+  list.appendChild(tip);
 }
 $('plugin-install-go')&&($('plugin-install-go').onclick=async()=>{
   const url=$('plugin-install-url').value.trim();if(!url)return;

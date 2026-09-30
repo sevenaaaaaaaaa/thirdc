@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
         .route("/sw.js", get(|| async {
     const SW: &str = r#"
-const SHELL = 'thirdc-shell-v38';
+const SHELL = 'thirdc-shell-v39';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -232,6 +232,9 @@ self.addEventListener('fetch', e => {
         .route("/plugins/toggle", post(plugins_toggle))
         .route("/plugins/remove", post(plugins_remove))
         .route("/plugins/view/{id}/{file}", get(plugins_view_file))
+        .route("/plugin-index", get(|| async {
+            ([("cache-control", "public, max-age=300")], include_str!("../web/plugin-index.json"))
+        }))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -4677,7 +4680,7 @@ async fn put_ui_state(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
 }
 
 /* ───────── 插件（Obsidian 式清单 + GitHub 链接安装；v0 仅声明式命令，不执行插件代码） ───────── */
-const PLUGIN_TARBALL_MAX: u64 = 25 * 1024 * 1024;
+const PLUGIN_TARBALL_MAX: u64 = 50 * 1024 * 1024;
 const PLUGIN_TREE_MAX: u64 = 50 * 1024 * 1024;
 
 fn plugins_root(root: &std::path::Path) -> std::path::PathBuf {
@@ -4740,8 +4743,8 @@ async fn plugins_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl Int
     Json(json!({ "plugins": plugins })).into_response()
 }
 
-/// GitHub 仓库 → (api tarball url)。支持 …/tree/<branch>[/<subdir>] 指定分支与子目录。
-fn parse_github_repo(url: &str) -> Option<(String, String, Option<String>)> {
+/// GitHub 仓库 → (api tarball url, 可选子目录)。支持 …/tree/<branch>[/sub/dir]。
+fn parse_github_repo(url: &str) -> Option<(String, String, Option<String>, Option<String>)> {
     let u = url.trim().trim_end_matches('/');
     let rest = u.strip_prefix("https://github.com/").or_else(|| u.strip_prefix("http://github.com/"))?;
     let mut it = rest.split('/');
@@ -4749,10 +4752,15 @@ fn parse_github_repo(url: &str) -> Option<(String, String, Option<String>)> {
     let repo = it.next()?.trim_end_matches(".git").to_string();
     if owner.is_empty() || repo.is_empty() { return None; }
     let mut branch = None;
+    let mut subdir = None;
     if it.next() == Some("tree") {
         branch = it.next().map(|s| s.to_string());
+        let rest_path: Vec<&str> = it.collect();
+        if !rest_path.is_empty() {
+            subdir = Some(rest_path.join("/"));
+        }
     }
-    Some((owner, repo, branch))
+    Some((owner, repo, branch, subdir))
 }
 
 async fn plugins_install(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
@@ -4762,10 +4770,12 @@ async fn plugins_install(State(st): State<Arc<AppState>>, h: HeaderMap, body: By
         Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
     };
     let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
-    let (owner, repo, branch) = match parse_github_repo(&url) {
+    let req_path = req.get("path").and_then(|u| u.as_str()).unwrap_or("").trim_matches('/').to_string();
+    let (owner, repo, branch, url_subdir) = match parse_github_repo(&url) {
         Some(v) => v,
         None => return err(StatusCode::BAD_REQUEST, "需要 GitHub 仓库链接（https://github.com/owner/repo）").into_response(),
     };
+    let subdir = if req_path.is_empty() { url_subdir } else { Some(req_path) };
     let api_url = match &branch {
         Some(b) => format!("https://api.github.com/repos/{owner}/{repo}/tarball/refs/heads/{b}"),
         None => format!("https://api.github.com/repos/{owner}/{repo}/tarball"),
@@ -4801,10 +4811,22 @@ async fn plugins_install(State(st): State<Arc<AppState>>, h: HeaderMap, body: By
             if e.path().is_dir() { top = Some(e.path()); break; }
         }
         let top = top.ok_or("压缩包为空")?;
+        // 定位插件目录：显式 path > 根 > 一层子目录（兼容多插件仓库）
+        let base = match &subdir {
+            Some(sp) => {
+                let bp = top.join(sp);
+                if !bp.is_dir() {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    return Err(format!("仓库内未找到目录：{sp}"));
+                }
+                bp
+            }
+            None => top.clone(),
+        };
         let mut plugin_dirs: Vec<std::path::PathBuf> = Vec::new();
-        if top.join("manifest.json").is_file() {
-            plugin_dirs.push(top.clone());
-        } else {
+        if base.join("manifest.json").is_file() {
+            plugin_dirs.push(base.clone());
+        } else if subdir.is_none() {
             for e in std::fs::read_dir(&top).map_err(|e| e.to_string())?.filter_map(|e| e.ok()) {
                 let p = e.path();
                 if p.is_dir() && p.join("manifest.json").is_file() { plugin_dirs.push(p); }

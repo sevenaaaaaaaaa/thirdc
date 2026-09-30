@@ -1,0 +1,45 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body{margin:0;padding:16px;font:13px/1.7 -apple-system,"PingFang SC",sans-serif;background:transparent;color:#ddd}
+  h3{margin:0 0 8px;font-size:14px}
+  textarea{width:100%;height:120px;box-sizing:border-box;border-radius:8px;border:1px solid #444;background:#1a1a1a;color:#eee;padding:10px;font:12.5px/1.7 Menlo,monospace;resize:vertical}
+  .row{display:flex;gap:8px;margin-top:10px}
+  button{flex:1;height:32px;border-radius:8px;border:1px solid #555;background:#2a2a2a;color:#eee;cursor:pointer;font-size:12.5px}
+  button:hover{background:#3a3a3a}
+  #doc{color:#8fd48f;font-size:11.5px;margin-top:10px;word-break:break-all}
+  #err{color:#e58;font-size:11.5px;margin-top:10px;word-break:break-all}
+</style></head>
+<body>
+<h3>📝 速记面板（v1 沙箱视图）</h3>
+<textarea id="note" placeholder="写点什么… 点「插入到文档」送进当前编辑器光标处"></textarea>
+<div class="row">
+  <button id="insert">插入到文档</button>
+  <button id="load">读取当前文档</button>
+</div>
+<div id="doc"></div><div id="err"></div>
+<script>
+const $=id=>document.getElementById(id);
+$('insert').onclick=async()=>{
+  const t=$('note').value.trim();
+  if(!t){await thirdc.toast('先写点内容');return}
+  await thirdc.insertText('\n〔'+t+'〕\n');
+  await thirdc.toast('已插入到光标处');
+  $('note').value='';
+};
+$('load').onclick=async()=>{
+  try{
+    const doc=await thirdc.getDocument();
+    $('doc').textContent='当前文档：'+doc.path+'（'+doc.markdown.length+' 字）';
+  }catch(e){$('err').textContent='读取失败：'+e.message}
+};
+/* 加载即自动握手：验证 RPC 通路 + doc:read 权限（真实用户打开面板同样触发） */
+(async()=>{
+  try{
+    const doc=await thirdc.getDocument();
+    $('doc').textContent='✓ RPC 通：当前文档 '+doc.path+'（'+doc.markdown.length+' 字）';
+  }catch(e){$('err').textContent='✗ RPC 失败：'+e.message}
+})();
+thirdc.setViewTitle('速记面板');
+</script>
+</body></html>

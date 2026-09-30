@@ -1,0 +1,55 @@
+{
+  "id": "demo-daily-note",
+  "name": "每日速记",
+  "version": "1.2.0",
+  "description": "示例插件：速记模板插入 + 沙箱视图（演示 v1 视图扩展与权限）",
+  "author": "ThirdC",
+  "permissions": [
+    "doc:read",
+    "editor:insert"
+  ],
+  "contributions": {
+    "commands": [
+      {
+        "id": "insert-daily",
+        "title": "插入今日速记模板",
+        "type": "insert-snippet",
+        "payload": "## 今日速记\n\n- "
+      }
+    ],
+    "views": [
+      {
+        "id": "panel",
+        "title": "速记面板",
+        "entry": "view.html",
+        "permissions": [
+          "doc:read",
+          "editor:insert"
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "id": "kbtag",
+        "title": "按标签检索库",
+        "description": "在知识库里检索关键词并返回最相关的文档路径",
+        "type": "kb-search"
+      },
+      {
+        "id": "wtime",
+        "title": "世界时间",
+        "description": "查询指定时区当前时间",
+        "type": "http",
+        "method": "GET",
+        "url": "https://worldtimeapi.org/api/timezone/{zone}",
+        "args": {
+          "zone": {
+            "type": "string",
+            "description": "时区名如 Asia/Shanghai",
+            "required": true
+          }
+        }
+      }
+    ]
+  }
+}
