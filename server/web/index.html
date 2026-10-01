@@ -4448,6 +4448,40 @@ const STYLES=[
  ['dada','达达 Dada','#f0ede4','#191919','#0021c9',F.mono,'none','h1{transform:rotate(-2deg) translateY(4px);background:#0021c9;color:#fff;display:inline-block;padding:6px 12px!important}h2{transform:rotate(1deg)}blockquote{transform:rotate(-1deg);border:3px solid #191919;background:#fff}'],
  ['ukiyoe','浮世绘 Ukiyo-e','#f2e8d5','#33302b','#a63a50','"Hiragino Mincho ProN","Songti SC",serif','none','h1{letter-spacing:.14em;border-bottom:10px solid #a63a50;padding-bottom:8px!important}blockquote{border:1px solid #a63a50;background:#ede0c4;border-radius:0 var(--r-lg) 0 var(--r-lg)}hr{border:none;height:3px;background:linear-gradient(90deg,#a63a50,transparent)}'],
  ['ink','水墨 Chinese Ink','#f7f5f0','#26241f','#26241f','"Hiragino Mincho ProN","Songti SC",serif','none','body{background-image:radial-gradient(ellipse at 85% 10%,rgba(38,36,31,.07),transparent 45%)}h1{font-weight:600;letter-spacing:.18em}blockquote{border:none;background:#edeae2;border-radius:4px 26px 4px 26px;color:#4a463d}hr{border:none;height:12px;background:radial-gradient(ellipse at center,rgba(38,36,31,.3),transparent 70%)}'],
+ /* 瑞士 IKB：灵感来自瑞士国际主义 + 克莱因蓝展示模板（网格/细字重/mono 标签/发丝线为公有设计语言） */
+ ['swiss-ikb','瑞士 IKB · 克莱因蓝','#fafaf8','#0a0a0a','#002FA7','"Inter","Helvetica Neue","PingFang SC",sans-serif','none',
+  'body{line-height:1.75}body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:radial-gradient(#0a0a0a .8px,transparent .8px);background-size:22px 22px;opacity:.05;z-index:0}body>*{position:relative;z-index:1}'
+ +'h1{font-weight:200;font-size:2.7em!important;letter-spacing:-.04em;line-height:1.08;border-top:2px solid #0a0a0a;padding-top:.55em!important}'
+ +'h2{font-family:"JetBrains Mono","SF Mono",monospace;font-weight:500;font-size:1.02em!important;letter-spacing:.22em;text-transform:uppercase;display:flex;align-items:center;gap:.65em}'
+ +'h2::before{content:"";width:24px;height:2px;background:#002FA7;flex:0 0 auto}'
+ +'h3{font-weight:600;border-left:3px solid #002FA7;padding-left:.55em}'
+ +'strong{font-weight:600;color:#002FA7}'
+ +'em{font-style:normal;background:linear-gradient(to bottom,transparent 72%,rgba(0,47,167,.26) 72%,rgba(0,47,167,.26) 96%,transparent 96%)}'
+ +'blockquote{border-left:3px solid #002FA7;background:#f0f0ee;padding:14px 18px!important;border-radius:0}'
+ +'table th{font-family:"JetBrains Mono","SF Mono",monospace;font-size:.76em;letter-spacing:.14em;text-transform:uppercase;font-weight:500;color:#737373;border-bottom:1px solid #0a0a0a}'
+ +'table td{font-weight:300;border-bottom:1px solid #e0e0e0}'
+ +'code,pre{font-family:"JetBrains Mono","SF Mono",monospace;background:#f0f0ee;border-radius:0}'
+ +'a{color:#002FA7;text-decoration:none;border-bottom:1px solid rgba(0,47,167,.4)}'
+ +'li::marker{color:#002FA7}'
+ +'::selection{background:#002FA7;color:#fff}'
+ +'hr{border:none;height:1px;background:#d4d4d2}'],
+ /* OpenFlow：ThirdC 姊妹产品的设计语言（全 oklch · 玻璃拟态 · oklch 色斑底 · 渐变 hairline） */
+ ['openflow','OpenFlow 玻璃','oklch(17% .022 262)','oklch(91% .012 262)','oklch(72% .14 255)','"Inter","SF Pro Display","PingFang SC",sans-serif','none',
+  'body{background-image:radial-gradient(38% 32% at 18% 12%,oklch(45% .12 265/.5),transparent 70%),radial-gradient(34% 30% at 82% 8%,oklch(50% .14 300/.38),transparent 70%),radial-gradient(40% 34% at 60% 92%,oklch(50% .1 200/.32),transparent 72%);background-attachment:fixed}'
+ +'h1{font-weight:700;letter-spacing:-.02em;position:relative;padding-bottom:14px!important}'
+ +'h1::after{content:"";position:absolute;left:0;bottom:0;width:120px;height:3px;border-radius:2px;background:linear-gradient(90deg,oklch(72% .14 255),oklch(65% .18 300))}'
+ +'h2{font-weight:600;background:linear-gradient(90deg,oklch(72% .14 255/.16),oklch(72% .14 255/.02));border-left:3px solid oklch(72% .14 255);border-radius:0 12px 12px 0;padding:9px 16px!important}'
+ +'h3{font-weight:600;letter-spacing:-.01em}'
+ +'strong{font-weight:650;color:oklch(83% .1 255);text-shadow:0 0 18px oklch(72% .14 255/.35)}'
+ +'em{font-style:normal;color:oklch(80% .09 300)}'
+ +'blockquote{background:oklch(30% .03 262/.55);border:1px solid oklch(70% .02 262/.18);border-left:3px solid oklch(72% .14 255);border-radius:0 14px 14px 0;backdrop-filter:blur(12px);box-shadow:0 8px 24px oklch(0% 0 0/.28)}'
+ +'table{border:1px solid oklch(70% .02 262/.16);border-radius:12px;overflow:hidden}table th{background:oklch(30% .03 262/.75);font-weight:600}'
+ +'code{background:oklch(30% .03 262/.7);color:oklch(82% .1 200);border-radius:6px;padding:1px 6px}'
+ +'pre{background:oklch(22% .025 262/.8);border:1px solid oklch(70% .02 262/.14);border-radius:12px}'
+ +'a{color:oklch(78% .12 255);text-decoration:none;border-bottom:1px dashed oklch(78% .12 255/.5)}'
+ +'li::marker{color:oklch(72% .14 255)}'
+ +'::selection{background:oklch(72% .14 255/.4)}'
+ +'hr{border:none;height:1px;background:linear-gradient(90deg,transparent,oklch(72% .14 255/.5),transparent)}'],
 ];
 function styleCss(p){
   const [id,name,bg,fg,ac,font,head,extra]=p;
