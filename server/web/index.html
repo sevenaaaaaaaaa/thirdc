@@ -206,9 +206,6 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 #rail-open svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .rail-head{padding:12px 14px 6px;display:flex;align-items:center;justify-content:space-between}
 .kicker{font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--accent);text-transform:uppercase}
-.rail-new{margin:4px 10px 8px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;border-radius:var(--r-md);border:1px dashed var(--border-strong);
-  background:transparent;color:var(--muted);cursor:pointer;font:600 13px var(--font-body);transition:all .2s}
-.rail-new:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 .rail-list{flex:1;overflow:auto;padding:0 8px 10px}
 .rail-item{display:block;padding:8px 10px;border-radius:var(--r-md);cursor:pointer;border:1px solid transparent;transition:background .18s var(--ease-out)}
 .rail-item:hover{background:var(--glass)}
@@ -297,8 +294,11 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .stepchip.run{background:var(--accent-soft);color:var(--accent)}
 .stepchip .spin{width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.dockbar{display:flex;align-items:center;gap:10px;height:var(--dock-h);padding:0 12px;border:0;border-top:1px solid var(--border);
+.dockbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;height:var(--dock-h);padding:0 12px;border:0;border-top:1px solid var(--border);
   background:var(--chat-bg);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
+.dk-left{display:flex;align-items:center;gap:4px;justify-self:start}
+.dock-center{display:flex;align-items:center;gap:8px;justify-self:center;min-width:0;width:min(640px,100%)}
+.dk-right{justify-self:end}
 #dock.thinking .dockbar{border-color:color-mix(in oklab,var(--accent) 55%,var(--border));
   box-shadow:var(--shadow),0 0 0 4px var(--accent-soft),0 0 44px -8px var(--accent)}
 .dockbar input{flex:1;min-width:0;border:none;outline:none;background:transparent;color:var(--fg);font:14px var(--font-body)}
@@ -409,10 +409,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .conn-item .h{font-family:var(--font-mono);font-size:10px;color:var(--faint);word-break:break-all}
 .conn-result{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding:8px 10px;border-radius:var(--r-md);background:var(--hover);margin-top:6px;white-space:pre-wrap}
 /* ── 模式 ── */
-#mode-seg{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:3px;gap:2px}
-#mode-seg button{height:30px;padding:0 12px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .25s var(--ease-spring)}
-#mode-seg button:hover{color:var(--fg);background:var(--glass)}
-#mode-seg button.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+/* 主模式切换 UI 已并入底栏 Magic 弧形菜单（#mode-seg 移除；body[data-mode] 状态与移动端 mob-nav 保留） */
 /* 模式即布局（§1.4）：三主模式切换布局；整理=Studio 工具态；Agent=底栏常驻（对话优先态） */
 body.agent #dock .thread{max-height:72vh}
 body.agent #canvas{filter:saturate(.55) brightness(.82)}
@@ -437,6 +434,30 @@ body[data-mode="organize"] #canvas{cursor:crosshair}
 .sync-ind.busy{background:transparent}
 .sync-ind.busy::after{content:'';position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--accent);border-top-color:transparent;animation:sb-spin .8s linear infinite}
 .dock-legacy{display:none!important}
+/* ── Magic 弧形菜单（S Pen Air command 式扇出）── */
+.mf-anchor{color:var(--accent);position:relative}
+.mf-anchor .mf-star{fill:currentColor;stroke:none;transition:transform .45s var(--ease-spring)}
+.mf-anchor:hover{color:var(--accent)}
+.mf-anchor.open .mf-star{transform:rotate(135deg) scale(1.12)}
+.mf-anchor.open::after{content:'';position:absolute;inset:-6px;border-radius:50%;border:1.5px solid color-mix(in oklab,var(--accent) 55%,transparent);opacity:.9;animation:mf-pulse 2.2s var(--ease-out) infinite}
+@keyframes mf-pulse{0%{transform:scale(.8);opacity:.9}70%{transform:scale(1.25);opacity:0}100%{transform:scale(1.25);opacity:0}}
+#magic-shade{position:fixed;inset:0;z-index:59;display:none;background:color-mix(in oklab,var(--bg) 45%,transparent);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+#magic-shade.open{display:block;animation:mf-fade .25s var(--ease-out)}
+@keyframes mf-fade{from{opacity:0}to{opacity:1}}
+#magic-fan{position:fixed;inset:0;z-index:60;pointer-events:none}
+.mf-item{position:fixed;left:0;top:0;pointer-events:auto;display:grid;place-items:center;gap:1px;
+  width:56px;height:56px;border-radius:50%;cursor:pointer;
+  background:var(--surface);border:1px solid var(--border);color:var(--fg);
+  box-shadow:0 6px 24px -6px color-mix(in oklab,var(--bg) 65%,transparent),0 2px 8px -2px color-mix(in oklab,var(--bg) 50%,transparent);
+  transform:translate(var(--mx,0),var(--my,0)) scale(.2) rotate(-30deg);opacity:0;visibility:hidden;
+  transition:transform .42s var(--ease-spring),opacity .28s var(--ease-out),visibility 0s .42s;
+  transition-delay:var(--d,0s)}
+#magic-fan.open .mf-item{transform:translate(var(--mx,0),var(--my,0)) scale(1) rotate(0);opacity:1;visibility:visible;transition:transform .42s var(--ease-spring),opacity .28s var(--ease-out);transition-delay:var(--d,0s)}
+.mf-item i{font-style:normal;font-size:19px;line-height:1}
+.mf-item span{font:500 10px var(--font-body);color:var(--muted);white-space:nowrap}
+.mf-item:hover{border-color:var(--accent);color:var(--accent);transform:translate(var(--mx,0),var(--my,0)) scale(1.12) rotate(0)}
+.mf-item:hover span{color:var(--accent)}
+.mf-item.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 /* 固定入口选择弹层 */
 #pin-menu{position:fixed;z-index:var(--z-overlay);display:none;flex-direction:column;min-width:180px;padding:6px;border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow)}
 #pin-menu.open{display:flex}
@@ -530,7 +551,6 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .rm-add input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-soft);color:var(--fg);font:12px var(--font-body);outline:none}
 .rm-add input:focus{border-color:var(--accent)}
 .rm-send{width:28px;height:28px;flex:0 0 auto;border-radius:var(--r-sm);border:none;background:var(--accent);color:var(--on-accent);cursor:pointer;font-size:15px;line-height:1}
-.rail-actions{padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;flex:0 0 auto}
 .rail-act{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);
   color:var(--muted);font:500 12.5px var(--font-body);cursor:pointer;transition:all .2s var(--ease-out)}
 .rail-act:hover{color:var(--fg);border-color:var(--border-strong);transform:translateY(-1px)}
@@ -814,19 +834,15 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 @media (max-width:767px),(min-width:768px) and (max-width:1024px) and (orientation:portrait){
   :root{--bottom-nav-h:calc(56px + env(safe-area-inset-bottom,0px))}
   #mob-nav{display:flex}
-  #mode-seg{display:none}
   #hintbar{display:none}
   .brand .bname{max-width:96px}
   #board-pill{display:none}
   #crumb{display:none} /* 窄屏与视图胶囊重叠；文件夹导航走左栏抽屉树 */
   #dock .thread{max-height:68vh}
   #dock-tokens,#dock-cmdmode,#sb-peers{display:none}
+  #dock .dk-pins{display:none} /* 移动端入口由 mob-nav 与工具 Widget 承载，防底栏挤压 */
 }
-/* ⋯ 菜单里的展示入口：仅底部导航接管模式切换时出现（桌面由 seg 呈现） */
-#present-mm{display:none}
-@media (max-width:767px),(min-width:768px) and (max-width:1024px) and (orientation:portrait){
-  #present-mm{display:flex}
-}
+/* 展示入口（⋯ 菜单）桌面端也常驻：主模式切换已并入 Magic 菜单，此处为备用路径 */
 /* 统一触控规范（§5）：coarse 指针可点目标 ≥44；hover 效果在触屏全部禁用 */
 @media (pointer:coarse){
   #chrome .icon-btn,#mode-seg button,#view-pill button,#mob-nav button{min-height:44px;min-width:44px;height:44px}
@@ -914,12 +930,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <!-- 画布身份（多画布切换） -->
   <button id="board-pill" title="切换画布（双击切知识库）"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <nav class="doc-tabs" id="doc-tabs"></nav>
-  <!-- 模式区：三主模式（整理/RAG/线上/Memo/Agent 均为工具态，不再并列） -->
-  <nav id="mode-seg" title="主模式：Studio 创作 · 学习 研读 · 展示 演示">
-    <button data-mode="studio" class="on" aria-pressed="true">Studio</button>
-    <button data-mode="learn" aria-pressed="false">学习</button>
-    <button data-mode="present" aria-pressed="false">展示</button>
-  </nav>
+  <!-- 主模式切换（Studio/学习/展示）已并入底栏 Magic 弧形菜单 -->
   <div class="chrome-actions">
     <button class="icon-btn dock-legacy" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
     <button class="icon-btn dock-legacy" id="more-btn" title="更多" aria-expanded="false" aria-haspopup="menu" aria-controls="more-menu">⋯</button>
@@ -957,10 +968,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
       </nav>
     </div>
     <div class="rail-list" id="rail-list"></div>
-    <div class="rail-actions">
-      <button class="rail-act accent" id="rail-new" title="新建文档">＋ 新建 <kbd style="font-family:var(--font-mono);font-size:10px;opacity:.6">N</kbd></button>
-      <button class="rail-act" id="organize-btn" title="按标签聚类，一键搬移文档">✨ 自动整理</button>
-    </div>
+    <!-- 新建 / 自动整理已并入底栏 Magic 弧形菜单（降级非顶级入口） -->
   </div>
   <!-- 工具 Widget 区（Studio/学习共用，三标签）：Memo · 日历 · 插件快捷入口 -->
   <div class="rail-widget" id="rail-widget">
@@ -1024,12 +1032,17 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <section id="dock">
   <div class="thread" id="thread"></div>
   <div class="dockbar">
-    <button class="dk-icon" id="dock-rail" title="展开 / 收起左侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
-    <button class="dk-icon" id="dock-mode" title="切换：Agent 对话 / 全文搜索">🤖</button>
-    <input id="say" placeholder="和知识库对话…">
-    <div id="dock-pins" class="dk-pins"></div>
-    <button class="send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+    <div class="dk-left">
+      <button class="dk-icon" id="dock-rail" title="展开 / 收起左侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <button class="dk-icon mf-anchor" id="dock-magic" title="Magic：新建 · 整理 · 模式 · 分享（右键 / 点击）" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" class="mf-star"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4Z"/></svg></button>
+    </div>
+    <div class="dock-center">
+      <button class="dk-icon" id="dock-mode" title="切换：Agent 对话 / 全文搜索">🤖</button>
+      <input id="say" placeholder="和知识库对话…">
+      <button class="send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+    </div>
     <div class="dk-right">
+      <div id="dock-pins" class="dk-pins"></div>
       <button class="dk-chip" id="dock-tokens" title="Token 消耗">¥0.00</button>
       <button class="dk-icon" id="dock-cmdmode" title="命令模式">⌘</button>
       <button class="dk-chip" id="sb-peers" title="在线协作者">在线 1</button>
@@ -1047,6 +1060,16 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     </div>
   </div>
 </section>
+<!-- Magic 弧形菜单（S Pen Air command 式扇出）：新建 · 自动整理 · 三模式 · 分享导出 -->
+<div id="magic-shade" aria-hidden="true"></div>
+<div id="magic-fan" role="menu" aria-label="Magic 菜单" aria-hidden="true">
+  <button class="mf-item" data-mf="new" role="menuitem"><i>＋</i><span>新建</span></button>
+  <button class="mf-item" data-mf="organize" role="menuitem"><i>🪄</i><span>自动整理</span></button>
+  <button class="mf-item" data-mf="studio" role="menuitem"><i>▦</i><span>Studio</span></button>
+  <button class="mf-item" data-mf="learn" role="menuitem"><i>🎓</i><span>学习</span></button>
+  <button class="mf-item" data-mf="present" role="menuitem"><i>🖼</i><span>展示</span></button>
+  <button class="mf-item" data-mf="export" role="menuitem"><i>⤓</i><span>分享导出</span></button>
+</div>
 <!-- 底部导航（Pad 竖屏 / 移动，spec §5）：Studio/学习/Memo/Agent——Memo/Agent 是工具态入口 -->
 <nav id="mob-nav" aria-label="主导航">
   <button data-mact="studio"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Studio</button>
@@ -1462,7 +1485,14 @@ if('serviceWorker' in navigator){
 }
 const params=new URLSearchParams(location.search);
 let token=params.get('token')||localStorage.getItem('thirdc_token')||'';
-if(params.get('token'))localStorage.setItem('thirdc_token',token);
+if(params.get('token')){
+  localStorage.setItem('thirdc_token',token);
+  /* 凭据纪律：token 已入 localStorage，立即从地址栏剥离——
+     不进浏览器历史/分享链接/外链 Referer（OS 宪法 §6） */
+  params.delete('token');
+  const rest=params.toString();
+  history.replaceState(null,'',location.pathname+(rest?'?'+rest:'')+location.hash);
+}
 /* 登录门禁：必须在这里（早于任何 DOM 绑定）。showLogin/doLogin 是函数声明，
    会被提升，因此登录页照常可用。若放到脚本末尾，前面的 $().onclick 绑定时
    body 已被换成登录页，取到 null 抛错，连带 init 都跑不到。 */
@@ -2675,7 +2705,7 @@ $('editor').addEventListener('paste',async e=>{
     const t=$('editor'),s=t.selectionStart;t.value=t.value.slice(0,s)+r.markdown+'\n'+t.value.slice(s);dirty=true;toast('图片入库 '+r.hash.slice(0,8)+'…','ok');
   }catch(err){toast('图片入库失败：'+err.message,'err');}
 });
-$b('rail-new').onclick=newDoc;
+/* 新建入口已并入 Magic 菜单（dock-magic）；⌘K 面板与 N 键不变 */
 
 /* ───────── 检查器动作 ───────── */
 $b('ins-open').onclick=()=>{const n=graph.nodes.find(x=>x.id===selected);if(n&&n.kind!=='asset')openDoc(n.path);};
@@ -4650,6 +4680,52 @@ function renderPinMenu(anchor){
   menu.classList.add('open');
 }
 renderDockPins();
+/* ── Magic 弧形菜单（S Pen Air command 式扇出）：新建 · 自动整理 · 三模式 · 分享导出 ── */
+const MF_ITEMS=[...document.querySelectorAll('#magic-fan .mf-item')];
+let mfOpen=false;
+function mfLayout(){
+  const a=$('dock-magic');if(!a)return;
+  const r=a.getBoundingClientRect();
+  const cx=r.left+r.width/2,cy=r.top+r.height/2;
+  const R=Math.min(128,Math.max(104,innerWidth*0.1));
+  const vx=Math.max(cx,R+72); /* 虚拟枢轴：左缘按钮也能展开完整弧 */
+  MF_ITEMS.forEach((el,i)=>{
+    const ang=(160-(160-20)*(i/(MF_ITEMS.length-1)))*Math.PI/180;
+    const x=Math.max(8,Math.min(innerWidth-64,vx+R*Math.cos(ang)-28));
+    const y=Math.max(8,cy-R*Math.sin(ang)-28);
+    el.style.setProperty('--mx',Math.round(x)+'px');
+    el.style.setProperty('--my',Math.round(y)+'px');
+    el.style.setProperty('--d',(i*36)+'ms');
+  });
+}
+function mfSyncOn(){
+  MF_ITEMS.forEach(el=>el.classList.toggle('on',
+    ['studio','learn','present'].includes(el.dataset.mf)&&mode===el.dataset.mf));
+}
+function mfSet(open){
+  mfOpen=open;
+  $('magic-fan').classList.toggle('open',open);
+  $('magic-fan').setAttribute('aria-hidden',open?'false':'true');
+  $('magic-shade').classList.toggle('open',open);
+  $('dock-magic').classList.toggle('open',open);
+  $('dock-magic').setAttribute('aria-expanded',open?'true':'false');
+  if(open){mfLayout();mfSyncOn()}
+}
+$('dock-magic')&&(()=>{
+  const a=$('dock-magic');
+  a.addEventListener('click',()=>mfSet(!mfOpen));
+  a.addEventListener('contextmenu',e=>{e.preventDefault();mfSet(!mfOpen)});
+  $('magic-shade').addEventListener('click',()=>mfSet(false));
+  MF_ITEMS.forEach(el=>el.addEventListener('click',()=>{
+    const k=el.dataset.mf;mfSet(false);
+    if(k==='new')newDoc();
+    else if(k==='organize')runAutoOrganize();
+    else if(k==='export')$('d-export')&&$('d-export').click();
+    else setMode(k);
+  }));
+  addEventListener('keydown',e=>{if(mfOpen&&e.key==='Escape')mfSet(false)});
+  addEventListener('resize',()=>{if(mfOpen)mfLayout()});
+})();
 $('dock-rail')&&($('dock-rail').onclick=()=>{
   const r=$('rail');
   setRailClosed(!r.classList.contains('closed')?true:false);
@@ -6401,7 +6477,7 @@ function sparkle(n){
     document.body.appendChild(p);setTimeout(()=>p.remove(),1600);
   }
 }
-$b('organize-btn').onclick=async()=>{
+async function runAutoOrganize(){
   sparkle(26);toast('✨ 正在分析结构，生成整理方案…');
   try{
     const plan=await api('/organize/plan',{method:'POST',json:{}});
@@ -6409,11 +6485,11 @@ $b('organize-btn').onclick=async()=>{
     if(!(await uiConfirm(`整理方案：${plan.moves.length} 项移动（按标签聚类）\n`+plan.moves.map(m=>`${m.from} → ${m.to}`).join('\n')+'\n\n执行？',{ok:'执行整理'})))return;
     const r=await api('/organize/apply',{method:'POST',json:{moves:plan.moves}});
     sparkle(40);
-    toast(`✨ 已整理 ${r.applied} 篇（失败 ${r.failed.length}）`,'ok');
+    toast(`✨ 已整理 ${r.applied} 篇（失败 ${r.failed.length} 篇）`,'ok');
     await refreshAll();
     setTimeout(()=>fit(),300);
   }catch(e){toast('整理失败：'+e.message,'err')}
-};
+}
 
 /* ───────── git 工作区面板 ───────── */
 async function gitRefresh(){

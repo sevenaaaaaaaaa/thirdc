@@ -1114,7 +1114,7 @@ async fn health(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoRespo
     if let Err(e) = check_token(&st, &h) {
         return e.into_response();
     }
-    Json(json!({ "ok": true, "name": "thirdc", "version": env!("CARGO_PKG_VERSION") })).into_response()
+    Json(json!({ "ok": true, "name": "thirdc", "version": env!("CARGO_PKG_VERSION"), "api": HOST_API_LEVEL })).into_response()
 }
 
 async fn status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
@@ -4765,6 +4765,9 @@ async fn put_ui_state(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes
 
 /* ───────── 插件（Obsidian 式清单 + GitHub 链接安装；v0 仅声明式命令，不执行插件代码） ───────── */
 const PLUGIN_TARBALL_MAX: u64 = 50 * 1024 * 1024;
+/// 宿主插件 API 级别（docs/spec/os.md §3）。当前为 1：manifest+commands+views+tools。
+/// 破坏性演进时递增：宿主 N 同时支持 ≤N 的插件；manifest 声明高于宿主级别则拒绝安装。
+const HOST_API_LEVEL: u64 = 1;
 const PLUGIN_TREE_MAX: u64 = 50 * 1024 * 1024;
 
 fn plugins_root(root: &std::path::Path) -> std::path::PathBuf {
@@ -4929,6 +4932,14 @@ async fn plugins_install(State(st): State<Arc<AppState>>, h: HeaderMap, body: By
             let id = m.get("id").and_then(|x| x.as_str()).unwrap_or_else(|| src.file_name().and_then(|n| n.to_str()).unwrap_or("")).to_string();
             if id.is_empty() || id.contains('/') || id.contains("..") {
                 continue;
+            }
+            // API 门禁（os.md §3）：manifest 可声明 "api": <n>，缺省视为 1——
+            // 声明高于宿主支持级别时拒绝该插件并整体回滚，不静默装载。
+            let papi = m.get("api").and_then(|x| x.as_u64()).unwrap_or(1);
+            if papi > HOST_API_LEVEL {
+                let _ = std::fs::remove_dir_all(&tmp);
+                let pid = m.get("id").and_then(|x| x.as_str()).unwrap_or("?");
+                return Err(format!("插件 {pid} 需要宿主 API 级别 {papi}，当前宿主支持 {HOST_API_LEVEL}（请升级 ThirdC）"));
             }
             let dest = dest_root.join(&id);
             if dest.exists() {
