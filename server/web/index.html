@@ -114,6 +114,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .rail-widget{flex:0 0 auto;border-top:1px solid var(--border);background:var(--surface)}
 .rw-tabs{display:flex;gap:2px;padding:5px 8px 0}
 .rw-tab{flex:1;height:26px;border:none;border-radius:var(--r-sm) var(--r-sm) 0 0;background:transparent;color:var(--faint);
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
   font:600 11px var(--font-body);cursor:pointer;transition:all .15s var(--ease-out)}
 .rw-tab:hover{color:var(--fg);background:var(--glass)}
 .rw-tab.on{color:var(--accent);background:var(--accent-soft)}
@@ -303,6 +304,13 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
   box-shadow:var(--shadow),0 0 0 4px var(--accent-soft),0 0 44px -8px var(--accent)}
 .dockbar input{flex:1;min-width:0;border:none;outline:none;background:transparent;color:var(--fg);font:14px var(--font-body)}
 .dockbar input::placeholder{color:var(--faint)}
+/* 输入胶囊：发送箭头内嵌为 ghost 圆钮（焦点光环在胶囊上，弱化箭头存在感） */
+.say-wrap{flex:1;min-width:0;display:flex;align-items:center;height:36px;padding:0 5px 0 13px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface);transition:border-color .2s,box-shadow .2s}
+.say-wrap:focus-within{border-color:color-mix(in oklab,var(--accent) 55%,var(--border));box-shadow:0 0 0 3px var(--accent-soft)}
+.say-send{width:27px;height:27px;flex:0 0 auto;border-radius:50%;border:none;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:all .2s var(--ease-spring)}
+.say-send:hover{background:var(--accent-soft);color:var(--accent)}
+.say-send:active{transform:scale(.9)}
+.say-send svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .send{width:36px;height:36px;border-radius:var(--r-md);border:none;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:background .2s,transform .2s var(--ease-spring)}
 .send:hover{background:var(--accent-strong)}
 .send:active{transform:scale(.94)}
@@ -458,6 +466,25 @@ body[data-mode="organize"] #canvas{cursor:crosshair}
 .mf-item:hover{border-color:var(--accent);color:var(--accent);transform:translate(var(--mx,0),var(--my,0)) scale(1.12) rotate(0)}
 .mf-item:hover span{color:var(--accent)}
 .mf-item.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+/* 左簇弹层：最近使用（纵向清单）· 固定板（Apple dock 式横向放大） */
+.dock-pop{position:fixed;z-index:58;display:none;flex-direction:column;min-width:264px;max-width:380px;padding:8px;border-radius:var(--r-lg);
+  background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)}
+.dock-pop.open{display:flex;animation:mf-fade .18s var(--ease-out)}
+.dock-pop h5{margin:4px 6px 5px;font:600 10.5px var(--font-body);color:var(--faint);letter-spacing:.06em}
+.dp-row{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--r-md);cursor:pointer;border:none;background:transparent;width:100%;text-align:left}
+.dp-row:hover{background:var(--glass)}
+.dp-row b{font:500 12.5px var(--font-body);color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px}
+.dp-row small{font:400 10.5px var(--font-mono);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.dp-row .ic{font-size:14px;flex:0 0 auto}
+.dp-empty{padding:10px;color:var(--faint);font:400 12px var(--font-body)}
+.dp-dock{flex-direction:row;align-items:flex-end;gap:6px;min-width:0;max-width:none}
+.dp-dock .dp-item{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:20px;transition:transform .22s var(--ease-spring),border-color .15s;transform-origin:50% 100%}
+.dp-dock .dp-item:hover{transform:scale(1.42) translateY(-3px);border-color:var(--accent)}
+.dp-dock .dp-item.manage{font-size:13px;color:var(--muted)}
+.dp-dock-sep{width:1px;align-self:stretch;margin:4px 3px;background:var(--border)}
+/* data-ic：统一线性图标容器（尺寸由 iconSvg 内联给出） */
+[data-ic]{display:inline-flex;flex:0 0 auto;line-height:0}
+.rw-tools button i{font-style:normal}
 /* 固定入口选择弹层 */
 #pin-menu{position:fixed;z-index:var(--z-overlay);display:none;flex-direction:column;min-width:180px;padding:6px;border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow)}
 #pin-menu.open{display:flex}
@@ -927,28 +954,29 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <span class="sp-txt">搜索文档、命令…</span><kbd>⌘K</kbd>
   </button>
-  <!-- 画布身份（多画布切换） -->
-  <button id="board-pill" title="切换画布（双击切知识库）"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <nav class="doc-tabs" id="doc-tabs"></nav>
-  <!-- 主模式切换（Studio/学习/展示）已并入底栏 Magic 弧形菜单 -->
+  <!-- 画布身份（多画布切换）：顶栏最右 -->
+  <button id="board-pill" title="切换画布（双击切知识库）"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span class="bname" id="board-name">main</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <div class="chrome-actions">
     <button class="icon-btn dock-legacy" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
     <button class="icon-btn dock-legacy" id="more-btn" title="更多" aria-expanded="false" aria-haspopup="menu" aria-controls="more-menu">⋯</button>
   </div>
 </header>
 <div id="more-menu">
-  <button class="mm-item" id="organize-mode-btn" title="Studio 工具态：空白拖拽圈选（M）">✨ 整理（圈选批量）</button>
-  <button class="mm-item" id="present-mm" title="全屏展示当前画布">🖼 展示模式</button>
+  <button class="mm-item" id="organize-mode-btn" title="Studio 工具态：空白拖拽圈选（M）"><i data-ic="wand" data-ics="14"></i>整理（圈选批量）</button>
+  <button class="mm-item" id="present-mm" title="全屏展示当前画布"><i data-ic="image" data-ics="14"></i>展示模式</button>
   <div class="mm-sep"></div>
-  <button class="mm-item" id="pub-btn" title="发布为 AI-HTML">⬆ 发布 / 线上</button>
-  <button class="mm-item" id="design-btn" title="设计规范 / tokens">🎨 设计规范</button>
-  <button class="mm-item" id="road-btn" title="功能路线图">🗺 路线图</button>
-  <button class="mm-item" id="trash-btn" title="回收站">🗑 回收站</button>
+  <button class="mm-item" id="pub-btn" title="发布为 AI-HTML"><i data-ic="upload" data-ics="14"></i>发布 / 线上</button>
+  <button class="mm-item" id="design-btn" title="设计规范 / tokens"><i data-ic="drop" data-ics="14"></i>设计规范</button>
+  <button class="mm-item" id="matrix-btn" title="芭乐派产品矩阵：怎么连接、怎么用"><i data-ic="chart" data-ics="14"></i>生态矩阵</button>
+  <button class="mm-item" id="conflow-btn" title="ConFlow 对话流：对话沉淀知识卡"><i data-ic="chat" data-ics="14"></i>对话流</button>
+  <button class="mm-item" id="road-btn" title="功能路线图"><i data-ic="map" data-ics="14"></i>路线图</button>
+  <button class="mm-item" id="trash-btn" title="回收站"><i data-ic="trash" data-ics="14"></i>回收站</button>
   <div class="mm-sep"></div>
-  <button class="mm-item" id="theme" title="明暗切换">🌓 明暗切换</button>
-  <button class="mm-item" id="sync" title="同步外部改动">🔄 同步外部改动</button>
-  <button class="mm-item" id="force-refresh" title="强制刷新">⟲ 强制刷新</button>
-  <button class="mm-item" id="settings-btn" title="设置">⚙ 设置</button>
+  <button class="mm-item" id="theme" title="明暗切换"><i data-ic="moon" data-ics="14"></i>明暗切换</button>
+  <button class="mm-item" id="sync" title="同步外部改动"><i data-ic="sync" data-ics="14"></i>同步外部改动</button>
+  <button class="mm-item" id="force-refresh" title="强制刷新"><i data-ic="sync" data-ics="14"></i>强制刷新</button>
+  <button class="mm-item" id="settings-btn" title="设置"><i data-ic="cog" data-ics="14"></i>设置</button>
 </div>
 
 <aside id="rail">
@@ -973,9 +1001,9 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <!-- 工具 Widget 区（Studio/学习共用，三标签）：Memo · 日历 · 插件快捷入口 -->
   <div class="rail-widget" id="rail-widget">
     <nav class="rw-tabs" role="tablist">
-      <button class="rw-tab" data-rw="memo" role="tab">📒 Memo</button>
-      <button class="rw-tab" data-rw="cal" role="tab">📅 日历</button>
-      <button class="rw-tab" data-rw="tools" role="tab">🧰 工具</button>
+      <button class="rw-tab" data-rw="memo" role="tab"><i data-ic="memo" data-ics="14"></i>Memo</button>
+      <button class="rw-tab" data-rw="cal" role="tab"><i data-ic="calendar" data-ics="14"></i>日历</button>
+      <button class="rw-tab" data-rw="tools" role="tab"><i data-ic="wrench" data-ics="14"></i>工具</button>
     </nav>
     <div class="rw-panes">
       <div class="rw-pane rail-memo" id="memo-slot" data-pane="memo">
@@ -991,16 +1019,11 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
       </div>
       <div class="rw-pane" id="rw-tools" data-pane="tools" hidden>
         <div class="rw-tools">
-          <button id="rt-topic" title="输入主题，自动从维基/HN/arXiv 建库">⚡<span>采集主题</span></button>
-          <button id="rt-web" title="网页 URL → Markdown 入库">🌐<span>网页本地化</span></button>
-          <button id="rt-conn" title="MCP 连接器：探测 / 采集">🔌<span>连接器</span></button>
-          <button id="rt-pub" title="发布为 AI-HTML 静态站">⬆<span>发布</span></button>
-          <button id="rt-design" title="导入 / 管理设计规范">🎨<span>设计规范</span></button>
-          <button id="rt-cal" title="整月内容日历">📅<span>日历</span></button>
-          <button id="rt-trash" title="已删除文档可恢复">🗑<span>回收站</span></button>
-          <button id="rt-road" title="功能可见性契约">🗺<span>路线图</span></button>
-          <button id="rt-matrix" title="芭乐派产品矩阵：Conflow / WebsFlow / PayFlow / InFlow">🌐<span>生态矩阵</span></button>
-          <button id="rt-conflow" title="ConFlow 对话流：对话沉淀知识卡">💬<span>对话流</span></button>
+          <!-- 工具 = 对库的「工作流动作」（宪法 §5：面板/管理入口归 ⋯ 菜单与固定板） -->
+          <button id="rt-topic" title="输入主题，自动从维基/HN/arXiv 建库"><i data-ic="bolt" data-ics="15"></i><span>采集主题</span></button>
+          <button id="rt-web" title="网页 URL → Markdown 入库"><i data-ic="globe" data-ics="15"></i><span>网页本地化</span></button>
+          <button id="rt-conn" title="MCP 连接器：探测 / 采集"><i data-ic="plug" data-ics="15"></i><span>连接器</span></button>
+          <button id="rt-pub" title="发布当前文档为 AI-HTML 静态站"><i data-ic="upload" data-ics="15"></i><span>发布</span></button>
         </div>
         <div class="rw-plug-head">插件</div>
         <div id="rw-plugins"></div>
@@ -1034,21 +1057,25 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <div class="dockbar">
     <div class="dk-left">
       <button class="dk-icon" id="dock-rail" title="展开 / 收起左侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
-      <button class="dk-icon mf-anchor" id="dock-magic" title="Magic：新建 · 整理 · 模式 · 分享（右键 / 点击）" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" class="mf-star"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4Z"/></svg></button>
+      <button class="dk-icon" id="dock-studio" title="Studio 创作台"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+      <button class="dk-icon" id="dock-recent" title="最近使用的文件夹与文件"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></button>
+      <button class="dk-icon" id="dock-pinhub" title="固定入口"><i data-ic="pin"></i></button>
     </div>
     <div class="dock-center">
-      <button class="dk-icon" id="dock-mode" title="切换：Agent 对话 / 全文搜索">🤖</button>
-      <input id="say" placeholder="和知识库对话…">
-      <button class="send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+      <button class="dk-icon" id="dock-mode" title="切换：Agent 对话 / 全文搜索"><i data-ic="agent"></i></button>
+      <div class="say-wrap">
+        <input id="say" placeholder="和知识库对话…">
+        <button class="say-send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+      </div>
     </div>
     <div class="dk-right">
-      <div id="dock-pins" class="dk-pins"></div>
       <button class="dk-chip" id="dock-tokens" title="Token 消耗">¥0.00</button>
       <button class="dk-icon" id="dock-cmdmode" title="命令模式">⌘</button>
       <button class="dk-chip" id="sb-peers" title="在线协作者">在线 1</button>
       <button class="dk-icon" id="dock-user" title="个人中心"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg></button>
       <button class="dk-icon" id="dock-more" title="更多">⋯</button>
       <span id="dock-sync-ind" class="sync-ind" title=""></span>
+      <button class="dk-icon mf-anchor" id="dock-magic" title="Magic：新建 · 整理 · 模式 · 分享（右键 / 点击）" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" class="mf-star"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4Z"/></svg></button>
       <!-- 旧状态位：既有 JS 仍写入，视觉由右侧新组件承载 -->
       <span id="sb-conn" class="dock-legacy">connecting</span>
       <span id="sb-stats" class="dock-legacy">—</span>
@@ -1063,13 +1090,16 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <!-- Magic 弧形菜单（S Pen Air command 式扇出）：新建 · 自动整理 · 三模式 · 分享导出 -->
 <div id="magic-shade" aria-hidden="true"></div>
 <div id="magic-fan" role="menu" aria-label="Magic 菜单" aria-hidden="true">
-  <button class="mf-item" data-mf="new" role="menuitem"><i>＋</i><span>新建</span></button>
-  <button class="mf-item" data-mf="organize" role="menuitem"><i>🪄</i><span>自动整理</span></button>
-  <button class="mf-item" data-mf="studio" role="menuitem"><i>▦</i><span>Studio</span></button>
-  <button class="mf-item" data-mf="learn" role="menuitem"><i>🎓</i><span>学习</span></button>
-  <button class="mf-item" data-mf="present" role="menuitem"><i>🖼</i><span>展示</span></button>
-  <button class="mf-item" data-mf="export" role="menuitem"><i>⤓</i><span>分享导出</span></button>
+  <button class="mf-item" data-mf="new" role="menuitem"><i data-ic="plus" data-ics="18"></i><span>新建</span></button>
+  <button class="mf-item" data-mf="organize" role="menuitem"><i data-ic="wand" data-ics="18"></i><span>自动整理</span></button>
+  <button class="mf-item" data-mf="studio" role="menuitem"><i data-ic="grid" data-ics="18"></i><span>Studio</span></button>
+  <button class="mf-item" data-mf="learn" role="menuitem"><i data-ic="cap" data-ics="18"></i><span>学习</span></button>
+  <button class="mf-item" data-mf="present" role="menuitem"><i data-ic="image" data-ics="18"></i><span>展示</span></button>
+  <button class="mf-item" data-mf="export" role="menuitem"><i data-ic="download" data-ics="18"></i><span>分享导出</span></button>
 </div>
+<!-- 左簇弹层：最近使用（纵向清单）· 手动固定板（Apple dock 式横向放大） -->
+<div class="dock-pop" id="recent-pop" role="menu" aria-label="最近使用" aria-hidden="true"></div>
+<div class="dock-pop dp-dock" id="pin-pop" role="menu" aria-label="固定入口" aria-hidden="true"></div>
 <!-- 底部导航（Pad 竖屏 / 移动，spec §5）：Studio/学习/Memo/Agent——Memo/Agent 是工具态入口 -->
 <nav id="mob-nav" aria-label="主导航">
   <button data-mact="studio"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Studio</button>
@@ -1177,6 +1207,22 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <input type="file" id="design-file" style="display:none" multiple>
     <div class="dv-sec"><h4>主题预设（来自 OpenFlow）</h4><div id="preset-list" class="swrap" style="gap:8px"></div></div>
     <div id="design-list"></div>
+  </div>
+</div></div>
+
+<div class="overlay" id="web-ov"><div class="panel" style="width:min(560px,94vw)">
+  <div class="panel-head"><h3>网页本地化</h3><span class="badge plan">URL → Markdown 入库</span><button class="icon-btn" data-close="web-ov" title="关闭" aria-label="关闭网页本地化">✕</button></div>
+  <div class="panel-body">
+    <div style="font-size:12px;color:var(--faint);margin-bottom:8px">抓取网页正文转为 Markdown 存入知识库。桌面端用内置渲染器跑完页面 JS 再抓，失败自动回退直抓。</div>
+    <input class="inp" id="web-url" placeholder="https://example.com/article" style="margin-bottom:10px">
+    <div style="font-size:11px;color:var(--faint);margin-bottom:4px">保存到（Notes/ 下的文件夹，可输入新目录）</div>
+    <input class="inp" id="web-dir" list="web-dir-list" value="Notes/Web" style="margin-bottom:10px">
+    <datalist id="web-dir-list"></datalist>
+    <div id="web-status" style="font:11.5px/1.8 var(--font-mono);color:var(--muted);min-height:40px;white-space:pre-wrap;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="act" data-close="web-ov">取消</button>
+      <button class="act" id="web-go" style="background:var(--accent);color:var(--on-accent);border-color:var(--accent)">开始本地化</button>
+    </div>
   </div>
 </div></div>
 
@@ -1364,6 +1410,15 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
       </div>
     </div>
     <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">插件授权（浏览器采集扩展）</div>
+      <div id="set-ext-info" style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-bottom:6px">—</div>
+      <div style="display:flex;gap:6px">
+        <button class="act" id="set-ext-grant" style="flex:1;background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">授权本浏览器的扩展</button>
+        <button class="act" id="set-ext-revoke" style="flex:1;border-color:var(--danger);color:var(--danger)">撤销授权</button>
+      </div>
+      <div style="font-size:11px;color:var(--faint);margin-top:6px">登录状态下，扩展 ≥0.3.0 在打开 ThirdC 页面时经你确认后自动获得本库地址与令牌，无需手动复制。</div>
+    </div>
+    <div style="margin-bottom:16px">
       <div style="font-size:12px;color:var(--faint);margin-bottom:6px">远程同步</div>
       <input class="inp" id="set-remote" placeholder="同步服务器 URL（可选）">
       <button class="act" id="set-push" style="margin-top:6px;width:100%">推送</button>
@@ -1470,6 +1525,42 @@ window.addEventListener("error",()=>{try{const b=document.getElementById("boot")
 const $=(id)=>document.getElementById(id);
 /* 安全绑定：元素缺失时静默（避免一个 null 让整个应用死掉） */
 const $b=(id)=>$(id)||new Proxy(function(){},{get:()=>()=>{},set:()=>true,apply:()=>{}});
+/* ── 统一线性 SVG 图标（宪法 §6 视觉统一）：chrome 内不再使用彩色 emoji ── */
+const IC={
+  agent:'<rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+  cap:'<path d="M12 3 2 8l10 5 10-5Z"/><path d="M6 10.5V15c0 1.6 2.7 3 6 3s6-1.4 6-3v-4.5"/>',
+  blocks:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M16.5 13.5v6M13.5 16.5h6"/>',
+  chat:'<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.2 0-2.4-.2-3.4-.7L4 21l1.7-4.1A8.5 8.5 0 1 1 21 11.5Z"/>',
+  term:'<path d="m5 7 5 5-5 5M12 17h7"/>',
+  download:'<path d="M12 3v13M6 11l6 6 6-6M4 21h16"/>',
+  calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  trash:'<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  wand:'<path d="M4 20 14 10"/><path d="m15 3 1.2 2.8L19 7l-2.8 1.2L15 11l-1.2-2.8L11 7l2.8-1.2Z"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  image:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-4-4-8 8"/>',
+  pin:'<path d="M8 4h8v5l2 3H6l2-3Z"/><path d="M12 12v8"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  doc:'<path d="M7 3h7l4 4v14H7Z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+  memo:'<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  bolt:'<path d="M13 2 4 14h6l-1 8 9-12h-6Z"/>',
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
+  plug:'<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0ZM12 17v4"/>',
+  upload:'<path d="M12 19V6M6 11l6-6 6 6M4 21h16"/>',
+  drop:'<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11Z"/>',
+  map:'<path d="m9 4-6 2v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/>',
+  wrench:'<path d="M14.5 6.5a4.2 4.2 0 0 0-5.8 5.3L3 17.5 6.5 21l5.7-5.7a4.2 4.2 0 0 0 5.3-5.8L14 13l-3-3Z"/>',
+  chart:'<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="5" rx="0.5"/><rect x="12" y="9" width="3" height="8" rx="0.5"/><rect x="17" y="6" width="3" height="11" rx="0.5"/>',
+  yen:'<path d="M7 4l5 7 5-7M12 11v9M8 13.5h8M8 16.5h8"/>',
+  wave:'<path d="M3 8c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2M3 14c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2"/>',
+  moon:'<path d="M20 12.5A8 8 0 1 1 11.5 4a6.5 6.5 0 0 0 8.5 8.5Z"/>',
+  sync:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 3v5h-5"/>',
+  cog:'<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/>'
+};
+function iconSvg(n,s=16){return `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]||''}</svg>`}
+document.querySelectorAll('[data-ic]').forEach(el=>{el.innerHTML=iconSvg(el.dataset.ic,+(el.dataset.ics||16))});
 /* 子路径部署支持：应用挂在 /thirdc/ 下时，所有 API 都要带前缀 */
 const BASE=location.pathname.replace(/\/+$/,'').replace(/\/index\.html$/,'');
 /* Service Worker：外壳缓存（直连场景下重复打开秒开） */
@@ -2069,7 +2160,7 @@ function maybeEmptyVault(t){
 function tagColor(t){let h=0;for(const c of t)h=(h*31+c.codePointAt(0))%360;const dark=document.documentElement.dataset.theme==='dark';return `oklch(${dark?'72%':'52%'} .14 ${h})`}
 let treeState=JSON.parse(localStorage.getItem('thirdc_tree')||'{}');
 /* ── 树 UI 状态：展开集合 + 最近文档 + 浏览位置；本地即时 + /ui-state 随库跨设备 ── */
-let treeUI = Object.assign({ expanded: [], lastDoc: null, browsePath: 'Notes', updatedAt: 0 }, JSON.parse(localStorage.getItem('thirdc_treestate') || '{}'));
+let treeUI = Object.assign({ expanded: [], lastDoc: null, browsePath: 'Notes', recentDocs: [], updatedAt: 0 }, JSON.parse(localStorage.getItem('thirdc_treestate') || '{}'));
 let treeUIPutTimer = null;
 function saveTreeUI(patch){
   Object.assign(treeUI, patch);
@@ -2084,6 +2175,11 @@ function treeExpandedAdd(path){
 function treeExpandedRemove(path){
   treeUI.expanded = treeUI.expanded.filter(p => p !== path && !p.startsWith(path + '/'));
   saveTreeUI({});
+}
+/* 最近使用（底栏 🕘 弹层数据源）：随 treeUI 本地持久化 + /ui-state 跨设备 */
+function recordRecent(path){
+  if(!path)return;
+  saveTreeUI({ recentDocs: [path, ...(treeUI.recentDocs||[]).filter(x=>x!==path)].slice(0,12) });
 }
 /* 用 /tree 的结构渲染（无文件标题）：文件夹秒开，文件展开时按需加载（构建函数模块级，供定位/自动展开复用） */
 function treeDocsOf(path){
@@ -2371,6 +2467,7 @@ async function openDoc(path){
     $('d-body').style.opacity=.55;
     const d=await api('/doc?path='+encodeURIComponent(path));
     current=path;dirty=false;currentFormat=d.format||'markdown';
+    recordRecent(path);
     $('d-path').textContent=path+(currentFormat==='html'?'  ·  HTML':currentFormat==='text'?'  ·  '+path.split('.').pop().toUpperCase():'');
     $('editor').value=currentFormat==='markdown'?d.markdown:d.source;
     setTimeout(()=>{renderRemoteCarets()},50);
@@ -2980,6 +3077,8 @@ function renderRoad(){
 }
 $b('road-btn').onclick=()=>{renderRoad();openOverlay('road-ov');};
 $b('trash-btn').onclick=()=>openTrash();
+$b('matrix-btn').onclick=()=>openMatrix();
+$b('conflow-btn').onclick=()=>openConflow();
 /* ───────── 回收站 ───────── */
 async function openTrash(){openOverlay('trash-ov');await renderTrash();}
 async function renderTrash(){
@@ -3355,27 +3454,7 @@ const CMDS=[
     if(nv!==null)localStorage.setItem('thirdc_webdav',nv);
     toast(nv?'WebDAV 已设置':'WebDAV 已清除','ok');
   }],
-  ['网页本地化','w',async()=>{
-    closeAll();const url=await uiPrompt('网页 URL','https://example.com/article');if(!url)return;
-    try{
-      let r;
-      if(IS_DESKTOP){
-        /* 内置 ego-lite：隐藏 webview 跑完 JS 后抓取渲染 DOM（失败自动回退直抓） */
-        toast('内置渲染器打开页面中…');
-        try{
-          const html=await tauriInvoke('desktop_render_page',{url});
-          r=await api('/ingest/html',{method:'POST',json:{url,html}});
-          toast('已用内置 ego-lite 渲染抓取','ok');
-        }catch(re){
-          toast('渲染器不可用（'+re.message.slice(0,40)+'），回退直抓','err');
-          r=await api('/ingest/web',{method:'POST',json:{url}});
-        }
-      }else{
-        r=await api('/ingest/web',{method:'POST',json:{url}});
-      }
-      toast(`已本地化「${r.title||url}」→ ${r.rel}`,'ok');await refreshAll();openDoc(r.rel);
-    }catch(e){toast('本地化失败：'+e.message,'err')}
-  }],
+  ['网页本地化','w',()=>{closeAll();openWebIngest();}],
   ['Agent 记忆','mem',async()=>{
     closeAll();
     const r=await api('/agent/memory');
@@ -3778,7 +3857,21 @@ async function openConnPanel(){
   const d=await api('/connections');
   const box=$('conn-list');box.innerHTML='';
   $('conn-ai').textContent=d.ai&&d.ai.configured?`AI：${d.ai.model}（${d.ai.base_url}）`:'AI：未配置（命令模式）';
-  if(!(d.connections||[]).length){box.innerHTML='<div class="dv-meta">没有连接。在 thirdc.toml 的 [[connections]] 里加 MCP server。</div>';}
+  if(!(d.connections||[]).length){
+    const guide=document.createElement('div');
+    guide.innerHTML=`<div style="font-size:12.5px;color:var(--fg);margin-bottom:6px"><b>连接器是什么</b>：让外部工具（MCP server）把数据灌进你的库——图表、对话、网页批采集都走这里。</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:8px">三步接入：<b>①</b> 点下方「复制示例配置」　<b>②</b> 粘贴到库根的 <span style="font-family:var(--font-mono)">thirdc.toml</span>（桌面端：设置 → 知识库 → 打开库文件夹）　<b>③</b> 重启 ThirdC，回到这里点「探测」确认在线。</div>
+      <pre style="margin:0 0 10px;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg-soft);border:1px solid var(--border);font:10.5px/1.6 var(--font-mono);white-space:pre-wrap;user-select:all">[[connections]]
+name = "openflow"          # 连接名 = 生态矩阵里的产品 id
+command = "openflow"       # 可执行命令（PATH 里的 MCP server）
+args = ["mcp"]</pre>
+      <button class="act" id="conn-copy-sample">复制示例配置</button>
+      <div class="dv-meta" style="margin-top:10px">还没有可装的工具？先逛「生态矩阵」（⋯ 菜单）看每个产品的接入方式。</div>`;
+    box.appendChild(guide);
+    guide.querySelector('#conn-copy-sample').onclick=async()=>{
+      try{await navigator.clipboard.writeText('[[connections]]\nname = "openflow"\ncommand = "openflow"\nargs = ["mcp"]');toast('示例已复制——粘贴到 thirdc.toml 的 [[connections]]','ok')}catch(e){toast('复制失败','err')}
+    };
+  }
   (d.connections||[]).forEach(c=>{
     const el=document.createElement('div');el.className='conn-item';
     el.innerHTML=`<span class="badge plan">MCP</span><div class="t">${c.name}<div class="h">${c.command} ${c.args.join(' ')}</div><div class="conn-result" style="display:none"></div></div>
@@ -3803,6 +3896,58 @@ async function openConnPanel(){
   });
 }
 
+/* ── 网页本地化对话框：URL + 保存位置 + 分步进度 + 结果路径（每步可见） ── */
+function openWebIngest(){
+  openOverlay('web-ov');
+  const url=$('web-url');url.value='';setTimeout(()=>url.focus(),60);
+  const dl=$('web-dir-list');dl.innerHTML='';
+  const dirs=new Set(['Notes/Web','Notes/Clippings']);
+  (window.__fullDocs||[]).forEach(d=>{const seg=d.path.split('/');if(seg.length>2)dirs.add(seg.slice(0,2).join('/'))});
+  [...dirs].sort().forEach(d=>{const o=document.createElement('option');o.value=d;dl.appendChild(o)});
+  $('web-status').textContent='';
+  $('web-go').disabled=false;
+}
+async function runWebIngest(){
+  const url=$('web-url').value.trim();
+  const st=$('web-status'),go=$('web-go');
+  if(!/^https?:\/\//.test(url)){st.textContent='✗ 请输入 http(s) 网址';return}
+  let dir=$('web-dir').value.trim().replace(/\/+$/,'');
+  if(dir&&!dir.startsWith('Notes/')){st.textContent='✗ 保存位置必须在 Notes/ 下';return}
+  go.disabled=true;
+  try{
+    st.textContent='① 抓取页面'+(IS_DESKTOP?'（内置渲染器渲染中：跑完 JS 再抓）':'…');
+    let r;
+    if(IS_DESKTOP){
+      try{
+        const html=await tauriInvoke('desktop_render_page',{url});
+        st.textContent='② 渲染完成，转换入库…';
+        r=await api('/ingest/html',{method:'POST',json:{url,html}});
+      }catch(re){
+        st.textContent='② 渲染器不可用（'+String(re.message||re).slice(0,42)+'），回退直抓…';
+        r=await api('/ingest/web',{method:'POST',json:{url}});
+      }
+    }else{
+      r=await api('/ingest/web',{method:'POST',json:{url}});
+    }
+    let rel=r.rel;
+    if(dir){
+      st.textContent='③ 写入完成，移动到 '+dir+' …';
+      try{
+        const mv=await api('/doc/move',{method:'POST',json:{from:rel,to:dir+'/'+rel.split('/').pop()}});
+        if(mv&&mv.to)rel=mv.to;
+      }catch(me){/* 目标冲突等：留在默认位置，下面如实显示 */}
+    }
+    st.textContent='✓ 已保存到 '+rel+'（正文约 '+Math.max(1,Math.round((r.bytes||0)/1024))+' KB）——正在打开预览';
+    toast('网页已本地化：'+rel,'ok');
+    await refreshAll();openDoc(rel);
+    setTimeout(()=>{const ov=document.getElementById('web-ov');ov&&ov.classList.remove('open')},700);
+  }catch(e){
+    st.textContent='✗ 本地化失败：'+e.message+'\n（网络超时可重试；桌面端失败会自动回退直抓）';
+  }
+  go.disabled=false;
+}
+$('web-go')&&($('web-go').onclick=runWebIngest);
+$('web-url')&&($('web-url').onkeydown=e=>{if(e.key==='Enter')runWebIngest()});
 /* ───────── TOC ───────── */
 function buildToc(md){
   const box=$('toc-list');box.innerHTML='';
@@ -4143,6 +4288,7 @@ function setMode(m){
   document.querySelectorAll('#mob-nav button').forEach(b=>{
     b.classList.toggle('on',b.dataset.mact===seg);
   });
+  const ds=$('dock-studio');if(ds)ds.classList.toggle('on',m==='studio');
   const def=MODES[m];
   if(def&&def.enter)def.enter();
   broadcastState();renderRemoteCarets();
@@ -4322,13 +4468,13 @@ function refreshMiniCal(){if($('mc-grid')&&!$('rw-cal').hidden)renderMiniCal()}
 
 /* 工具快捷入口：全部复用既有面板/命令，不引入第二套逻辑 */
 $('rt-topic')&&($('rt-topic').onclick=()=>{const c=CMDS.find(c=>c[0]==='采集主题（快速建库）');c&&c[2]()});
-$('rt-web')&&($('rt-web').onclick=()=>{const c=CMDS.find(c=>c[0]==='网页本地化');c&&c[2]()});
+$('rt-web')&&($('rt-web').onclick=()=>openWebIngest());
 $('rt-conn')&&($('rt-conn').onclick=()=>openConnPanel());
-$('rt-pub')&&($('rt-pub').onclick=()=>$('pub-btn').click());
+$('rt-pub')&&($('rt-pub').onclick=()=>{
+  if(!current)toast('发布面向当前文档——先在画布或最近里打开一篇','err');
+  $('pub-btn').click();
+});
 $('rt-design')&&($('rt-design').onclick=()=>openDesign());
-$('rt-cal')&&($('rt-cal').onclick=()=>openCalendar());
-$('rt-trash')&&($('rt-trash').onclick=()=>openTrash());
-$('rt-road')&&($('rt-road').onclick=()=>{renderRoad();openOverlay('road-ov')});
 $('rt-matrix')&&($('rt-matrix').onclick=()=>openMatrix());
 $('rt-conflow')&&($('rt-conflow').onclick=()=>openConflow());
 
@@ -4543,20 +4689,20 @@ $('cf-digest-latest')&&($('cf-digest-latest').onclick=async()=>{
 
 /* ── 生态矩阵（芭乐派产品矩阵）：接入方式声明 + 配置指引 + 连接检测 ── */
 const MATRIX=[
-  { id:'openflow', name:'OpenFlow', emoji:'📊', role:'图表与架构流——知识库画布与架构图互导', status:'live',
+  { id:'openflow', name:'OpenFlow', icon:'chart', role:'图表与架构流——知识库画布与架构图互导', status:'live', connect:'mcp',
     how:'设计契约同源（oklch · 弹簧缓动 · 玻璃拟态），设计规范经「设计规范」面板互通；架构图生成走 MCP 连接器。',
     cfg:'[[connections]]\nname = "openflow"\ncommand = "openflow"\nargs = ["mcp"]' },
-  { id:'conflow', name:'Conflow', emoji:'💬', role:'对话流——把 Agent 对话沉淀为可检索知识', status:'live',
+  { id:'conflow', name:'Conflow', icon:'chat', role:'对话流——把 Agent 对话沉淀为可检索知识', status:'live',
     how:'已内置对话流：Agent 对话自动归档（Notes/Agent/），一键提炼「要点 / 决定 / 待办」知识卡（存于 Notes/Conflow/，命令「总结对话」）。独立部署版发布后经 MCP 连接器无缝替换。',
     open:'conflow',
     cfg:'[[connections]]\nname = "conflow"\ncommand = "conflow"\nargs = ["mcp"]' },
-  { id:'websflow', name:'WebsFlow', emoji:'🕸️', role:'网页流——批量网页采集与本地化', status:'planned',
+  { id:'websflow', name:'WebsFlow', icon:'globe', role:'网页流——批量网页采集与本地化', status:'planned', connect:'mcp',
     how:'MCP 连接器接入后，资源批量拉取入库（同连接器「采集」）。',
     cfg:'[[connections]]\nname = "websflow"\ncommand = "websflow"\nargs = ["serve"]' },
-  { id:'payflow', name:'PayFlow', emoji:'💰', role:'变现流——知识内容的商业化分发', status:'planned',
+  { id:'payflow', name:'PayFlow', icon:'yen', role:'变现流——知识内容的商业化分发', status:'planned',
     how:'以插件工具（type: http）接入支付/分发 API，agent 可直接调用。',
     cfg:'# PayFlow 发布后，做一个带 tools 的插件即可接入：\n# { "type": "http", "url": "https://your.payflow.api/{order}" }' },
-  { id:'inflow', name:'InFlow', emoji:'🌊', role:'采集流——本机输入流与三方同步', status:'planned',
+  { id:'inflow', name:'InFlow', icon:'wave', role:'采集流——本机输入流与三方同步', status:'planned',
     how:'桌面端已开放本机采集端口（127.0.0.1:7717 + Token），InFlow 直连即可。',
     cfg:'# InFlow → 桌面端本机接口\n# POST http://127.0.0.1:7717/asset  (x-thirdc-token)' },
 ];
@@ -4565,16 +4711,20 @@ async function openMatrix(){
   let connNames=[];
   try{ connNames=((await api('/connections')).connections||[]).map(c=>c.name); }catch{}
   const box=$('matrix-list');box.innerHTML='';
+  const head=document.createElement('div');
+  head.style.cssText='font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:10px';
+  head.innerHTML='矩阵产品经两种协议接入：<b>MCP 连接器</b>（复制配置 → 粘贴到库根 <span style="font-family:var(--font-mono)">thirdc.toml</span> 的 [[connections]] → 重启 ThirdC → 回此页点「检测连接」）或<b>插件工具</b>（插件 manifest 的 contributions.tools）。状态灯实时反映 thirdc.toml 里已配置的连接。';
+  box.appendChild(head);
   MATRIX.forEach(m=>{
     const configured=m.connect==='mcp'&&connNames.includes(m.id);
-    const stBadge=m.status==='live'?'<span class="badge ok">已互通</span>':configured?'<span class="badge ok">已连接</span>':'<span class="badge plan">规划中</span>';
+    const stBadge=m.status==='live'&&!m.connect?'<span class="badge ok">已互通</span>':configured?'<span class="badge ok">已连接</span>':'<span class="badge plan">规划中</span>';
     const el=document.createElement('div');el.className='conn-item';el.style.flexWrap='wrap';
-    el.innerHTML=`<div class="t" style="flex:1 1 100%"><span style="font-size:15px">${m.emoji}</span> <b>${m.name}</b> ${stBadge}
+    el.innerHTML=`<div class="t" style="flex:1 1 100%"><span style="display:inline-flex;vertical-align:-3px;margin-right:4px">${iconSvg(m.icon,15)}</span> <b>${m.name}</b> ${stBadge}
       <div class="h" style="font-size:12px;color:var(--fg);margin-top:2px">${m.role}</div>
       <div class="h" style="margin-top:4px">${m.how}</div>
       <pre style="margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg-soft);border:1px solid var(--border);font:10.5px/1.6 var(--font-mono);white-space:pre-wrap;user-select:all">${m.cfg}</pre></div>
       <div style="display:flex;gap:6px;flex:1 1 100%;margin-top:8px">
-        <button class="act" data-copy style="height:28px">📋 复制配置</button>
+        <button class="act" data-copy style="height:28px">复制配置</button>
         ${m.open?`<button class="act" data-open-panel style="height:28px;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">打开${m.name}面板</button>`:''}
         ${m.connect==='mcp'?'<button class="act" data-check style="height:28px">检测连接</button>':''}
       </div>`;
@@ -4616,7 +4766,7 @@ function setDockMode(m){
   dockMode=m;localStorage.setItem('thirdc_dockmode',m);
   const b=$('dock-mode');if(!b)return;
   b.classList.toggle('on',m==='search');
-  b.textContent=m==='search'?'🔍':'🤖';
+  b.innerHTML=iconSvg(m==='search'?'search':'agent',17);
   b.title=m==='search'?'当前：全文搜索（点击切回 Agent 对话）':'当前：Agent 对话（点击切为全文搜索）';
   $('say').placeholder=m==='search'
     ?'全文搜索（含 HTML / 代码 / 笔记正文）— Enter'
@@ -4635,27 +4785,67 @@ function dockSubmit(){
 }
 /* 固定入口：默认 文件夹 / 学习模式 / 插件，可在 ⋏ 菜单里增删 */
 const PIN_DEFS=[
-  {id:'folders',icon:'📁',label:'文件夹',run:()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();}},
-  {id:'learn',icon:'🎓',label:'学习模式',run:()=>setMode('learn')},
-  {id:'plugins',icon:'🧩',label:'插件',run:()=>openPluginsPanel()},
-  {id:'conflow',icon:'💬',label:'对话流',run:()=>openConflow()},
-  {id:'term',icon:'⌨️',label:'终端',run:()=>document.getElementById('set-term')?.click?.()},
-  {id:'export',icon:'⤓',label:'导出',run:()=>document.getElementById('d-export')?.click?.()},
-  {id:'calendar',icon:'📅',label:'日历',run:()=>openCalendar()},
-  {id:'trash',icon:'🗑',label:'回收站',run:()=>openTrash()},
+  {id:'folders',icon:'folder',label:'文件夹',run:()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();}},
+  {id:'learn',icon:'cap',label:'学习模式',run:()=>setMode('learn')},
+  {id:'plugins',icon:'blocks',label:'插件',run:()=>openPluginsPanel()},
+  {id:'conflow',icon:'chat',label:'对话流',run:()=>openConflow()},
+  {id:'term',icon:'term',label:'终端',run:()=>document.getElementById('set-term')?.click?.()},
+  {id:'export',icon:'download',label:'导出',run:()=>document.getElementById('d-export')?.click?.()},
+  {id:'calendar',icon:'calendar',label:'日历',run:()=>openCalendar()},
+  {id:'trash',icon:'trash',label:'回收站',run:()=>openTrash()},
 ];
 let dockPins=(()=>{try{const v=JSON.parse(localStorage.getItem('thirdc_dock_pins')||'null');if(Array.isArray(v))return v}catch(e){}return['folders','learn','plugins']})();
 function saveDockPins(){localStorage.setItem('thirdc_dock_pins',JSON.stringify(dockPins))}
+/* ── 底栏弹层助手：最近使用 / 固定板共用（点外即收，Esc 同收） ── */
+function closeDockPop(id){const p=document.getElementById(id);if(p){p.classList.remove('open');p.setAttribute('aria-hidden','true')}}
+function closeAllDockPops(){closeDockPop('recent-pop');closeDockPop('pin-pop')}
+function toggleDockPop(id,anchor,fill){
+  const p=document.getElementById(id);if(!p||!anchor)return false;
+  const was=p.classList.contains('open');
+  closeAllDockPops();
+  if(was)return true;
+  fill(p);
+  p.classList.add('open');p.setAttribute('aria-hidden','false');p.style.visibility='hidden';
+  const r=anchor.getBoundingClientRect();
+  const pw=p.offsetWidth,ph=p.offsetHeight;
+  p.style.left=Math.max(10,Math.min(innerWidth-pw-10,r.left))+'px';
+  p.style.bottom=(innerHeight-r.top+10)+'px';
+  p.style.top='auto';p.style.visibility='';
+  return true;
+}
+document.addEventListener('pointerdown',e=>{
+  if(e.target.closest&&e.target.closest('#recent-pop,#pin-pop,#dock-recent,#dock-pinhub,#dock-magic'))return;
+  closeAllDockPops();
+},true);
+addEventListener('keydown',e=>{if(e.key==='Escape')closeAllDockPops()});
+/* 手动固定板（宪法 §6 入口减法）：单入口=直开；多入口=Apple dock 式弹层；空=固定选择器 */
 function renderDockPins(){
-  const box=$('dock-pins');if(!box)return;box.innerHTML='';
-  dockPins.forEach(id=>{
-    const d=PIN_DEFS.find(x=>x.id===id);if(!d)return;
-    const b=document.createElement('button');b.className='dk-pin';b.title=d.label;b.textContent=d.icon;
-    b.onclick=d.run;box.appendChild(b);
+  const btn=$('dock-pinhub');if(!btn)return;
+  closeDockPop('pin-pop');
+  const pins=dockPins.map(id=>PIN_DEFS.find(x=>x.id===id)).filter(Boolean);
+  if(pins.length===1){
+    btn.innerHTML=iconSvg(pins[0].icon,17);btn.title='固定：'+pins[0].label;
+    btn.onclick=()=>pins[0].run();
+  }else if(pins.length>1){
+    btn.innerHTML=iconSvg('pin',17);btn.title='固定入口（'+pins.length+' 个）';
+    btn.onclick=e=>{e.stopPropagation();toggleDockPop('pin-pop',btn,renderPinPop)};
+  }else{
+    btn.innerHTML=iconSvg('pin',17);btn.title='选择固定入口';
+    btn.onclick=e=>{e.stopPropagation();renderPinMenu(btn)};
+  }
+}
+function renderPinPop(box){
+  box.innerHTML='';
+  dockPins.map(id=>PIN_DEFS.find(x=>x.id===id)).filter(Boolean).forEach(d=>{
+    const b=document.createElement('button');b.className='dp-item';b.type='button';
+    b.innerHTML=iconSvg(d.icon,18);b.title=d.label;
+    b.onclick=()=>{closeDockPop('pin-pop');d.run()};
+    box.appendChild(b);
   });
-  const add=document.createElement('button');add.className='dk-pin';add.title='固定 / 取消入口';add.textContent='⋏';
-  add.onclick=e=>{e.stopPropagation();renderPinMenu(add)};
-  box.appendChild(add);
+  const sep=document.createElement('span');sep.className='dp-dock-sep';box.appendChild(sep);
+  const m=document.createElement('button');m.className='dp-item manage';m.type='button';m.textContent='⋏';m.title='管理固定入口';
+  m.onclick=e=>{e.stopPropagation();const btn=$('dock-pinhub');closeDockPop('pin-pop');renderPinMenu(btn||e.target)};
+  box.appendChild(m);
 }
 function renderPinMenu(anchor){
   let menu=document.getElementById('pin-menu');
@@ -4666,7 +4856,7 @@ function renderPinMenu(anchor){
   PIN_DEFS.forEach(d=>{
     const on=dockPins.includes(d.id);
     const b=document.createElement('button');
-    b.innerHTML=`<span class="chk">${on?'✓':''}</span>${d.icon} ${d.label}`;
+    b.innerHTML=`<span class="chk">${on?'✓':''}</span>${iconSvg(d.icon,13)} ${d.label}`;
     b.onclick=()=>{
       dockPins=on?dockPins.filter(x=>x!==d.id):[...dockPins,d.id];
       saveDockPins();renderDockPins();renderPinMenu(anchor);
@@ -4686,13 +4876,14 @@ let mfOpen=false;
 function mfLayout(){
   const a=$('dock-magic');if(!a)return;
   const r=a.getBoundingClientRect();
-  const cx=r.left+r.width/2,cy=r.top+r.height/2;
+  const cy=r.top+r.height/2;
   const R=Math.min(128,Math.max(104,innerWidth*0.1));
-  const vx=Math.max(cx,R+72); /* 虚拟枢轴：左缘按钮也能展开完整弧 */
+  /* 最右锚点：虚拟枢轴贴右缘，扇出严格限制在 90°（正左 → 正上），不越过屏幕右缘 */
+  const vx=Math.min(r.left+r.width/2,innerWidth-R-72);
   MF_ITEMS.forEach((el,i)=>{
-    const ang=(160-(160-20)*(i/(MF_ITEMS.length-1)))*Math.PI/180;
-    const x=Math.max(8,Math.min(innerWidth-64,vx+R*Math.cos(ang)-28));
-    const y=Math.max(8,cy-R*Math.sin(ang)-28);
+    const ang=(180-90*(i/(MF_ITEMS.length-1)))*Math.PI/180;
+    const x=Math.min(innerWidth-64,Math.max(8,vx+R*Math.cos(ang)-28));
+    const y=Math.max(8,cy-R*Math.sin(ang)-34);
     el.style.setProperty('--mx',Math.round(x)+'px');
     el.style.setProperty('--my',Math.round(y)+'px');
     el.style.setProperty('--d',(i*36)+'ms');
@@ -4709,7 +4900,7 @@ function mfSet(open){
   $('magic-shade').classList.toggle('open',open);
   $('dock-magic').classList.toggle('open',open);
   $('dock-magic').setAttribute('aria-expanded',open?'true':'false');
-  if(open){mfLayout();mfSyncOn()}
+  if(open){closeAllDockPops();mfLayout();mfSyncOn()}
 }
 $('dock-magic')&&(()=>{
   const a=$('dock-magic');
@@ -4726,6 +4917,40 @@ $('dock-magic')&&(()=>{
   addEventListener('keydown',e=>{if(mfOpen&&e.key==='Escape')mfSet(false)});
   addEventListener('resize',()=>{if(mfOpen)mfLayout()});
 })();
+/* ── 左簇：Studio 创作台入口 + 最近使用弹层 ── */
+$('dock-studio')&&($('dock-studio').onclick=()=>{mode!=='studio'?setMode('studio'):fit()});
+function renderRecentPop(box){
+  box.innerHTML='';
+  const all=window.__fullDocs||[];
+  const byPath=new Map(all.map(d=>[d.path,d]));
+  const recents=(treeUI.recentDocs||[]).filter(p=>byPath.has(p));
+  const docs=recents.slice(0,8);
+  const folders=[];const seen=new Set();
+  recents.forEach(p=>{const dir=p.split('/').slice(0,-1).join('/');if(dir&&dir!=='Notes'&&!seen.has(dir)){seen.add(dir);folders.push(dir)}});
+  if(!docs.length){const e=document.createElement('div');e.className='dp-empty';e.textContent='暂无最近记录——打开些文档就会出现在这里';box.appendChild(e);return}
+  if(folders.length){
+    const h=document.createElement('h5');h.textContent='文件夹';box.appendChild(h);
+    folders.slice(0,5).forEach(f=>{
+      const b=document.createElement('button');b.className='dp-row';b.type='button';
+      b.innerHTML=`<span class="ic">${iconSvg('folder',14)}</span><b></b><small></small>`;
+      b.querySelector('b').textContent=f.split('/').pop();
+      b.querySelector('small').textContent=f;
+      b.onclick=()=>{closeDockPop('recent-pop');if(mode!=='studio')setMode('studio');browsePath=f;loadGraph();};
+      box.appendChild(b);
+    });
+  }
+  const h2=document.createElement('h5');h2.textContent='文件';box.appendChild(h2);
+  docs.forEach(p=>{
+    const d=byPath.get(p);
+    const b=document.createElement('button');b.className='dp-row';b.type='button';
+    b.innerHTML=`<span class="ic">${iconSvg('doc',14)}</span><b></b><small></small>`;
+    b.querySelector('b').textContent=d.title||p.split('/').pop();
+    b.querySelector('small').textContent=p;
+    b.onclick=()=>{closeDockPop('recent-pop');openDoc(p)};
+    box.appendChild(b);
+  });
+}
+$('dock-recent')&&($('dock-recent').onclick=e=>{e.stopPropagation();toggleDockPop('recent-pop',$('dock-recent'),renderRecentPop)});
 $('dock-rail')&&($('dock-rail').onclick=()=>{
   const r=$('rail');
   setRailClosed(!r.classList.contains('closed')?true:false);
@@ -4763,7 +4988,8 @@ $('dock-tokens')&&($('dock-tokens').onclick=e=>{
 });
 $('dock-cmdmode')&&($('dock-cmdmode').onclick=()=>openConnPanel());
 $('dock-user')&&($('dock-user').onclick=()=>openSettings());
-$('dock-more')&&($('dock-more').onclick=()=>document.getElementById('more-btn').click());
+/* stopPropagation：防原始点击冒泡到 document 的「点外关闭」监听，把刚打开的菜单同帧关掉 */
+$('dock-more')&&($('dock-more').onclick=(e)=>{e.stopPropagation();document.getElementById('more-btn').click()});
 /* 同步指示灯状态机：绿=已连接已同步 / 蓝⤴=同步中 / 红=未连接或异常 / 黄=有新同步内容 */
 function updateSyncInd(){
   const ind=$('dock-sync-ind');if(!ind)return;
@@ -6900,6 +7126,30 @@ function renderAcctInfo(){
   if(tm)tm.textContent=token?`Token：${token.slice(0,4)}…${token.slice(-4)}（${token.length} 位）`:'Token：未登录';
 }
 /* 剪贴板：安全上下文走 async API，否则退回 execCommand；都失败由调用方弹 uiPrompt 手动复制 */
+/* ── 插件自动授权：登录态 token 经页面握手流向浏览器扩展（宪法 §4：显式确认 + 可撤销） ── */
+function extGranted(){return localStorage.getItem('thirdc_ext_granted')==='1'}
+function renderExtGrantInfo(){
+  const el=document.getElementById('set-ext-info');if(!el)return;
+  el.textContent=extGranted()
+    ?'已授权：本浏览器的 ThirdC 扩展可免配置直采（撤销后恢复手动填写）。'
+    :'未授权：扩展需手动粘贴地址与令牌；点「授权本浏览器的扩展」或打开本页时按提示确认。';
+}
+document.getElementById('set-ext-grant')&&(document.getElementById('set-ext-grant').onclick=()=>{
+  localStorage.setItem('thirdc_ext_granted','1');renderExtGrantInfo();toast('已授权本浏览器的采集扩展','ok');
+});
+document.getElementById('set-ext-revoke')&&(document.getElementById('set-ext-revoke').onclick=()=>{
+  localStorage.setItem('thirdc_ext_granted','0');renderExtGrantInfo();toast('已撤销——扩展下次连接需重新授权','ok');
+});
+renderExtGrantInfo();
+addEventListener('message',e=>{
+  if(e.origin!==location.origin||!e.data||e.data.type!=='thirdc-auth-request')return;
+  if(!token)return; /* 未登录不响应 */
+  const reply=()=>{try{e.source&&e.source.postMessage({type:'thirdc-auth-response',token,base:location.origin+BASE},location.origin)}catch(_){}}
+  if(extGranted()){reply();return}
+  uiConfirm('浏览器扩展请求访问你的知识库（读写）。\n\n授权后扩展自动获得本库地址与令牌，无需手动复制；可随时在 设置 → 账号与同步 里撤销。',{ok:'授权'}).then(ok=>{
+    if(ok){localStorage.setItem('thirdc_ext_granted','1');renderExtGrantInfo();reply();toast('已授权浏览器扩展','ok')}
+  });
+});
 function copyText(t){
   if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(t);
   return new Promise((res,rej)=>{
@@ -7273,7 +7523,7 @@ function bootDone(){
     try{
       const r=await api('/ui-state');
       if(r&&r.updatedAt&&r.updatedAt>(treeUI.updatedAt||0)){
-        treeUI=Object.assign(treeUI,{expanded:r.expanded||[],lastDoc:r.lastDoc||null,browsePath:r.browsePath||'Notes',updatedAt:r.updatedAt});
+        treeUI=Object.assign(treeUI,{expanded:r.expanded||[],lastDoc:r.lastDoc||null,browsePath:r.browsePath||'Notes',recentDocs:r.recentDocs||[],updatedAt:r.updatedAt});
         try{localStorage.setItem('thirdc_treestate',JSON.stringify(treeUI))}catch{}
         renderTreeFromTree(cacheGet('tree')||{dirs:[]});
         if(r.browsePath&&r.browsePath!==browsePath){browsePath=r.browsePath;await loadGraph();}

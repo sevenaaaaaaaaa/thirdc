@@ -10,7 +10,11 @@ function normalizeBase(raw) {
 
 api.storage.local.get(["baseUrl", "token"]).then((d) => {
   if (d.baseUrl) $("url").value = d.baseUrl;
-  if (d.token) $("token").value = d.token;
+  if (d.token) {
+    $("token").value = d.token;
+    $("msg").className = "ok";
+    $("msg").textContent = `✓ 已连接 ${d.baseUrl || ""}\n（经登录页自动授权；改动后记得保存）`;
+  }
 });
 
 $("save").onclick = async () => {

@@ -31,7 +31,7 @@ async function clipPage(info, tab) {
   const cfg = await api.storage.local.get(["baseUrl", "token"]);
   const base = normalizeBase(cfg.baseUrl);
   if (!base || !cfg.token) {
-    notify("ThirdC 未配置", "点击扩展图标填写地址与 Token");
+    notify("ThirdC 未配置", "打开已登录的 ThirdC 页面可一键自动授权；或点击扩展图标手动填写");
     return;
   }
   let html = "";
@@ -72,6 +72,13 @@ async function clipPage(info, tab) {
 
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({ id: "thirdc-clip", title: "采集到 ThirdC", contexts: ["page", "selection"] });
+});
+
+// content.js 自动授权成功 → 气泡告知一次
+api.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === "thirdc:auth-ok") {
+    notify("ThirdC 已自动授权", "地址与令牌已就绪，右键任意网页即可采集");
+  }
 });
 
 // 用非 async 包装，避免 Firefox "Promised response went out of scope" 警告
