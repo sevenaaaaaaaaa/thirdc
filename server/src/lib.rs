@@ -100,15 +100,9 @@ fn check_token(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode,
 }
 
 /// 构建带认证的 API 路由。`/` 与静态资产不需要令牌，页面内用令牌调 API。
-pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route("/", get(app))
-        .route("/assets/tokens.css", get(tokens_css))
-        .route("/icon48.png", get(|| async { ([("content-type","image/png"),("cache-control","public, max-age=86400")], include_bytes!("../web/icon48.png").as_slice()) }))
-        .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
-        .route("/sw.js", get(|| async {
-    const SW: &str = r#"
-const SHELL = 'thirdc-shell-v43';
+/// Service Worker 源码：__SHELL_VERSION__ 由路由注入 index.html 内容哈希。
+const SW_SRC: &str = r#"
+const SHELL = '__SHELL_VERSION__';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   const keys = await caches.keys();
@@ -155,7 +149,27 @@ self.addEventListener('fetch', e => {
   }));
 });
 "#;
-    ([("content-type", "application/javascript; charset=utf-8"), ("cache-control", "no-cache")], SW)
+
+/// 壳版本：index.html 内容哈希（构建期内嵌，改动自动出新缓存键）。
+fn shell_version() -> &'static String {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let html = include_str!("../web/index.html");
+        format!("thirdc-shell-{}", &kernel_core::Cas::hash_hex(html.as_bytes())[..12])
+    })
+}
+
+/// 构建带认证的 API 路由。`/` 与静态资产不需要令牌，页面内用令牌调 API。
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/", get(app))
+        .route("/assets/tokens.css", get(tokens_css))
+        .route("/icon48.png", get(|| async { ([("content-type","image/png"),("cache-control","public, max-age=86400")], include_bytes!("../web/icon48.png").as_slice()) }))
+        .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
+        .route("/sw.js", get(|| async {
+    // 壳版本 = index.html 内容哈希（构建期自动）：改前端必出新缓存键，忘 bump 也不再吃旧壳。
+    let body = SW_SRC.replace("__SHELL_VERSION__", shell_version());
+    ([("content-type", "application/javascript; charset=utf-8"), ("cache-control", "no-cache")], body).into_response()
 }))
         .route("/assets/fonts/{name}", get(font))
         .route("/health", get(health))
@@ -181,6 +195,7 @@ self.addEventListener('fetch', e => {
         .route("/design/presets", get(design_presets))
         .route("/ingest/topic", post(ingest_topic))
         .route("/ingest/web", post(ingest_web))
+        .route("/ingest/html", post(ingest_html))
         .route("/ingest/file", post(ingest_file))
         .route("/desktop/info", get(desktop_info))
         .route("/desktop/import", post(desktop_import))
@@ -236,6 +251,8 @@ self.addEventListener('fetch', e => {
             ([("cache-control", "public, max-age=300")], include_str!("../web/plugin-index.json"))
         }))
         .route("/ws", get(ws_handler))
+        .route("/conflow/conversations", get(conflow_conversations))
+        .route("/conflow/digest", post(conflow_digest))
         .with_state(state)
 }
 
@@ -3255,6 +3272,28 @@ impl PresenceHub {
 
 use axum::extract::ws::WebSocketUpgrade;
 
+/* ───────── ConFlow 对话流（矩阵整合）：对话列表 + 知识卡生成 ───────── */
+async fn conflow_conversations(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    match thirdc_mcp::conflow::list_conversations(&st.mcp) {
+        Ok(list) => Json(json!({ "conversations": list })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+async fn conflow_digest(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let path = req.get("path").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    match thirdc_mcp::conflow::digest(&st.mcp, &path) {
+        Ok(r) => {
+            audit_log(&st.kernel.lock().unwrap().vault.sidecar(), "conflow-digest", &r);
+            Json(json!({ "ok": true, "result": r })).into_response()
+        }
+        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
 async fn ws_handler(
     State(st): State<Arc<AppState>>,
     Query(q): Query<HashMap<String, String>>,
@@ -3715,9 +3754,54 @@ async fn ingest_web(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) 
     }
 }
 
+/// POST /ingest/html：外部（如桌面端内置 ego-lite 渲染器）送来的已渲染 HTML → 本地化为文档。
+async fn ingest_html(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) { return e.into_response(); }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+    let html = req.get("html").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if html.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "html 为空").into_response();
+    }
+    let lower = html.to_lowercase();
+    let mut text = html.clone();
+    for tag in ["script", "style", "noscript", "svg"] {
+        let open = format!("<{}", &tag[..1]);
+        let close = format!("</{}>", tag);
+        while let Some(i) = text.to_lowercase().find(&open) {
+            let rest = &text[i..];
+            if let Some(j) = rest.to_lowercase().find(&close) {
+                let e2 = j + close.len();
+                text = format!("{}{}", &text[..i], &text[i + e2..]);
+            } else { break; }
+        }
+    }
+    let title = req.get("title").and_then(|t| t.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
+        let i = lower.find("<title").and_then(|i| html[i..].find('>').map(|g| i + g + 1));
+        i.and_then(|i| html[i..].find("</title>").map(|e| html[i..i + e].trim().to_string()))
+         .unwrap_or_else(|| if url.is_empty() { "渲染页面".into() } else { url.clone() })
+    });
+    let stripped = strip_all_tags(&text);
+    let words: Vec<&str> = stripped.split_whitespace().collect();
+    let excerpt = words.iter().take(800).cloned().collect::<Vec<_>>().join(" ");
+    let src_line = if url.is_empty() { String::new() } else { format!("\n> 来源：{url}\n") };
+    let md = format!("# {title}\n{src_line}\n{excerpt}\n\n---\n\n<!-- 由内置 ego-lite 渲染器抓取（JS 渲染后 DOM） -->\n");
+    let mut k = st.kernel.lock().unwrap();
+    let uri = format!("ego://{}", kernel_core::Cas::hash_hex(if url.is_empty() { title.as_bytes() } else { url.as_bytes() })[..16].to_string());
+    match k.import_capture("ego", &uri, Some(&title), &md, "text/markdown") {
+        Ok(rel) => {
+            audit_log(&k.vault.sidecar(), "ingest-ego", &json!({ "url": url, "rel": rel }));
+            Json(json!({ "title": title, "rel": rel, "bytes": excerpt.len() })).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
 /// 去掉全部 HTML 标签，留纯文本。
-fn strip_all_tags(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
+fn strip_all_tags(html: &str) -> String {    let mut out = String::with_capacity(html.len());
     let bytes = html.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -5407,7 +5491,8 @@ async fn desktop_terminal(State(st): State<Arc<AppState>>, h: HeaderMap, body: B
     let prog = parts[0];
     let allowed = if prog == "thirdc" {
         true
-    } else if matches!(prog, "ls" | "cat" | "grep" | "rg" | "find" | "head" | "tail" | "wc" | "tree" | "du" | "file" | "stat") {
+    } else if matches!(prog, "ls" | "cat" | "grep" | "rg" | "find" | "head" | "tail" | "wc" | "tree" | "du" | "file" | "stat"
+        | "mkdir" | "touch" | "echo" | "cp" | "mv" | "python3" | "node" | "sed" | "sort" | "uniq") {
         true
     } else if prog == "git" {
         matches!(parts.get(1).copied(), Some("status") | Some("log") | Some("diff") | Some("branch"))
@@ -5443,7 +5528,7 @@ async fn desktop_terminal(State(st): State<Arc<AppState>>, h: HeaderMap, body: B
         std::path::PathBuf::from(prog)
     };
     let out = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
+        std::time::Duration::from_secs(60),
         tokio::process::Command::new(&bin).args(&parts[1..]).current_dir(&root).output(),
     )
     .await;

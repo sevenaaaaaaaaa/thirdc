@@ -132,7 +132,7 @@ ThirdC 属于芭乐派产品矩阵的**第三层:Studio 套件**——偏本地�
 
 - [x] 五模式 · Flow 画布三视图 · 50 设计风格 · Memo 热力图 · 桌面壳
 - [x] 启动预热 · 监听式同步 · 性能门禁
-- [ ] 生态矩阵：Conflow（对话流）· WebsFlow（网页流）· PayFlow（变现流）· InFlow（采集流）——经 MCP 连接器接入
+- [x] 生态矩阵接入框架就绪：**Conflow 对话流已内置**（对话自动归档 + 一键知识卡）；WebsFlow / PayFlow / InFlow 待接入（MCP 连接器 / 插件工具协议已就绪）
 - [ ] 桌面独占：全盘索引 · 本地小模型 · 内嵌终端（[规划](docs/spec/desktop.md)）
 - [ ] 多端：Windows / Linux / Android / iOS 持续跟进（[规划](docs/spec/platform.md)）
 - [ ] 发布目标：GitHub Pages · 对象存储直传

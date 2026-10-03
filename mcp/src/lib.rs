@@ -776,6 +776,36 @@ mod tests {
     }
 
     #[test]
+    fn conflow_digest_extracts_structure() {
+        let (s, dir) = server();
+        // 造一篇真实格式的对话文档
+        let conv = dir.path().join("Notes/Agent");
+        std::fs::create_dir_all(&conv).unwrap();
+        std::fs::write(
+            conv.join("2026-10-01 对话.md"),
+            "---\ndate: 2026-10-01\ntype: conversation\n---\n\n# 2026-10-01 对话\n\n## 09:00 我\n\n讨论一下导出功能的方案，待办：先做长图\n\n## 09:01 studio\n\n好的。\n\n## 09:05 我\n\n决定：卡片按块分页\n\n## 09:06 studio\n\n明白。\n",
+        ).unwrap();
+        // 知识卡生成
+        let r = conflow::digest(&s, "").unwrap();
+        assert_eq!(r["source"], "Notes/Agent/2026-10-01 对话.md");
+        assert_eq!(r["digest"], "Notes/Conflow/2026-10-01-知识卡.md");
+        assert_eq!(r["turns"], 4);
+        assert_eq!(r["points"], 2);
+        // 知识卡内容：要点 / 决定 / 待办 三段齐备
+        let md = std::fs::read_to_string(dir.path().join("Notes/Conflow/2026-10-01-知识卡.md")).unwrap();
+        assert!(md.contains("## 讨论要点"));
+        assert!(md.contains("讨论一下导出功能的方案"));
+        assert!(md.contains("决定：卡片按块分页"));
+        assert!(md.contains("待办：先做长图"));
+        // 列表：最新一篇排序在前
+        let list = conflow::list_conversations(&s).unwrap();
+        assert_eq!(list[0]["date"], "2026-10-01");
+        // 命令模式动词可达
+        let out = agent::command_mode(&s, "总结对话");
+        assert!(out.reply.contains("知识卡已生成"), "got: {}", out.reply);
+    }
+
+    #[test]
     fn plugin_tools_register_and_kbsearch_roundtrip() {
         let (s, dir) = server();
         seed_tool_plugin(&dir, "https://example.com/api?q={kw}", json!({}));
@@ -1438,6 +1468,119 @@ fn ssrf_guard(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/* ───────── ConFlow 对话流（矩阵产品 · 内置整合）─────────
+   独立开发、定期整合：ConFlow 的知识卡逻辑独立成模块，知识卡落在独立命名空间
+   Notes/Conflow/，未来独立部署版经 MCP 连接器替换本模块即可，ThirdC 侧无感。 */
+pub mod conflow {
+    use crate::McpServer;
+    use serde_json::{json, Value};
+
+    pub const DIR: &str = "Notes/Conflow";
+
+    /// 列出库内对话文档（Notes/Agent 下含「对话」且 type: conversation 的文档）。
+    pub fn list_conversations(server: &McpServer) -> Result<Vec<Value>, String> {
+        let mut k = server.kernel.lock().map_err(|_| "内核锁异常".to_string())?;
+        let _ = k.sync_throttled();
+        let mut out = Vec::new();
+        for p in kernel_core::list_docs(&k.vault).map_err(|e| e.to_string())? {
+            let rel = p.to_string_lossy().into_owned();
+            if !rel.starts_with("Notes/Agent/") || !rel.contains("对话") || !rel.ends_with(".md") { continue }
+            let text = std::fs::read_to_string(k.vault.root.join(&p)).unwrap_or_default();
+            if !text.contains("type: conversation") { continue }
+            let turns = text.matches("\n## ").count();
+            let date = rel.trim_end_matches(" 对话.md").rsplit('/').next().unwrap_or("").to_string();
+            out.push(json!({ "path": rel, "date": date, "turns": turns, "bytes": text.len() }));
+        }
+        out.sort_by(|a, b| {
+            let da = a.get("date").and_then(|x| x.as_str()).unwrap_or("");
+            let db = b.get("date").and_then(|x| x.as_str()).unwrap_or("");
+            db.cmp(da)
+        });
+        Ok(out)
+    }
+
+    /// 生成知识卡（规则提炼，无需模型）：要点 = 我方各轮首句；决定 / 待办 = 关键词行。
+    /// 空路径 = 最新一篇；传日期 = Notes/Agent/<日期> 对话.md。
+    pub fn digest(server: &McpServer, rel_or_date: &str) -> Result<Value, String> {
+        let rel = if rel_or_date.trim().is_empty() {
+            list_conversations(server)?
+                .first()
+                .and_then(|c| c.get("path")).and_then(|p| p.as_str())
+                .ok_or("库内还没有对话记录")?.to_string()
+        } else if rel_or_date.contains('/') {
+            rel_or_date.trim().to_string()
+        } else {
+            format!("Notes/Agent/{} 对话.md", rel_or_date.trim())
+        };
+
+        let mut k = server.kernel.lock().map_err(|_| "内核锁异常".to_string())?;
+        let text = std::fs::read_to_string(k.vault.root.join(&rel))
+            .map_err(|_| format!("对话不存在：{rel}"))?;
+        let date = rel.trim_end_matches(" 对话.md").rsplit('/').next().unwrap_or("").to_string();
+
+        // 解析轮次：## HH:MM role → (time, role, body)
+        let mut turns: Vec<(String, String, String)> = Vec::new();
+        let mut cur: Option<(String, String)> = None;
+        let mut buf = String::new();
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("## ") {
+                if let Some((t, r)) = cur.take() { turns.push((t, r, std::mem::take(&mut buf))); }
+                let mut it = rest.splitn(2, ' ');
+                let time = it.next().unwrap_or("").to_string();
+                let role = it.next().unwrap_or("").to_string();
+                cur = Some((time, role));
+            } else if cur.is_some() {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+        }
+        if let Some((t, r)) = cur.take() { turns.push((t, r, buf)); }
+
+        let my_turns: Vec<&(String, String, String)> = turns.iter().filter(|(_, r, _)| r == "我").collect();
+        let points: Vec<String> = my_turns.iter()
+            .filter_map(|(_, _, x)| x.lines().find(|l| !l.trim().is_empty()))
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .map(|l| if l.chars().count() > 60 { format!("{}…", l.chars().take(60).collect::<String>()) } else { l.to_string() })
+            .collect();
+        let mut actions: Vec<String> = Vec::new();
+        let mut decisions: Vec<String> = Vec::new();
+        for (_, _, x) in &turns {
+            for l in x.lines() {
+                let ll = l.trim();
+                if ll.is_empty() { continue }
+                let is_action = ll.starts_with("- [ ]") || ll.contains("待办") || ll.contains("TODO") || ll.contains("后续：");
+                let is_decision = ll.contains("决定") || ll.contains("结论：") || ll.contains("结论:");
+                if is_action && !actions.contains(&ll.to_string()) { actions.push(ll.to_string()); }
+                if is_decision && !decisions.contains(&ll.to_string()) && !is_action { decisions.push(ll.to_string()); }
+            }
+        }
+        let duration = if turns.len() >= 2 {
+            format!("{} → {}", turns.first().unwrap().0, turns.last().unwrap().0)
+        } else { "—".to_string() };
+
+        let mut md = format!("# ConFlow 知识卡 · {date}\n\n> 来源：`{rel}` · {} 轮 · {duration}\n\n## 讨论要点\n", my_turns.len());
+        if points.is_empty() { md.push_str("- （无有效讨论）\n"); } else { for p in &points { md.push_str(&format!("- {p}\n")); } }
+        md.push_str("\n## 决定\n");
+        if decisions.is_empty() { md.push_str("- （未识别到明确决定）\n"); } else { for d in &decisions { md.push_str(&format!("- {d}\n")); } }
+        md.push_str("\n## 待办\n");
+        if actions.is_empty() {
+            md.push_str("- [ ] （未识别到待办，可手动补充）\n");
+        } else {
+            for a in &actions {
+                let clean = a.trim_start_matches("- [ ]").trim().to_string();
+                md.push_str(&format!("- [ ] {clean}\n"));
+            }
+        }
+        md.push_str("\n> 由 ConFlow 对话流自动提炼（规则模式）。配好 AI 后在对话中说「用 AI 重新总结这篇对话」可获得语义级摘要。\n");
+
+        let digest_rel = format!("{DIR}/{date}-知识卡.md");
+        k.put_doc(&digest_rel, &md).map_err(|e| e.to_string())?;
+        Ok(json!({ "source": rel, "digest": digest_rel, "turns": turns.len(),
+                   "points": points.len(), "decisions": decisions.len(), "actions": actions.len() }))
+    }
+}
+
 pub mod agent {
     use crate::McpServer;
     use kernel_core::AiConfig;
@@ -1469,6 +1612,7 @@ pub mod agent {
             ("新建", "new"), ("创建", "new"), ("new", "new"),
             ("采集", "pull"), ("拉取", "pull"), ("pull", "pull"),
             ("同步", "sync"), ("sync", "sync"), ("状态", "status"), ("status", "status"),
+            ("总结对话", "digest"), ("对话总结", "digest"), ("对话纪要", "digest"), ("digest", "digest"),
         ];
         let (kind, rest) = verbs
             .iter()
@@ -1478,6 +1622,32 @@ pub mod agent {
 
         // 不需要模型的本地动作
         match kind {
+            "digest" => {
+                // ConFlow 对话流：rest 可为日期（2026-09-25）或空（最新一篇）
+                return match crate::conflow::digest(server, rest) {
+                    Ok(r) => Outcome {
+                        mode: "command",
+                        reply: format!(
+                            "知识卡已生成：{}（{} 轮 · 要点 {} · 决定 {} · 待办 {}）",
+                            r["digest"].as_str().unwrap_or(""),
+                            r["turns"], r["points"], r["decisions"], r["actions"]
+                        ),
+                        steps: vec![Step {
+                            tool: "conflow_digest".into(),
+                            args: json!({ "source": r["source"] }),
+                            ok: true,
+                            summary: r["digest"].as_str().unwrap_or("").to_string(),
+                        }],
+                        tokens: 0,
+                    },
+                    Err(e) => Outcome {
+                        mode: "command",
+                        reply: format!("总结失败：{e}"),
+                        steps: vec![Step { tool: "conflow_digest".into(), args: json!({}), ok: false, summary: e }],
+                        tokens: 0,
+                    },
+                };
+            }
             "new" if !rest.is_empty() => {
                 let slug = kernel_core::slugify(rest);
                 let path = if slug.is_empty() {

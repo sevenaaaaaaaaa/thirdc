@@ -7,8 +7,214 @@
 //! 显示一页可读的错误（库路径 + 原因 + 下一步怎么办）。
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// ego-lite 内置渲染槽：隐藏 webview 抓取 JS 渲染后的页面 DOM。
+#[derive(Default)]
+struct RenderSlot(StdMutex<Option<String>>);
+
+/// 多库注册表：独立开发、统一管理。库本身永远是普通目录（文件真相不受注册表影响）。
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct VaultEntry {
+    name: String,
+    path: String,
+    origin: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+struct VaultRegistry {
+    #[serde(default)]
+    vaults: Vec<VaultEntry>,
+    #[serde(default)]
+    current: Option<VaultEntry>,
+}
+
+fn registry_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("配置目录不可用：{e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
+    Ok(dir.join("vaults.json"))
+}
+
+fn prefs_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("配置目录不可用：{e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
+    Ok(dir.join("prefs.json"))
+}
+
+/// 用户偏好（localStorage 的 thirdc_* 键）：跨库（跨 origin）持久化。
+/// 每个 origin 的内核 token 不同，thirdc_token 排除——页面首帧从 URL 写入正确值。
+#[tauri::command]
+fn desktop_prefs_save(app: AppHandle, prefs: serde_json::Value) -> Result<(), String> {
+    if !prefs.is_object() {
+        return Err("prefs 必须是对象".into());
+    }
+    let p = prefs_path(&app)?;
+    std::fs::write(&p, serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("写入偏好失败：{e}"))
+}
+
+fn load_registry(app: &AppHandle) -> VaultRegistry {
+    registry_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_registry(app: &AppHandle, reg: &VaultRegistry) -> Result<(), String> {
+    let p = registry_path(app)?;
+    std::fs::write(&p, serde_json::to_string_pretty(reg).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("写入注册表失败：{e}"))
+}
+
+fn vault_name_for(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ThirdC".into())
+}
+
+fn sanitize_vault_name(name: &str) -> Result<String, String> {
+    let t: String = name
+        .trim()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || (*c as u32) > 0x2E7F)
+        .collect();
+    if t.is_empty() {
+        return Err("库名不能为空（仅保留文字/数字/连字符）".into());
+    }
+    Ok(t.chars().take(40).collect())
+}
+
+/// 在新线程里启动新库的内核，注册表登记为当前库，并把主窗口导航过去。
+/// 旧库的内核继续在后台监听（无句柄可停，资源占用小、互不干扰）——
+/// 新实例优先绑 7717 失败会自动换端口，不会冲突。
+fn switch_and_navigate(app: &AppHandle, path: PathBuf, name: String) -> Result<String, String> {
+    let (port, token) = boot_kernel(path.clone())?;
+    wait_ready(port);
+    let origin = format!("http://127.0.0.1:{port}");
+    let url = format!("{origin}/?token={token}");
+    let mut reg = load_registry(app);
+    let entry = VaultEntry { name, path: path.display().to_string(), origin: origin.clone() };
+    reg.vaults.retain(|v| v.path != entry.path);
+    reg.vaults.insert(0, entry.clone());
+    reg.current = Some(entry);
+    save_registry(app, &reg)?;
+    if let Some(w) = app.get_webview_window("main") {
+        w.navigate(url.parse().map_err(|e| format!("地址解析失败：{e}"))?)
+            .map_err(|e| format!("窗口导航失败：{e}"))?;
+    }
+    Ok(url)
+}
+
+#[tauri::command]
+fn ego_render_result(state: tauri::State<RenderSlot>, html: String) -> Result<(), String> {
+    let mut slot = state.0.lock().map_err(|_| "渲染槽锁异常".to_string())?;
+    if slot.is_none() {
+        *slot = Some(html);
+    }
+    Ok(())
+}
+
+/// 内置 ego-lite：隐藏 webview 打开页面（跑完 JS），抓取渲染后的完整 DOM。
+/// 页面 load 完成 + 1.8s 缓冲后自动回传；总超时 40s。
+#[tauri::command]
+async fn desktop_render_page(
+    app: AppHandle,
+    state: tauri::State<'_, RenderSlot>,
+    url: String,
+) -> Result<String, String> {
+    use tauri::webview::PageLoadEvent;
+    {
+        let mut slot = state.0.lock().map_err(|_| "渲染槽锁异常".to_string())?;
+        *slot = None;
+    }
+    let (tx, _rx) = std::sync::mpsc::channel::<tauri::WebviewWindow>();
+    let _ = tx;
+    let label = format!("ego-render-{}", std::process::id());
+    let label_for_close = label.clone();
+    let label_inner = label.clone();
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("URL 解析失败：{e}"))?;
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        let builder = WebviewWindowBuilder::new(
+            &app2,
+            &label_inner,
+            WebviewUrl::External(parsed.clone()),
+        )
+        .title("ego render")
+        .visible(false)
+        .inner_size(1280.0, 900.0);
+        let _ = builder
+            .on_page_load(move |w, _payload| {
+                if matches!(_payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                    let _ = w.eval(
+                        "setTimeout(function(){try{window.__TAURI_INTERNALS__.invoke('ego_render_result',{html:document.documentElement.outerHTML})}catch(e){}},1800)",
+                    );
+                }
+            })
+            .build();
+    })
+    .map_err(|e| format!("主线程调度失败：{e}"))?;
+
+    // 轮询渲染槽；拿到结果即关闭渲染窗口
+    for _ in 0..200 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let got = {
+            let mut slot = state.0.lock().map_err(|_| "渲染槽锁异常".to_string())?;
+            slot.take()
+        };
+        if let Some(html) = got {
+            if let Some(w) = app.get_webview_window(&label) {
+                let _ = w.close();
+            }
+            if html.len() < 200 {
+                return Err("页面渲染结果过短（可能是空页或被拦截）".into());
+            }
+            return Ok(html);
+        }
+    }
+    if let Some(w) = app.get_webview_window(&label_for_close) {
+        let _ = w.close();
+    }
+    Err("渲染超时（40s）".into())
+}
+
+#[tauri::command]
+fn desktop_vaults(app: AppHandle) -> Result<serde_json::Value, String> {
+    let reg = load_registry(&app);
+    Ok(serde_json::json!({ "vaults": reg.vaults, "current": reg.current }))
+}
+
+#[tauri::command]
+fn desktop_create_vault(app: AppHandle, name: String) -> Result<String, String> {
+    let name = sanitize_vault_name(&name)?;
+    let dir = default_vault()
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(&name);
+    if dir.exists() && !dir.join("thirdc.toml").is_file() {
+        return Err(format!("目录已存在且不是 ThirdC 库：{}", dir.display()));
+    }
+    switch_and_navigate(&app, dir, name)
+}
+
+#[tauri::command]
+fn desktop_switch_vault(app: AppHandle, path: String) -> Result<String, String> {
+    let p = PathBuf::from(path.trim());
+    if !p.is_dir() {
+        return Err(format!("目录不存在：{}", p.display()));
+    }
+    let name = vault_name_for(&p);
+    switch_and_navigate(&app, p, name)
+}
 
 /// 默认库位置：~/Documents/ThirdC，可用 THIRDC_VAULT 覆盖。
 fn default_vault() -> PathBuf {
@@ -145,6 +351,15 @@ pub fn run() {
     let vault_override = std::env::var_os("THIRDC_VAULT").map(PathBuf::from);
 
     tauri::Builder::default()
+        .manage(RenderSlot(StdMutex::new(None)))
+        .invoke_handler(tauri::generate_handler![
+            desktop_vaults,
+            desktop_create_vault,
+            desktop_switch_vault,
+            desktop_render_page,
+            ego_render_result,
+            desktop_prefs_save
+        ])
         .setup(move |app| {
             let vault_path = vault_override.unwrap_or_else(|| {
                 #[cfg(mobile)]
@@ -156,7 +371,12 @@ pub fn run() {
                 }
                 #[cfg(desktop)]
                 {
-                    default_vault()
+                    // 恢复上次使用的库（注册表）；首次启动回落到默认库。
+                    let reg = load_registry(app.handle());
+                    reg.current
+                        .map(|c| PathBuf::from(c.path))
+                        .filter(|p| p.is_dir())
+                        .unwrap_or_else(default_vault)
                 }
             });
             let url = match boot_kernel(vault_path.clone()) {
@@ -182,6 +402,23 @@ pub fn run() {
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                     .title("ThirdC Studio")
                     .resizable(true);
+
+            /* 偏好初始化脚本：每次页面加载（含换库导航）把 prefs.json 灌进 localStorage，
+               主题/昵称/树状态等跨库保留。token 除外——每个 origin 的内核 token 不同，
+               页面首帧会从 URL 写入正确值。 */
+            #[cfg(desktop)]
+            {
+                let prefs_txt = prefs_path(app.handle())
+                    .ok()
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .filter(|s| serde_json::from_str::<serde_json::Value>(s).map(|v| v.is_object()).unwrap_or(false))
+                    .unwrap_or_else(|| "{}".into());
+                let init = format!(
+                    r#"try{{var __prefs={prefs};Object.keys(__prefs).forEach(function(k){{if(k==='thirdc_token')return;try{{localStorage.setItem(k,__prefs[k])}}catch(e){{}}}})}}catch(e){{}}"#,
+                    prefs = prefs_txt
+                );
+                builder = builder.initialization_script(&init);
+            }
 
             /* 桌面专属的窗口几何/装饰：移动端 API 不存在 */
             #[cfg(desktop)]

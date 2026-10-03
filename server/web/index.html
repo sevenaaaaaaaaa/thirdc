@@ -73,7 +73,7 @@ html.desktop #chrome button,html.desktop #chrome input,html.desktop #chrome nav,
 #acct-btn .on{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--ok);display:none;border:1px solid var(--surface)}
 #acct-btn.linked .on{display:block}
 #more-btn{font-size:17px;font-weight:700;line-height:1}
-#more-menu{position:fixed;top:calc(var(--chrome-h) + 8px);right:12px;z-index:var(--z-overlay);display:none;flex-direction:column;min-width:196px;padding:6px;border-radius:var(--r-lg);
+#more-menu{position:fixed;bottom:calc(var(--dock-h) + 16px);right:12px;z-index:var(--z-overlay);display:none;flex-direction:column;min-width:196px;padding:6px;border-radius:var(--r-lg);
   border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
 #more-menu.open{display:flex;animation:nodeIn .18s var(--ease-out) both}
 .mm-item{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:var(--r-md);border:none;background:transparent;color:var(--muted);
@@ -117,7 +117,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
   font:600 11px var(--font-body);cursor:pointer;transition:all .15s var(--ease-out)}
 .rw-tab:hover{color:var(--fg);background:var(--glass)}
 .rw-tab.on{color:var(--accent);background:var(--accent-soft)}
-.rw-panes{max-height:230px;overflow:auto;padding:0 8px 8px}
+.rw-panes{max-height:200px;overflow:auto;padding:0 8px 8px}
 .rw-pane[hidden]{display:none}
 .rw-pane#memo-slot{position:static;visibility:visible;transform:none;box-shadow:none;margin:4px 2px 0;padding:8px 4px 2px;border:none;background:transparent}
 /* 迷你日历 */
@@ -134,10 +134,11 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .mc-cell .dot-n{position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--accent)}
 .mc-cell .dot-n.cap{background:var(--type-capture)}
 /* 工具快捷入口栅格 */
-.rw-tools{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:6px 0 2px}
-.rw-tools button{display:flex;flex-direction:column;align-items:center;gap:2px;height:46px;padding:6px 2px;border-radius:var(--r-md);
-  border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;font:500 9.5px var(--font-body);transition:all .18s var(--ease-out)}
-.rw-tools button:hover{color:var(--fg);border-color:var(--border-strong);background:var(--surface-strong);transform:translateY(-1px)}
+/* 工具快捷入口：幽灵式列表（无盒子描边，悬停浮起）——减少圆角矩形密度 */
+.rw-tools{display:grid;grid-template-columns:repeat(2,1fr);gap:2px;padding:6px 0 2px}
+.rw-tools button{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border-radius:var(--r-md);
+  border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font:500 12px var(--font-body);transition:all .15s var(--ease-out)}
+.rw-tools button:hover{color:var(--fg);background:var(--glass)}
 .rw-tools button em{font-style:normal;font-size:13px;line-height:1}
 .rw-plug-head{margin:10px 2px 4px;font:600 10.5px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
 .rw-plug-cmd{display:block;width:100%;text-align:left;margin:0 0 4px;padding:7px 10px;border-radius:var(--r-md);border:1px solid var(--border);
@@ -193,7 +194,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 #export-preview img{max-height:300px;max-width:100%;border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-sm)}
 .export-hidden{position:fixed;left:-12000px;top:0;visibility:hidden;z-index:-1}
 /* Studio Slot：镜头四档与「过滤文档」并为顶部一处过滤行 */
-.rail-filter{padding:2px 10px 8px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
+.rail-filter{padding:8px 10px 4px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
 #rail-fold{position:absolute;top:8px;right:8px;z-index:2;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);
   background:var(--surface-strong);color:var(--muted);cursor:pointer;display:grid;place-items:center;padding:0;transition:color .15s,border-color .15s}
 #rail-fold:hover{color:var(--fg);border-color:var(--border-strong)}
@@ -296,7 +297,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .stepchip.run{background:var(--accent-soft);color:var(--accent)}
 .stepchip .spin{width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.dockbar{display:flex;align-items:center;gap:10px;height:var(--dock-h);padding:0 14px;border:0;border-top:1px solid var(--border);
+.dockbar{display:flex;align-items:center;gap:10px;height:var(--dock-h);padding:0 12px;border:0;border-top:1px solid var(--border);
   background:var(--chat-bg);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
 #dock.thinking .dockbar{border-color:color-mix(in oklab,var(--accent) 55%,var(--border));
   box-shadow:var(--shadow),0 0 0 4px var(--accent-soft),0 0 44px -8px var(--accent)}
@@ -307,7 +308,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .send:active{transform:scale(.94)}
 .send svg{width:17px;height:17px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 /* 状态簇：连接 / 统计 / 用户 / 提示的唯一家（原 statusbar 并入底栏右端） */
-.sb-cluster{display:flex;align-items:center;gap:14px;margin-left:6px;padding-left:14px;border-left:1px solid var(--border);
+.dock-right-legacy{display:flex;align-items:center;gap:14px;padding-left:14px;border-left:1px solid var(--border);
   font-family:var(--font-mono);font-size:11px;color:var(--faint);flex:0 0 auto;white-space:nowrap}
 .sb-cluster .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px}
 #sb-sync{cursor:pointer;font-variant-numeric:tabular-nums;transition:color .2s}
@@ -339,9 +340,9 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .panel{width:min(560px,92vw);background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);
   backdrop-filter:blur(22px) saturate(160%);overflow:hidden;animation:nodeIn .4s var(--ease-spring) both}
-.panel-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.panel-head{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--border)}
 .panel-head h3{margin:0;font-family:var(--font-display);font-size:15px;flex:1}
-.panel-body{padding:14px 16px;max-height:56vh;overflow:auto}
+.panel-body{padding:16px 20px;max-height:56vh;overflow:auto}
 .prow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-md);cursor:pointer}
 .prow:hover,.prow.on{background:var(--hover)}
 .prow .t{flex:1;font-size:13.5px}
@@ -418,7 +419,32 @@ body.agent #canvas{filter:saturate(.55) brightness(.82)}
 body[data-mode="organize"] #canvas{cursor:crosshair}
 
 /* ── Studio 视图胶囊（§3.1/P2）：视图切换属画布，不属全局导航 ── */
-#view-pill{position:fixed;top:calc(var(--chrome-h) + 12px);right:12px;z-index:var(--z-chrome);display:flex;align-items:center;
+/* ── 底栏 v2：侧栏开关 · 模式切换 · 对话/搜索 · 固定入口 · 右侧状态簇 ── */
+.dk-icon{width:34px;height:34px;flex:0 0 auto;display:grid;place-items:center;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;transition:all .15s var(--ease-out);font:600 13px var(--font-body)}
+.dk-icon:hover{color:var(--fg);background:var(--glass)}
+.dk-icon.on{color:var(--accent);background:var(--accent-soft)}
+.dk-icon svg{width:17px;height:17px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.dk-pins{display:flex;gap:2px;align-items:center}
+.dk-pin{height:30px;padding:0 10px;border-radius:var(--r-md);border:none;background:transparent;color:var(--muted);font:500 12px var(--font-body);cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:all .15s var(--ease-out)}
+.dk-pin:hover{color:var(--fg);background:var(--glass)}
+.dk-right{display:flex;align-items:center;gap:2px;margin-left:auto;flex:0 0 auto}
+.dk-chip{height:26px;padding:0 10px;border-radius:var(--r-pill);border:none;background:transparent;color:var(--muted);font:500 11px var(--font-mono);cursor:pointer;transition:all .15s var(--ease-out)}
+.dk-chip:hover{color:var(--fg);background:var(--glass)}
+.sync-ind{width:10px;height:10px;border-radius:50%;flex:0 0 auto;position:relative;cursor:pointer;margin:0 6px}
+.sync-ind.ok{background:var(--ok)}
+.sync-ind.err{background:var(--danger)}
+.sync-ind.warn{background:var(--warn)}
+.sync-ind.busy{background:transparent}
+.sync-ind.busy::after{content:'';position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--accent);border-top-color:transparent;animation:sb-spin .8s linear infinite}
+.dock-legacy{display:none!important}
+/* 固定入口选择弹层 */
+#pin-menu{position:fixed;z-index:var(--z-overlay);display:none;flex-direction:column;min-width:180px;padding:6px;border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow)}
+#pin-menu.open{display:flex}
+#pin-menu button{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:none;border-radius:var(--r-md);background:transparent;color:var(--fg);font:500 12.5px var(--font-body);cursor:pointer;text-align:left}
+#pin-menu button:hover{background:var(--glass)}
+#pin-menu button .chk{width:14px;flex:0 0 auto;color:var(--accent);font-weight:700}
+/* 画布视图切换：画布右下角悬浮（原顶栏右侧移入） */
+#view-pill{position:fixed;bottom:calc(var(--dock-h) + 14px);right:12px;z-index:var(--z-canvas);display:flex;align-items:center;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px;gap:2px;
   box-shadow:var(--shadow-sm);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 #view-pill button{height:26px;padding:0 12px;border-radius:var(--r-pill);border:none;background:transparent;color:var(--muted);
@@ -599,7 +625,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .share-card .link{font-family:var(--font-mono);font-size:11.5px;color:var(--accent);word-break:break-all;padding:10px;background:var(--hover);border-radius:var(--r-md);cursor:pointer}
 .share-card .hint{font-size:11px;color:var(--faint);margin-top:8px}
 #ws-panel{position:fixed;top:calc(var(--chrome-h) + 12px);left:var(--rail-x,270px);right:290px;z-index:var(--z-drawer);display:none;
-  background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
+  background:var(--surface-strong);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 20px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
 #ws-panel.open{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 .ws-chip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);cursor:pointer;font:500 13px var(--font-body);transition:all .2s var(--ease-out)}
 .ws-chip:hover{border-color:var(--border-strong);background:var(--surface-strong)}
@@ -682,7 +708,7 @@ body[data-view="timeline"] .node:hover,body[data-view="kanban"] .node:hover{tran
 .empty p{margin:0 0 16px;color:var(--muted);font-size:13px}
 .empty .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 @media (max-width:900px){#drawer{width:calc(100vw - 20px)}
-  .sb-cluster .sb-hint,#sb-peers{display:none}
+  .sb-hint,.dk-chip:not(#sb-peers){display:none}
   .ob-grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
 
 /* ── 键盘焦点：可 tab 元素必须有可见焦点环 ── */
@@ -794,7 +820,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   #board-pill{display:none}
   #crumb{display:none} /* 窄屏与视图胶囊重叠；文件夹导航走左栏抽屉树 */
   #dock .thread{max-height:68vh}
-  .sb-cluster #sb-stats,.sb-cluster #sb-peers,.sb-cluster #sb-user,.sb-cluster #sb-ai{display:none}
+  #dock-tokens,#dock-cmdmode,#sb-peers{display:none}
 }
 /* ⋯ 菜单里的展示入口：仅底部导航接管模式切换时出现（桌面由 seg 呈现） */
 #present-mm{display:none}
@@ -881,7 +907,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <span class="mark">3C</span><span class="bname" id="brand-name">ThirdC</span>
     <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
   </button>
-  <button class="search-pill" id="search-btn" title="检索与命令（⌘K）">
+    <button class="search-pill dock-legacy" id="search-btn" title="检索与命令（⌘K）">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <span class="sp-txt">搜索文档、命令…</span><kbd>⌘K</kbd>
   </button>
@@ -895,8 +921,8 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <button data-mode="present" aria-pressed="false">展示</button>
   </nav>
   <div class="chrome-actions">
-    <button class="icon-btn" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
-    <button class="icon-btn" id="more-btn" title="更多" aria-expanded="false" aria-haspopup="menu" aria-controls="more-menu">⋯</button>
+    <button class="icon-btn dock-legacy" id="acct-btn" title="账号 / 同步"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span class="on"></span></button>
+    <button class="icon-btn dock-legacy" id="more-btn" title="更多" aria-expanded="false" aria-haspopup="menu" aria-controls="more-menu">⋯</button>
   </div>
 </header>
 <div id="more-menu">
@@ -919,13 +945,11 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <!-- 学习 Slot：目录大纲（Memo/日历/工具在下方共用 Widget 区） -->
   <div class="rail-slot slot-learn">
     <div id="toc"><h4>目录</h4><div id="toc-list"></div></div>
-    <button id="memo-slot-btn" aria-expanded="true" title="Memo：热力图 / 标签 / 随手记">📒 Memo</button>
   </div>
   <!-- Studio Slot：过滤行（镜头四档）+ 文档树 + 动作 -->
   <div class="rail-slot slot-studio">
     <div class="rail-filter">
-      <input id="rail-search" placeholder="过滤文档…">
-      <nav class="rail-lens" id="rail-lens" title="透镜：只看某一类">
+    <nav class="rail-lens" id="rail-lens" title="透镜：只看某一类">
         <button class="tab-pill on" data-lens="all" aria-pressed="true">全部</button>
         <button class="tab-pill" data-lens="doc" aria-pressed="false">文档</button>
         <button class="tab-pill" data-lens="capture" aria-pressed="false">采集</button>
@@ -968,6 +992,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
           <button id="rt-trash" title="已删除文档可恢复">🗑<span>回收站</span></button>
           <button id="rt-road" title="功能可见性契约">🗺<span>路线图</span></button>
           <button id="rt-matrix" title="芭乐派产品矩阵：Conflow / WebsFlow / PayFlow / InFlow">🌐<span>生态矩阵</span></button>
+          <button id="rt-conflow" title="ConFlow 对话流：对话沉淀知识卡">💬<span>对话流</span></button>
         </div>
         <div class="rw-plug-head">插件</div>
         <div id="rw-plugins"></div>
@@ -999,18 +1024,26 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <section id="dock">
   <div class="thread" id="thread"></div>
   <div class="dockbar">
-    <button id="agent-toggle" title="对话优先：画布退居背景" aria-pressed="false">🤖 Agent</button>
+    <button class="dk-icon" id="dock-rail" title="展开 / 收起左侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+    <button class="dk-icon" id="dock-mode" title="切换：Agent 对话 / 全文搜索">🤖</button>
     <input id="say" placeholder="和知识库对话…">
+    <div id="dock-pins" class="dk-pins"></div>
     <button class="send" id="send" title="发送" aria-label="发送消息"><svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
-    <!-- 状态簇：连接 / 统计 / 同步进度 / 在线 / 用户 / 提示的唯一家（原 statusbar 并入） -->
-    <div class="sb-cluster">
-      <span><span class="dot" id="sb-dot"></span><span id="sb-conn">connecting</span></span>
-      <span id="sb-stats">—</span>
-      <span id="sb-sync" style="display:none" title="点击刷新"></span>
-      <span id="sb-peers">在线 1</span>
-      <span id="sb-user"></span>
-      <span id="sb-ai"></span>
-      <span class="sb-hint">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
+    <div class="dk-right">
+      <button class="dk-chip" id="dock-tokens" title="Token 消耗">¥0.00</button>
+      <button class="dk-icon" id="dock-cmdmode" title="命令模式">⌘</button>
+      <button class="dk-chip" id="sb-peers" title="在线协作者">在线 1</button>
+      <button class="dk-icon" id="dock-user" title="个人中心"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg></button>
+      <button class="dk-icon" id="dock-more" title="更多">⋯</button>
+      <span id="dock-sync-ind" class="sync-ind" title=""></span>
+      <!-- 旧状态位：既有 JS 仍写入，视觉由右侧新组件承载 -->
+      <span id="sb-conn" class="dock-legacy">connecting</span>
+      <span id="sb-stats" class="dock-legacy">—</span>
+      <span id="sb-sync" class="dock-legacy" style="display:none" title="点击刷新"></span>
+      <span id="sb-user" class="dock-legacy"></span>
+      <span id="sb-ai" class="dock-legacy"></span>
+      <span class="sb-hint dock-legacy">拖拽空白平移 · ⌘滚轮缩放 · 双击节点编辑 · 拖拽节点排布</span>
+      <span><span class="dot" id="sb-dot" class="dock-legacy"></span></span>
     </div>
   </div>
 </section>
@@ -1027,6 +1060,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <span class="badge ok">文件真相</span>
     <span class="path" id="d-path"></span>
     <select class="style-sel" id="d-style" title="阅读设计风格（62 款 · 按场景）"><option value="">风格：默认</option></select>
+    <button class="icon-btn" id="d-graph" title="一键生成知识图谱（画布）">🕸</button>
     <button class="icon-btn" id="d-export" title="导出分享（长图 / 小红书 / 公众号 / Newsletter）"><svg viewBox="0 0 24 24"><path d="M12 3v13M6 11l6 6 6-6M4 21h16"/></svg></button>
     <button class="icon-btn" id="d-upload" title="上传附件（图片/PDF/DOCX）"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7-7 7 7"/></svg></button>
     <input type="file" id="d-file" style="display:none" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.docx,.doc,.xlsx,.pptx,.md,.txt,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.py,.js,.ts,.jsx,.tsx,.css,.scss,.sh,.rs,.go,.c,.h,.cpp,.java,.kt,.swift,.rb,.php,.sql,.log,.ini,.cfg,.conf">
@@ -1068,7 +1102,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 
 <div class="overlay" id="memo-ov"><div class="panel" style="width:min(940px,94vw);max-height:88vh;display:flex;flex-direction:column">
-  <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--border)">
     <b style="font-family:var(--font-display);font-size:15px">Memo</b>
     <span style="color:var(--faint);font-size:12px" id="memo-total"></span>
     <input class="inp" id="memo-q" placeholder="搜标题 / 路径 / 标签…" style="margin-left:auto;width:230px;height:32px">
@@ -1155,6 +1189,23 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 <div class="peers-pop" id="peers-pop"></div>
 
+<div class="overlay" id="conflow-ov"><div class="panel" style="width:min(640px,94vw)">
+  <div class="panel-head"><h3>💬 ConFlow 对话流</h3><span class="badge ok">已整合</span><button class="icon-btn" data-close="conflow-ov" title="关闭" aria-label="关闭对话流面板">✕</button></div>
+  <div class="panel-body">
+    <div style="font-size:12px;color:var(--faint);margin-bottom:10px">ConFlow（独立产品 · 定期整合）：Agent 对话自动归档，一键提炼为「要点 / 决定 / 待办」知识卡。知识卡存于 <span style="font-family:var(--font-mono)">Notes/Conflow/</span>。</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="act" id="cf-digest-latest" style="background:var(--accent);color:var(--on-accent);border-color:var(--accent)">⚡ 生成最新知识卡</button>
+      <button class="act" id="cf-ppt">🖼 生成演示 PPT</button>
+      <button class="act" id="cf-video">🎬 生成卡片视频</button>
+      <button class="act" id="cf-refresh">刷新</button>
+    </div>
+    <div class="rw-plug-head">对话记录</div>
+    <div id="cf-convs"></div>
+    <div class="rw-plug-head" style="margin-top:12px">已生成知识卡</div>
+    <div id="cf-digests"></div>
+  </div>
+</div></div>
+
 <div class="overlay" id="export-ov"><div class="panel" style="width:min(720px,94vw)">
   <div class="panel-head"><h3>导出分享</h3><span class="badge ok" id="export-style-name">—</span><button class="icon-btn" data-close="export-ov" title="关闭" aria-label="关闭导出面板">✕</button></div>
   <div class="panel-body">
@@ -1225,40 +1276,104 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div>
 
 <div id="settings-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
-<div style="width:min(460px,92vw);max-height:88vh;overflow:auto;padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
-  <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:14px">设置</div>
-  <div style="margin-bottom:16px">
-    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">账号</div>
-    <div id="set-acct-info" style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-bottom:6px"></div>
-    <div style="display:flex;gap:6px">
-      <button class="act" id="set-login" style="flex:1;background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">登录 / 同步账号</button>
-      <button class="act" id="set-logout" style="flex:1;border-color:var(--danger);color:var(--danger)">退出登录</button>
+<div style="width:min(520px,94vw);max-height:88vh;overflow:auto;padding:0;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
+  <div style="display:flex;align-items:center;padding:14px 20px 0">
+    <div style="font-family:var(--font-display);font-weight:700;font-size:17px;flex:1">设置</div>
+    <button class="icon-btn" onclick="document.getElementById('settings-ov').style.display='none'" title="关闭">✕</button>
+  </div>
+  <div class="set-tabs" style="display:flex;gap:2px;padding:10px 20px 0;border-bottom:1px solid var(--border)">
+    <button class="set-tab on" data-set="general">通用</button>
+    <button class="set-tab" data-set="vault">知识库</button>
+    <button class="set-tab" data-set="sync">账号与同步</button>
+    <button class="set-tab" data-set="about">关于</button>
+  </div>
+  <div style="padding:16px 20px 20px">
+  <div class="set-pane" data-pane="general">
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">主题</div>
+      <div style="display:flex;gap:6px" id="set-theme-seg">
+        <button class="act" data-settheme="auto" style="flex:1">跟随系统</button>
+        <button class="act" data-settheme="light" style="flex:1">浅色</button>
+        <button class="act" data-settheme="dark" style="flex:1">深色</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">协作昵称（对外可见）</div>
+      <div style="display:flex;gap:6px">
+        <input class="inp" id="set-nick" placeholder="访客" style="margin:0;flex:1">
+        <button class="act" id="set-nick-save" style="flex:0 0 auto">保存</button>
+      </div>
+    </div>
+    <div style="margin-bottom:4px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">阅读与展示风格</div>
+      <div style="font-size:12.4px;color:var(--muted)">62 款设计风格——打开任意文档后，在抽屉右上角「风格」下拉中选择（阅读/展示独立记忆）。</div>
     </div>
   </div>
-  <div id="desk-block" style="display:none;margin-bottom:16px">
-    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">本机能力</div>
-    <div id="desk-info" style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-bottom:8px"></div>
-    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">导入本机目录（md/txt/html 复制入库）</div>
-    <input class="inp" id="set-vault-path" placeholder="绝对路径（如 /Users/你/Documents）" style="margin-bottom:6px">
-    <div style="display:flex;gap:6px">
-      <button class="act" id="set-import" style="flex:1;border-style:dashed">导入目录</button>
-      <button class="act" id="set-term" style="flex:1">终端</button>
+  <div class="set-pane" data-pane="vault" hidden>
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">当前知识库</div>
+      <div id="set-vault-info" style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-bottom:8px"></div>
+      <button class="act" id="set-open-ws" style="width:100%">管理多库 / 新建库</button>
     </div>
-    <button class="act" id="set-scan" style="width:100%;margin-top:6px">扫描无用文档</button>
-    <div id="set-scan-out" style="display:none;margin-top:8px;font-size:12.5px;line-height:1.7;color:var(--muted)">
-      <div id="set-scan-list" style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;margin-bottom:6px"></div>
-      <button class="act" id="set-quarantine" style="width:100%;border-color:var(--danger);color:var(--danger)">隔离以上候选（移入 .thirdc/quarantine，可还原）</button>
+    <div id="desk-block" style="display:none;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">本机能力（桌面端）</div>
+      <div id="desk-info" style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-bottom:8px"></div>
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">导入本机目录（md/txt/html 复制入库）</div>
+      <input class="inp" id="set-vault-path" placeholder="绝对路径（如 /Users/你/Documents）" style="margin-bottom:6px">
+      <div style="display:flex;gap:6px">
+        <button class="act" id="set-import" style="flex:1;border-style:dashed">导入目录</button>
+        <button class="act" id="set-term" style="flex:1">终端</button>
+      </div>
+      <button class="act" id="set-scan" style="width:100%;margin-top:6px">扫描无用文档</button>
+      <div id="set-scan-out" style="display:none;margin-top:8px;font-size:12.5px;line-height:1.7;color:var(--muted)">
+        <div id="set-scan-list" style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;margin-bottom:6px"></div>
+        <button class="act" id="set-quarantine" style="width:100%;border-color:var(--danger);color:var(--danger)">隔离以上候选（移入 .thirdc/quarantine，可还原）</button>
+      </div>
     </div>
   </div>
-  <div style="margin-bottom:16px">
-    <div style="font-size:12px;color:var(--faint);margin-bottom:6px">远程同步</div>
-    <input class="inp" id="set-remote" placeholder="同步服务器 URL（可选）">
-    <button class="act" id="set-push" style="margin-top:6px;width:100%">推送</button>
+  <div class="set-pane" data-pane="sync" hidden>
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">账号</div>
+      <div id="set-acct-info" style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-bottom:6px"></div>
+      <div style="display:flex;gap:6px">
+        <button class="act" id="set-login" style="flex:1;background:var(--accent-soft);border-color:var(--accent);color:var(--accent)">登录 / 同步账号</button>
+        <button class="act" id="set-logout" style="flex:1;border-color:var(--danger);color:var(--danger)">退出登录</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">远程同步</div>
+      <input class="inp" id="set-remote" placeholder="同步服务器 URL（可选）">
+      <button class="act" id="set-push" style="margin-top:6px;width:100%">推送</button>
+    </div>
+    <div style="margin-bottom:4px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">备份</div>
+      <div style="display:flex;gap:6px">
+        <button class="act" id="set-backup" style="flex:1">全量备份（加密）</button>
+        <button class="act" id="set-webdav" style="flex:1">WebDAV 地址</button>
+      </div>
+    </div>
   </div>
-  <button class="act" onclick="document.getElementById('settings-ov').style.display='none'" style="margin-top:10px;width:100%">关闭</button>
+  <div class="set-pane" data-pane="about" hidden>
+    <div style="margin-bottom:14px">
+      <div style="font-family:var(--font-display);font-weight:700;font-size:15px">ThirdC Studio <span id="set-version" style="font-size:11px;color:var(--faint);font-weight:400"></span></div>
+      <div style="font-size:12.4px;line-height:1.8;color:var(--muted);margin-top:6px">
+        AI Agent 时代第一个 0 门槛、自然组织的知识库工具。<br>
+        本地优先 · 核心永久开源（AGPL-3.0）· 芭乐派产品矩阵成员（与 OpenFlow 同源设计契约）。
+      </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:12px;color:var(--faint);margin-bottom:6px">资源</div>
+      <div style="font-size:12.4px;line-height:2">
+        <a href="https://github.com/sevenaaaaaaaaa/thirdc" target="_blank" style="color:var(--accent)">GitHub 仓库 ↗</a><br>
+        <a href="https://github.com/sevenaaaaaaaaa/thirdc/releases" target="_blank" style="color:var(--accent)">版本发布 ↗</a><br>
+        <a href="https://github.com/sevenaaaaaaaaa/thirdc/releases/tag/v0.1.9" target="_blank" style="color:var(--accent)">安装问题（已损坏 / 无法验证开发者）↗</a>
+      </div>
+    </div>
+  </div>
+  </div>
 </div></div>
 <div id="acct-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
-<div style="width:min(400px,92vw);padding:24px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
+<div style="width:min(400px,92vw);padding:16px 20px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:17px;margin-bottom:4px">登录 / 同步账号</div>
   <div id="acct-state" style="font-size:12.4px;color:var(--muted);margin-bottom:10px;min-height:16px"></div>
   <div style="color:var(--faint);font-size:12px;margin-bottom:14px">登录后把远端知识库拉到本地（内容相同自动跳过，不覆盖本地改动以外的部分请谨慎）</div>
@@ -1280,7 +1395,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
   <button class="act" onclick="document.getElementById('acct-ov').style.display='none'" style="width:100%;margin-top:8px">关闭</button>
 </div></div>
 <div id="term-ov" style="position:fixed;inset:0;z-index:var(--z-overlay);display:none;place-items:center;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:blur(8px)">
-<div style="width:min(680px,94vw);padding:20px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
+<div style="width:min(680px,94vw);padding:16px 20px;border-radius:var(--r-lg);background:var(--surface-strong);border:1px solid var(--border);box-shadow:var(--shadow)">
   <div style="font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:4px">终端</div>
   <div style="font-size:12px;color:var(--faint);margin-bottom:10px">thirdc 命令需路径参数时用 <b>.</b>（工作目录已设为库根）<br>白名单：thirdc 子命令 · ls/cat/grep/rg/find/head/tail/wc/tree/du/file/stat · git status|log|diff|branch</div>
   <input class="inp" id="term-in" placeholder="thirdc status" style="font-family:var(--font-mono)" autocomplete="off">
@@ -1318,7 +1433,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 </div></div>
 <div id="ws-panel">
   <span class="kicker">工作区</span><span id="ws-list"></span>
-  <button class="ws-chip" id="ws-add" style="border-style:dashed">＋ 添加库</button>
+  <button class="ws-chip" id="ws-add" style="border-style:dashed;display:none">＋ 连接远程库</button>
   <button class="icon-btn" id="ws-close" style="width:26px;height:26px;margin-left:auto" title="关闭工作区面板" aria-label="关闭工作区面板">✕</button>
 </div>
 <div id="cal-ov">
@@ -1605,7 +1720,7 @@ function tidy(){
   list.forEach((n,i)=>{board.nodes[n.id]={x:(i%per)*COL,y:Math.floor(i/per)*ROW};});
   withAnim(()=>{});renderGraph();fit();saveBoard();toast('已整理 '+list.length+' 个节点');
 }
-function saveBoard(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{api('/board?name='+encodeURIComponent(boardName),{method:'PUT',json:{nodes:board.nodes}}).catch(()=>{});},420);}
+function saveBoard(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{api('/board?name='+encodeURIComponent(boardName),{method:'PUT',json:{nodes:board.nodes,edges:graph.edges}}).catch(()=>{});},420);}
 
 /* ───────── 画布交互（修复：容器不吃指针 + 拖拽不重建 DOM） ───────── */
 const canvas=$('canvas');
@@ -2076,12 +2191,12 @@ async function loadDocsFull(){
     window.__fullDocs=r.docs;
     window.__docsFetchedAt=Date.now();
     cacheSet('docs',r.docs);
-    if(!($('rail-search').value||'').trim())renderTreeFromTree(cacheGet('tree')||{dirs:[]});
+    renderTreeFromTree(cacheGet('tree')||{dirs:[]});
     const rc2=$('rail-count');if(rc2)rc2.textContent=r.docs.length;
   }catch{}
 }
 function renderTree(docs){
-  const q=($('rail-search').value||'').trim().toLowerCase();
+  const q='';
   const box=$('rail-list');box.innerHTML='';
   const root={dirs:new Map(),docs:[],path:''};
   for(const d of docs){
@@ -2581,6 +2696,8 @@ function dropDocLocal(path){
   }
   if(currentBrowse&&Array.isArray(currentBrowse.docs))currentBrowse.docs=currentBrowse.docs.filter(d=>d.path!==path);
   graph.nodes=graph.nodes.filter(n=>n.path!==path);
+  /* 关掉指向已删文档的标签（不然点开会 404） */
+  if(docTabs.includes(path)){docTabs=docTabs.filter(t=>t!==path);saveDocTabs();renderDocTabs();}
   if(selected==='doc:'+path){selected=null;$('inspector').classList.add('closed');}
   try{renderGraph()}catch{}
   try{renderTreeFromTree(cacheGet('tree')||{dirs:[]})}catch{}
@@ -2677,6 +2794,7 @@ async function chat(message){
           stepN++;chipFor(d.tool+(d.ok?' ✓':' ✕'),d.ok?'':'err');
         }else if(ev==='done'){
           clearInterval(tick);timer.remove();
+          if(d.tokens)addTokens(d.tokens);
           const meta=document.createElement('div');meta.className='meta';
           const secs=((performance.now()-chatT0)/1000).toFixed(1);
           meta.textContent=(d.tokens?`≈ ${d.tokens} tokens · `:'')+`${secs}s · ${stepN} 个工具调用`;
@@ -2705,8 +2823,17 @@ async function chat(message){
   }
   busy=false;$('dock').classList.remove('thinking');$('aura').classList.remove('on');
 }
-$b('send').onclick=()=>chat();
-$('say').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chat();}});
+function dockSubmit(){
+  const v=$('say').value.trim();if(!v)return;
+  if(dockMode==='search'){
+    $('say').value='';
+    openPalette(v);
+  }else{
+    chat();
+  }
+}
+$b('send').onclick=()=>dockSubmit();
+$('say').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();dockSubmit();}});
 
 
 
@@ -2920,7 +3047,7 @@ function renderBoards(){
       }
       boardName=b;$('board-name').textContent=b;closeAll();
       board=await api('/board?name='+encodeURIComponent(b));
-      renderGraph();fit();toast('已切换到画布 '+b,'ok');
+      graph.edges=board.edges||[];renderGraph();fit();toast('已切换到画布 '+b,'ok');
     };
     box.appendChild(el);
   });
@@ -2930,7 +3057,7 @@ function renderBoards(){
     const n=await uiPrompt('画布名','board-'+(boards.length+1));if(!n)return;
     await api('/boards',{method:'POST',json:{name:n}});
     await loadBoards();boardName=n;$('board-name').textContent=n;closeAll();
-    board=await api('/board?name='+encodeURIComponent(n));renderGraph();fit();
+    board=await api('/board?name='+encodeURIComponent(n));graph.edges=board.edges||[];renderGraph();fit();
   };
   box.appendChild(el);
 }
@@ -3126,7 +3253,12 @@ function closeTopFloat(){
   }
   return false;
 }
-function openPalette(){openOverlay('palette-ov');$('palette-in').value='';renderPalette('');setTimeout(()=>$('palette-in').focus(),30);}
+function openPalette(q){
+  openOverlay('palette-ov');
+  $('palette-in').value=q||'';
+  renderPalette(q||'');
+  setTimeout(()=>$('palette-in').focus(),30);
+}
 const CMDS=[
   ['新建文档','n',()=>{closeAll();newDoc();}],
   ['同步外部改动','s',async()=>{closeAll();const r=await api('/sync',{method:'POST'});toast('同步完成，合入 '+r.changed+' 篇');await refreshAll();}],
@@ -3196,7 +3328,21 @@ const CMDS=[
   ['网页本地化','w',async()=>{
     closeAll();const url=await uiPrompt('网页 URL','https://example.com/article');if(!url)return;
     try{
-      const r=await api('/ingest/web',{method:'POST',json:{url}});
+      let r;
+      if(IS_DESKTOP){
+        /* 内置 ego-lite：隐藏 webview 跑完 JS 后抓取渲染 DOM（失败自动回退直抓） */
+        toast('内置渲染器打开页面中…');
+        try{
+          const html=await tauriInvoke('desktop_render_page',{url});
+          r=await api('/ingest/html',{method:'POST',json:{url,html}});
+          toast('已用内置 ego-lite 渲染抓取','ok');
+        }catch(re){
+          toast('渲染器不可用（'+re.message.slice(0,40)+'），回退直抓','err');
+          r=await api('/ingest/web',{method:'POST',json:{url}});
+        }
+      }else{
+        r=await api('/ingest/web',{method:'POST',json:{url}});
+      }
       toast(`已本地化「${r.title||url}」→ ${r.rel}`,'ok');await refreshAll();openDoc(r.rel);
     }catch(e){toast('本地化失败：'+e.message,'err')}
   }],
@@ -3271,20 +3417,7 @@ function renderPalette(q){
     }).catch(()=>{});
   }
 }
-/* 侧栏过滤：有词 → 平铺过滤视图（标题/路径/标签）；清空 → 回到文件夹树 */
-let railT=null;
-$('rail-search').addEventListener('input',()=>{
-  clearTimeout(railT);
-  railT=setTimeout(()=>{
-    const q=($('rail-search').value||'').trim().toLowerCase();
-    if(q){
-      const docs=window.__fullDocs||cacheGet('docs')||[];
-      renderTree(docs);
-    }else{
-      renderTreeFromTree(cacheGet('tree')||{dirs:[]});
-    }
-  },160);
-});
+/* 树过滤输入已移除（搜索统一走 ⌘K）；保留平铺渲染器备用 */
 $('palette-in').addEventListener('input',e=>renderPalette(e.target.value));
 /* palette Escape：关自己并还原焦点 */
 $('palette-in').addEventListener('keydown',e=>{
@@ -3758,7 +3891,36 @@ async function shareEncrypted(path){
 }
 $('share-pass')?.addEventListener('keydown',e=>{if(e.key==='Enter')shareEncrypted(current)});
 
-/* ───────── 多库工作区 ───────── */
+/* ───────── 多库工作区 ─────────
+   桌面端：本地多库（Rust 注册表），新建库名称即建、点击即切换；
+   Web 端：连接其他 ThirdC 服务器实例（URL + Token）。 */
+const IS_DESKTOP=!!(window.__TAURI_INTERNALS__);
+function tauriInvoke(cmd,args){return window.__TAURI_INTERNALS__.invoke(cmd,args)}
+/* 桌面端偏好写同步：thirdc_* 键（token 除外）节流写回 prefs.json，
+   换库（换 origin）时由壳的初始化脚本灌回——主题/昵称/树状态等跨库保留 */
+let prefsSnap=null;
+function prefsCollect(){
+  const o={};
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k&&k.startsWith('thirdc_')&&k!=='thirdc_token')o[k]=localStorage.getItem(k);
+  }
+  return JSON.stringify(o);
+}
+function prefsSync(){
+  if(!IS_DESKTOP)return;
+  try{
+    const s=prefsCollect();
+    if(prefsSnap===s)return;
+    prefsSnap=s;
+    tauriInvoke('desktop_prefs_save',{prefs:JSON.parse(s)}).catch(()=>{});
+  }catch(e){}
+}
+if(IS_DESKTOP){
+  setInterval(prefsSync,4000);
+  addEventListener('beforeunload',()=>{try{prefsSync()}catch(e){}});
+  setTimeout(()=>{prefsSnap=prefsCollect()},3000);
+}
 function loadWorkspaces(){return JSON.parse(localStorage.getItem('thirdc_workspaces')||'[]')}
 function wsEnsureCurrent(){
   const list=loadWorkspaces();
@@ -3773,38 +3935,94 @@ function wsEnsureCurrent(){
 }
 function openWorkspace(w){
   if(!w||w.url===location.origin)return;
+  if(IS_DESKTOP){toast('桌面端请通过本地库列表切换——远程库用「设置 → 账号与同步」拉取','err');return}
   localStorage.setItem('thirdc_token',w.token||token);
   localStorage.setItem('thirdc_last_ws',w.url);
   location.href=w.url+'/?token='+w.token;
 }
-function renderWorkspaces(){
-  const list=wsEnsureCurrent();const box=$('ws-list');box.innerHTML='';
+async function renderLocalVaults(box){
+  try{
+    const r=await tauriInvoke('desktop_vaults');
+    const curOrigin=(r.current&&r.current.origin)||'';
+    (r.vaults||[]).forEach(v=>{
+      const b=document.createElement('button');b.className='ws-chip'+(v.origin===location.origin?' on':'');
+      b.textContent=v.name;b.title=v.path;
+      b.onclick=async()=>{
+        if(v.origin===location.origin)return;
+        try{await tauriInvoke('desktop_switch_vault',{path:v.path});toast('正在打开 '+v.name+'…','ok')}
+        catch(e){toast('切换失败：'+e.message,'err')}
+      };
+      box.appendChild(b);
+    });
+    const add=document.createElement('button');add.className='ws-chip';add.style.borderStyle='dashed';
+    add.textContent='＋ 新建本地库';
+    add.onclick=async()=>{
+      const name=await uiPrompt('新库名称（将作为「文稿」里的文件夹名）','我的知识库');
+      if(!name)return;
+      add.disabled=true;
+      try{
+        await tauriInvoke('desktop_create_vault',{name});
+        toast('库「'+name+'」已创建，正在打开…','ok');
+      }catch(e){toast('创建失败：'+e.message,'err');add.disabled=false;}
+    };
+    box.appendChild(add);
+    const hint=document.createElement('div');hint.className='dv-meta';
+    hint.textContent='库 = 「文稿」里的普通文件夹。切换/新建由桌面壳原地重启内核，无需重开应用。';
+    box.appendChild(hint);
+  }catch(e){box.innerHTML='<span style="font-size:11px;color:var(--faint)">库列表加载失败：'+e.message+'</span>'}
+}
+async function renderWorkspaces(){
+  const box=$('ws-list');box.innerHTML='';
+  if(IS_DESKTOP){
+    const tip=document.createElement('div');tip.className='dv-meta';tip.textContent='本地库（点击切换）';
+    box.appendChild(tip);
+    await renderLocalVaults(box);
+    return;
+  }
+  const list=wsEnsureCurrent();
   list.forEach(w=>{
     const b=document.createElement('button');b.className='ws-chip'+(w.url===location.origin?' on':'');b.textContent=w.name;
+    b.title=w.url;
     b.onclick=()=>openWorkspace(w);
     box.appendChild(b);
   });
+  const add2=document.createElement('button');add2.className='ws-chip';add2.style.borderStyle='dashed';
+  add2.textContent='＋ 连接远程库';add2.onclick=()=>$('ws-add').click();
+  box.appendChild(add2);
+  const hint=document.createElement('div');hint.className='dv-meta';
+  hint.textContent='本地新建库请下载桌面客户端；Web 端可连接其他正在运行的 ThirdC 实例。';
+  box.appendChild(hint);
 }
 /* 左栏知识库切换：默认选中「有使用记录」的库（最近使用） */
-function renderRailVaults(){
+async function renderRailVaults(){
   const list=wsEnsureCurrent();const box=$('rail-vaults');if(!box)return;box.innerHTML='';
+  if(IS_DESKTOP){
+    try{
+      const r=await tauriInvoke('desktop_vaults');
+      (r.vaults||[]).forEach(v=>{
+        const b=document.createElement('button');b.className='rail-vault'+(v.origin===location.origin?' on':'');
+        b.textContent=v.name;b.title=v.path;
+        b.onclick=async()=>{
+          if(v.origin===location.origin)return;
+          try{await tauriInvoke('desktop_switch_vault',{path:v.path});toast('正在打开 '+v.name+'…','ok')}
+          catch(e){toast('切换失败：'+e.message,'err')}
+        };
+        box.appendChild(b);
+      });
+    }catch(e){}
+    return;
+  }
   list.forEach(w=>{
     const b=document.createElement('button');b.className='rail-vault'+(w.url===location.origin?' on':'');b.textContent=w.name;b.title=w.url;
     b.onclick=()=>openWorkspace(w);box.appendChild(b);
   });
 }
-/* 启动时若记录过别的库，默认打开它（只在一次会话里跳一次，避免来回跳） */
-function maybeSwitchToLastWs(){
-  const last=localStorage.getItem('thirdc_last_ws');
-  if(!last||last===location.origin)return;
-  if(sessionStorage.getItem('thirdc_ws_redirected')==='1')return;
-  const w=loadWorkspaces().find(x=>x.url===last);
-  if(w){sessionStorage.setItem('thirdc_ws_redirected','1');openWorkspace(w);}
-}
+/* 启动自动跳库已移除：跳到不可达实例=白屏陷阱。多库切换一律手动（工作区面板/侧栏）。 */
 $b('ws-add').onclick=async()=>{
-  const url=await uiPrompt('另一个 ThirdC 的 URL','http://127.0.0.1:7700');if(!url)return;
-  const t2=await uiPrompt('Token','');if(!t2)return;
-  const name=await uiPrompt('显示名','新工作区')||url;
+  if(IS_DESKTOP){toast('本地新建库请用工作区面板的「＋ 新建本地库」','ok');return}
+  const url=await uiPrompt('另一个 ThirdC 服务器的 URL','http://127.0.0.1:7700');if(!url)return;
+  const t2=await uiPrompt('该服务器的 Token','');if(!t2)return;
+  const name=await uiPrompt('显示名','远程库')||url;
   const list=loadWorkspaces();list.push({name,url:url.replace(/\/+$/,''),token:t2});
   localStorage.setItem('thirdc_workspaces',JSON.stringify(list));renderWorkspaces();renderRailVaults();
 };
@@ -4082,14 +4300,225 @@ $('rt-cal')&&($('rt-cal').onclick=()=>openCalendar());
 $('rt-trash')&&($('rt-trash').onclick=()=>openTrash());
 $('rt-road')&&($('rt-road').onclick=()=>{renderRoad();openOverlay('road-ov')});
 $('rt-matrix')&&($('rt-matrix').onclick=()=>openMatrix());
+$('rt-conflow')&&($('rt-conflow').onclick=()=>openConflow());
+
+/* ── ConFlow 对话流（矩阵整合）：对话列表 + 知识卡 ── */
+async function openConflow(){
+  openOverlay('conflow-ov');
+  await renderConflow();
+}
+async function renderConflow(){
+  try{
+    const r=await api('/conflow/conversations');
+    const box=$('cf-convs');box.innerHTML='';
+    if(!(r.conversations||[]).length)box.innerHTML='<div class="dv-meta">还没有对话记录。在底栏和 Agent 聊几句，对话会自动归档到这里。</div>';
+    (r.conversations||[]).forEach(c=>{
+      const el=document.createElement('div');el.className='conn-item';
+      el.innerHTML=`<div class="t" style="flex:1">${c.date} <span class="h" style="font-family:var(--font-mono);font-size:10px">${c.turns} 轮 · ${(c.bytes/1024).toFixed(1)}KB</span></div>
+        <button class="act" data-digest style="height:28px">生成知识卡</button>`;
+      el.querySelector('[data-digest]').onclick=async ev=>{
+        ev.stopPropagation();
+        const b=ev.target;b.disabled=true;b.textContent='提炼中…';
+        try{
+          const rr=await api('/conflow/digest',{method:'POST',json:{path:c.path}});
+          toast('知识卡已生成：'+rr.result.digest,'ok');
+          renderConflow();
+        }catch(e){toast('生成失败：'+e.message,'err');b.disabled=false;b.textContent='生成知识卡';}
+      };
+      box.appendChild(el);
+    });
+    // 已生成知识卡
+    const docs=(window.__fullDocs||[]).filter(d=>d.path.startsWith('Notes/Conflow/'));
+    const dg=$('cf-digests');dg.innerHTML='';
+    if(!docs.length)dg.innerHTML='<div class="dv-meta">还没有知识卡。</div>';
+    docs.sort((a,b)=>b.path.localeCompare(a.path)).forEach(d=>{
+      const el=document.createElement('div');el.className='conn-item';el.style.cursor='pointer';
+      el.innerHTML=`<div class="t" style="flex:1;font-size:12.5px">${d.title||d.path.split('/').pop()}</div><span class="h" style="font-family:var(--font-mono);font-size:10px">打开 ↗</span>`;
+      el.onclick=()=>openDoc(d.path);
+      dg.appendChild(el);
+    });
+  }catch(e){toast('Conflow 加载失败：'+e.message,'err')}
+}
+$('cf-refresh')&&($('cf-refresh').onclick=renderConflow);
+
+/* ── 一键知识图谱（Heptabase 式：原子卡片落在当前画布，辐射连线） ── */
+$('d-graph')&&($('d-graph').onclick=async()=>{
+  if(!current){toast('先打开一篇文档','err');return}
+  toast('图谱生成中…');
+  try{
+    const md=$('editor').value||'';
+    const title=(md.match(/^# (.+)$/m)||[])[1]||current.split('/').pop().replace(/\.md$/,'');
+    const secs=[];
+    let cur=null;
+    for(const l of md.split('\n')){
+      const m=l.match(/^## (.+)$/);
+      if(m){
+        const t=m[1].replace(/[*`]/g,'').trim();
+        cur=t?{t,x:''}:null;
+        if(cur)secs.push(cur);
+        continue;
+      }
+      if(cur&&!cur.x&&l.trim()&&!l.startsWith('#'))cur.x=l.trim().slice(0,90);
+    }
+    if(!secs.length){toast('没有可用的二级标题——先给文档搭个结构','err');return}
+    const dir=current.split('/').slice(0,-1).join('/');
+    const slug=title.replace(/[\/\\:|]/g,'-').slice(0,20);
+    const srcId='doc:'+current;
+    const srcNode=graph.nodes.find(n=>n.id===srcId);
+    const base=srcNode&&board.nodes[srcId]?board.nodes[srcId]:{x:600,y:300};
+    const created=[];
+    for(let i=0;i<secs.length;i++){
+      const p=dir+'/'+slug+'-图谱/'+String(i+1).padStart(2,'0')+' '+secs[i].t.slice(0,24).replace(/[\/\\:|]/g,'-')+'.md';
+      const body='# '+secs[i].t+'\n\n'+(secs[i].x||'')+'\n\n> 摘自 ['+title+']('+current+')\n';
+      try{
+        await api('/doc?path='+encodeURIComponent(p),{method:'PUT',body,headers:{'content-type':'text/markdown'}});
+        created.push(p);
+      }catch(e){}
+    }
+    if(!created.length){toast('原子笔记创建失败','err');return}
+    window.__docsFetchedAt=0;
+    await refreshAll();
+    /* 辐射布局：源文档居中，原子卡绕一圈 */
+    const cx=base.x+680,cy=base.y+320,R=Math.max(300,secs.length*46);
+    created.forEach((p,i)=>{
+      const ang=(i/created.length)*Math.PI*2-Math.PI/2;
+      board.nodes['doc:'+p]={x:Math.round(cx+R*Math.cos(ang)),y:Math.round(cy+R*Math.sin(ang)*0.74)};
+    });
+    board.nodes[srcId]=board.nodes[srcId]||{x:base.x,y:base.y};
+    graph.edges=graph.edges.filter(e=>e.from!==srcId||!created.some(p=>'doc:'+p===e.to));
+    created.forEach(p=>graph.edges.push({from:srcId,to:'doc:'+p}));
+    renderGraph();fit();saveBoard();
+    toast('图谱已生成：'+created.length+' 张原子卡已连到「'+title+'」','ok');
+  }catch(e){toast('图谱生成失败：'+e.message,'err')}
+});
+
+/* ── ConFlow 生成 PPT 与卡片视频 ── */
+async function cfDeckFromDigest(digestPath){
+  const d=await api('/doc?path='+encodeURIComponent(digestPath));
+  const md=d.markdown||'';
+  const sec=(name)=>{const m=md.match(new RegExp('## '+name+'\\n([\\s\\S]*?)(?=\\n## |\\n> |$)'));return m?m[1].trim():''};
+  const points=sec('讨论要点').split('\n').filter(x=>x.trim()).slice(0,6);
+  const decisions=sec('决定').split('\n').filter(x=>x.trim()&&!x.includes('未识别'));
+  const todos=sec('待办').split('\n').filter(x=>x.trim()&&!x.includes('未识别'));
+  const date=(digestPath.split('/').pop()||'').replace('-知识卡.md','');
+  const src=(md.match(/`([^`]+)`/)||[])[1]||'';
+  let deck='---\ntype: deck\n---\n\n# '+date+' · 对话演示\n\n'
+    +'> 来源：'+(src?'`'+src+'`':'ConFlow 知识卡')+'\n\n'
+    +'- **要点**：'+(points.length?points.length+' 条':'0')+'　**决定**：'+decisions.length+'　**待办**：'+todos.length+'\n\n';
+  if(points.length){
+    deck+='## 要点\n\n';
+    points.forEach(p=>{deck+=p.replace(/^- /,'')+'\n\n'});
+  }
+  if(decisions.length){
+    deck+='## 决定\n\n';
+    decisions.forEach(p=>{deck+=p.replace(/^- /,'')+'\n\n'});
+  }
+  if(todos.length){
+    deck+='## 待办\n\n';
+    todos.forEach(p=>{deck+=p.replace(/^- /,'')+'\n\n'});
+  }
+  deck+='## 结语\n\n谢谢观看 · ThirdC Studio × ConFlow\n';
+  const rel='Notes/Conflow/'+date+'-演示.md';
+  await api('/doc?path='+encodeURIComponent(rel),{method:'PUT',body:deck,headers:{'content-type':'text/markdown'}});
+  return rel;
+}
+$('cf-ppt')&&($('cf-ppt').onclick=async()=>{
+  try{
+    const rel=await cfDeckFromDigest(cfLatestDigest());
+    window.__docsFetchedAt=0;await loadDocsFull().catch(()=>{});
+    browsePath='Notes/Conflow';await loadGraph();
+    openDoc(rel);
+    toast('演示文档已生成——顶栏点「展示」即可播放','ok');
+  }catch(e){toast('生成失败：'+e.message,'err')}
+});
+function cfLatestDigest(){
+  const docs=(window.__fullDocs||[]).filter(d=>d.path.startsWith('Notes/Conflow/')&&d.path.includes('知识卡'));
+  docs.sort((a,b)=>b.path.localeCompare(a.path));
+  if(!docs.length)throw new Error('先生成一张知识卡');
+  return docs[0].path;
+}
+/* 卡片视频：知识卡 → 逐卡 webm（MediaRecorder 实时录制） */
+async function cfVideoFromDigest(digestPath){
+  const d=await api('/doc?path='+encodeURIComponent(digestPath));
+  const md=d.markdown||'';
+  const st={bg:'#0b0817',fg:'#ECEBFF',font:'"Inter","PingFang SC",sans-serif'};
+  const date=(digestPath.split('/').pop()||'').replace('-知识卡.md','');
+  const slide=async(sub,lines)=>{
+    const el=document.createElement('div');
+    el.style.cssText='width:840px;height:1120px;background:'+st.bg+';color:'+st.fg+';font-family:'+st.font+';padding:70px 60px;box-sizing:border-box;display:flex;flex-direction:column';
+    el.innerHTML='<div style="font-family:monospace;font-size:15px;letter-spacing:.2em;color:#8b5cf6;margin-bottom:26px">CONFLOW · '+date+'</div>'
+      +'<div style="font-weight:800;font-size:40px;line-height:1.3;margin-bottom:30px"></div>'
+      +'<div style="font-size:24px;line-height:1.9;opacity:.9;white-space:pre-wrap"></div>'
+      +'<div style="margin-top:auto;font-size:14px;opacity:.5">ThirdC Studio</div>';
+    el.children[1].textContent=sub||'';
+    el.children[2].textContent=(lines||[]).map(x=>x.replace(/^- /,'')).join('\n')||' ';
+    document.body.appendChild(el);
+    const canvas=await rasterize(el,840,1120,st.bg);
+    el.remove();
+    return canvas;
+  };
+  const sec=(name)=>{const m=md.match(new RegExp('## '+name+'\\n([\\s\\S]*?)(?=\\n## |\\n> |$)'));return m?m[1].trim():''};
+  const slides=[await slide(date+' · 对话演示',['ConFlow 对话流'])];
+  const secs=[['要点',sec('讨论要点')],['决定',sec('决定')],['待办',sec('待办')]];
+  for(const [nm,body] of secs){
+    const lines=body.split('\n').filter(x=>x.trim()&&!x.includes('未识别')).slice(0,7);
+    if(lines.length)slides.push(await slide(nm,lines));
+  }
+  slides.push(await slide('谢谢观看',['ThirdC Studio × ConFlow']));
+  toast('录制视频中（'+slides.length+' 页）…');
+  const c=document.createElement('canvas');c.width=840;c.height=1120;
+  const ctx=c.getContext('2d');
+  const stream=c.captureStream(30);
+  const rec=new MediaRecorder(stream,{mimeType:'video/webm'});
+  const chunks=[];
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  const done=new Promise(res=>{rec.onstop=res});
+  rec.start();
+  for(const src of slides){
+    await new Promise(res=>{
+      const t0=performance.now();
+      (function frame(t){
+        const k=Math.min(1,(t-t0)/2200);
+        ctx.fillStyle='#0b0817';ctx.fillRect(0,0,840,1120);
+        ctx.globalAlpha=Math.min(1,k*3);
+        ctx.drawImage(src,0,0,840,1120);
+        ctx.globalAlpha=1;
+        if(k<1)requestAnimationFrame(frame);else res();
+      })(t0);
+    });
+  }
+  rec.stop();await done;
+  const blob=new Blob(chunks,{type:'video/webm'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=date+'-卡片视频.webm';a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),6000);
+  return slides.length;
+}
+$('cf-video')&&($('cf-video').onclick=async()=>{
+  try{
+    const n=await cfVideoFromDigest(cfLatestDigest());
+    toast('卡片视频已生成（'+n+' 页 webm）','ok');
+  }catch(e){toast('视频生成失败：'+e.message,'err')}
+});
+$('cf-digest-latest')&&($('cf-digest-latest').onclick=async()=>{
+  const b=$('cf-digest-latest');b.disabled=true;b.textContent='提炼中…';
+  try{
+    const rr=await api('/conflow/digest',{method:'POST',json:{}});
+    toast('知识卡已生成：'+rr.result.digest,'ok');
+    window.__docsFetchedAt=0;   // 绕过节流，强制拉全量（新知识卡要出现在列表里）
+    await loadDocsFull().catch(()=>{});
+    renderConflow();
+  }catch(e){toast('生成失败：'+e.message,'err')}
+  b.disabled=false;b.textContent='⚡ 生成最新知识卡';
+});
 
 /* ── 生态矩阵（芭乐派产品矩阵）：接入方式声明 + 配置指引 + 连接检测 ── */
 const MATRIX=[
   { id:'openflow', name:'OpenFlow', emoji:'📊', role:'图表与架构流——知识库画布与架构图互导', status:'live',
     how:'设计契约同源（oklch · 弹簧缓动 · 玻璃拟态），设计规范经「设计规范」面板互通；架构图生成走 MCP 连接器。',
     cfg:'[[connections]]\nname = "openflow"\ncommand = "openflow"\nargs = ["mcp"]' },
-  { id:'conflow', name:'Conflow', emoji:'💬', role:'对话流——把 Agent 对话沉淀为可检索知识', status:'planned',
-    how:'发布后经 MCP 连接器接入，对话记录自动采集入库。',
+  { id:'conflow', name:'Conflow', emoji:'💬', role:'对话流——把 Agent 对话沉淀为可检索知识', status:'live',
+    how:'已内置对话流：Agent 对话自动归档（Notes/Agent/），一键提炼「要点 / 决定 / 待办」知识卡（存于 Notes/Conflow/，命令「总结对话」）。独立部署版发布后经 MCP 连接器无缝替换。',
+    open:'conflow',
     cfg:'[[connections]]\nname = "conflow"\ncommand = "conflow"\nargs = ["mcp"]' },
   { id:'websflow', name:'WebsFlow', emoji:'🕸️', role:'网页流——批量网页采集与本地化', status:'planned',
     how:'MCP 连接器接入后，资源批量拉取入库（同连接器「采集」）。',
@@ -4116,6 +4545,7 @@ async function openMatrix(){
       <pre style="margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg-soft);border:1px solid var(--border);font:10.5px/1.6 var(--font-mono);white-space:pre-wrap;user-select:all">${m.cfg}</pre></div>
       <div style="display:flex;gap:6px;flex:1 1 100%;margin-top:8px">
         <button class="act" data-copy style="height:28px">📋 复制配置</button>
+        ${m.open?`<button class="act" data-open-panel style="height:28px;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">打开${m.name}面板</button>`:''}
         ${m.connect==='mcp'?'<button class="act" data-check style="height:28px">检测连接</button>':''}
       </div>`;
     el.querySelector('[data-copy]').onclick=async ev=>{
@@ -4136,12 +4566,153 @@ async function openMatrix(){
       }catch(e){toast('检测失败：'+e.message,'err')}
       chk.disabled=false;chk.textContent='检测连接';
     };
+    const opn=el.querySelector('[data-open-panel]');
+    if(opn)opn.onclick=ev=>{
+      ev.stopPropagation();
+      document.getElementById('matrix-ov').classList.remove('open');
+      if(m.open==='conflow')openConflow();
+    };
     box.appendChild(el);
   });
   const tip=document.createElement('div');tip.className='dv-meta';
   tip.textContent='矩阵产品经 MCP 连接器或插件工具两种协议接入；状态由各产品发布节奏决定，接入框架（连接器 / 插件工具 / 本机采集端口）已就绪。';
   box.appendChild(tip);
 }
+
+/* ───────── 底栏 v2：模式切换 · 固定入口 · Token 计量 · 同步指示灯 ───────── */
+/* 模式：chat=Agent 对话（有 AI 走模型，无 AI 命令模式）；search=无 AI 全文搜索 */
+let dockMode=localStorage.getItem('thirdc_dockmode')||'chat';
+function setDockMode(m){
+  dockMode=m;localStorage.setItem('thirdc_dockmode',m);
+  const b=$('dock-mode');if(!b)return;
+  b.classList.toggle('on',m==='search');
+  b.textContent=m==='search'?'🔍':'🤖';
+  b.title=m==='search'?'当前：全文搜索（点击切回 Agent 对话）':'当前：Agent 对话（点击切为全文搜索）';
+  $('say').placeholder=m==='search'
+    ?'全文搜索（含 HTML / 代码 / 笔记正文）— Enter'
+    :'和知识库对话…';
+}
+$('dock-mode')&&($('dock-mode').onclick=()=>setDockMode(dockMode==='chat'?'search':'chat'));
+setDockMode(dockMode);
+function dockSubmit(){
+  const v=$('say').value.trim();if(!v)return;
+  if(dockMode==='search'){
+    $('say').value='';
+    openPalette(v);
+  }else{
+    chat();
+  }
+}
+/* 固定入口：默认 文件夹 / 学习模式 / 插件，可在 ⋏ 菜单里增删 */
+const PIN_DEFS=[
+  {id:'folders',icon:'📁',label:'文件夹',run:()=>{$('ws-panel').classList.toggle('open');renderWorkspaces();}},
+  {id:'learn',icon:'🎓',label:'学习模式',run:()=>setMode('learn')},
+  {id:'plugins',icon:'🧩',label:'插件',run:()=>openPluginsPanel()},
+  {id:'conflow',icon:'💬',label:'对话流',run:()=>openConflow()},
+  {id:'term',icon:'⌨️',label:'终端',run:()=>document.getElementById('set-term')?.click?.()},
+  {id:'export',icon:'⤓',label:'导出',run:()=>document.getElementById('d-export')?.click?.()},
+  {id:'calendar',icon:'📅',label:'日历',run:()=>openCalendar()},
+  {id:'trash',icon:'🗑',label:'回收站',run:()=>openTrash()},
+];
+let dockPins=(()=>{try{const v=JSON.parse(localStorage.getItem('thirdc_dock_pins')||'null');if(Array.isArray(v))return v}catch(e){}return['folders','learn','plugins']})();
+function saveDockPins(){localStorage.setItem('thirdc_dock_pins',JSON.stringify(dockPins))}
+function renderDockPins(){
+  const box=$('dock-pins');if(!box)return;box.innerHTML='';
+  dockPins.forEach(id=>{
+    const d=PIN_DEFS.find(x=>x.id===id);if(!d)return;
+    const b=document.createElement('button');b.className='dk-pin';b.title=d.label;b.textContent=d.icon;
+    b.onclick=d.run;box.appendChild(b);
+  });
+  const add=document.createElement('button');add.className='dk-pin';add.title='固定 / 取消入口';add.textContent='⋏';
+  add.onclick=e=>{e.stopPropagation();renderPinMenu(add)};
+  box.appendChild(add);
+}
+function renderPinMenu(anchor){
+  let menu=document.getElementById('pin-menu');
+  if(menu&&menu.classList.contains('open')){menu.classList.remove('open');return}
+  if(!menu){menu=document.createElement('div');menu.id='pin-menu';document.body.appendChild(menu);
+    document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target)&&e.target!==anchor)menu.classList.remove('open')},true);}
+  menu.innerHTML='';
+  PIN_DEFS.forEach(d=>{
+    const on=dockPins.includes(d.id);
+    const b=document.createElement('button');
+    b.innerHTML=`<span class="chk">${on?'✓':''}</span>${d.icon} ${d.label}`;
+    b.onclick=()=>{
+      dockPins=on?dockPins.filter(x=>x!==d.id):[...dockPins,d.id];
+      saveDockPins();renderDockPins();renderPinMenu(anchor);
+    };
+    menu.appendChild(b);
+  });
+  const r=anchor.getBoundingClientRect();
+  menu.style.left=Math.max(12,r.left-80)+'px';
+  menu.style.bottom=(innerHeight-r.top+8)+'px';
+  menu.style.top='auto';
+  menu.classList.add('open');
+}
+renderDockPins();
+$('dock-rail')&&($('dock-rail').onclick=()=>{
+  const r=$('rail');
+  setRailClosed(!r.classList.contains('closed')?true:false);
+});
+/* Token 计量：会话累计 + 估算成本（混合费率示例，可按模型调整） */
+let tokTotal=+(localStorage.getItem('thirdc_tokens')||0);
+const TOK_RATE=0.0072;
+function addTokens(n){
+  if(!n)return;
+  tokTotal+=n;localStorage.setItem('thirdc_tokens',String(tokTotal));
+  updateTokChip();
+}
+function updateTokChip(){
+  const b=$('dock-tokens');if(!b)return;
+  const cost=tokTotal/1000*TOK_RATE;
+  b.textContent='¥ '+cost.toFixed(2);
+  b.title=`本机累计 ${tokTotal.toLocaleString()} tokens ≈ ¥${cost.toFixed(2)}`;
+}
+$('dock-tokens')&&($('dock-tokens').onclick=e=>{
+  e.stopPropagation();
+  let menu=document.getElementById('tok-menu');
+  if(menu){menu.remove();return}
+  menu=document.createElement('div');menu.id='tok-menu';
+  menu.style.cssText='position:fixed;z-index:var(--z-overlay);min-width:220px;padding:12px 14px;border-radius:var(--r-lg);border:1px solid var(--border);background:var(--surface-strong);box-shadow:var(--shadow);font:12.5px/1.8 var(--font-body);color:var(--fg)';
+  const cost=tokTotal/1000*TOK_RATE;
+  const member=localStorage.getItem('thirdc_member')==='1';
+  menu.innerHTML=`<b>Token 消耗</b><br>本机累计：${tokTotal.toLocaleString()} tokens<br>估算成本：≈ ¥${cost.toFixed(2)}（混合费率 ¥${TOK_RATE}/1K）`
+    +'<hr style="border:none;border-top:1px solid rgba(127,127,127,.3);margin:8px 0">'
+    +(member?`<span style="color:var(--ok)">✓ 会员生效——已为您节省 ¥${(cost*0.25).toFixed(2)}</span>`:'未开通会员 · 开通后按会员价计费，可为您节省约 25%');
+  document.body.appendChild(menu);
+  const r=e.target.getBoundingClientRect();
+  menu.style.left=Math.max(12,r.left-80)+'px';
+  menu.style.bottom=(innerHeight-r.top+8)+'px';
+  setTimeout(()=>document.addEventListener('pointerdown',function h(ev){if(!menu.contains(ev.target)){menu.remove();document.removeEventListener('pointerdown',h)}}),0);
+});
+$('dock-cmdmode')&&($('dock-cmdmode').onclick=()=>openConnPanel());
+$('dock-user')&&($('dock-user').onclick=()=>openSettings());
+$('dock-more')&&($('dock-more').onclick=()=>document.getElementById('more-btn').click());
+/* 同步指示灯状态机：绿=已连接已同步 / 蓝⤴=同步中 / 红=未连接或异常 / 黄=有新同步内容 */
+function updateSyncInd(){
+  const ind=$('dock-sync-ind');if(!ind)return;
+  const chip=$('sb-sync');
+  const busy=!!(chip&&chip.classList.contains('busy'));
+  const txt=(chip&&chip.textContent)||'';
+  const err=txt.includes('中断')||txt.includes('失败')||txt.includes('不可用');
+  const done=txt.includes('已同步');
+  const conn=(document.getElementById('sb-conn')||{textContent:''}).textContent==='connected';
+  let cls='sync-ind ',tip='';
+  if(busy){cls+='busy';tip='同步中…'}
+  else if(err){cls+='err';tip='同步异常：'+txt}
+  else if(done){cls+='warn';tip='有新同步内容 · 点击刷新'}
+  else if(conn){cls+='ok';tip='已连接 · 已同步'}
+  else{cls+='err';tip='未连接'}
+  ind.className=cls;ind.title=tip;
+}
+$('dock-sync-ind')&&($('dock-sync-ind').addEventListener('click',async()=>{
+  const ind=$('dock-sync-ind');
+  if(ind.classList.contains('busy'))return;
+  toast('刷新中…');
+  try{await api('/sync',{method:'POST',json:{}});await refreshAll();toast('已同步','ok')}catch(e){toast('同步失败：'+e.message,'err')}
+}));
+setInterval(updateSyncInd,600);
+updateSyncInd();
 
 /* ───────── 导出分享（长图 / 场景卡片 / 公众号 / Newsletter / 博客） ─────────
    流程：服务端 AI-HTML + 当前风格 CSS → 隐藏容器（图片转 dataURL）→
@@ -5672,11 +6243,15 @@ document.getElementById('rail-list').addEventListener('contextmenu',e=>{
 /* ───────── 展示模式（§4.3/P2）：全屏 + 底部悬浮控制条 + Gamma 式大纲栏 ───────── */
 /* pIdx/pIdleTimer 用 var：boot 期间的 setMode 可能触发 exit→pTeardown，
    早于本区块求值；var 有提升不 TDZ（let 会在该路径炸掉整个脚本） */
-var pIdx=0,pIdleTimer=null;
+var pIdx=0,pIdleTimer=null,pDocs=null;
 function docList(){return graph.nodes.filter(n=>n.kind==='doc'||n.kind==='capture').map(n=>n.path)}
+function presentList(){return pDocs||docList()}
 async function openPresent(){
-  const list=docList();
+  let list=docList();
+  /* 当前文档不在本画布序列（如刚从侧栏/Conflow 打开）时，锁定为第一页——展示的永远是你正在看的这篇 */
+  if(current&&list.indexOf(current)<0)list=[current,...list];
   if(!list.length){toast('没有可展示的文档','err');setMode('studio');return;}
+  pDocs=list;
   pIdx=Math.max(0,list.indexOf(current));
   renderPThumbs();
   $('present-ov').classList.add('open');
@@ -5687,7 +6262,7 @@ async function openPresent(){
 }
 /* Gamma 式缩略图大纲：纵向卡片，点击跳页，可收起 */
 function renderPThumbs(){
-  const list=docList(),box=$('p-thumbs-list');
+  const list=presentList(),box=$('p-thumbs-list');
   box.innerHTML='';
   list.forEach((path,i)=>{
     const n=graph.nodes.find(x=>x.path===path);
@@ -5699,7 +6274,7 @@ function renderPThumbs(){
   });
 }
 async function showPresent(){
-  const list=docList();
+  const list=presentList();
   const path=list[pIdx];
   try{
     const d=await api('/doc?path='+encodeURIComponent(path));
@@ -5720,13 +6295,14 @@ function pWake(){
   pIdleTimer=setTimeout(()=>$('present-ov').classList.add('idle'),2000);
 }
 function pTeardown(){
+  pDocs=null;
   $('present-ov').classList.remove('open','idle','thumbs');
   $('p-thumbs-toggle')?.setAttribute('aria-pressed','false');
   clearTimeout(pIdleTimer);pIdleTimer=null;
   const ov=$('present-ov');if(ov)ov.onmousemove=null;
 }
-$b('p-next').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx+1)%n;showPresent()}};
-$b('p-prev').onclick=()=>{const n=docList().length;if(n){pIdx=(pIdx-1+n)%n;showPresent()}};
+$b('p-next').onclick=()=>{const n=presentList().length;if(n){pIdx=(pIdx+1)%n;showPresent()}};
+$b('p-prev').onclick=()=>{const n=presentList().length;if(n){pIdx=(pIdx-1+n)%n;showPresent()}};
 $b('p-exit').onclick=()=>setMode('studio');
 $('p-thumbs-toggle')&&($('p-thumbs-toggle').onclick=()=>{
   const on=$('present-ov').classList.toggle('thumbs');
@@ -6158,6 +6734,56 @@ document.addEventListener('pointerdown',e=>{
 
 /* 设置面板 */
 $('settings-btn').addEventListener('click',()=>{openSettings()});
+/* 设置面板：标签切换 + 通用项绑定（既有 ID 全保留，老 handler 照常工作） */
+document.querySelectorAll('.set-tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.set-tab').forEach(x=>x.classList.toggle('on',x===t));
+  document.querySelectorAll('.set-pane').forEach(p=>p.hidden=p.dataset.pane!==t.dataset.set);
+}));
+function applyThemePref(v){
+  localStorage.setItem('thirdc_theme',v);
+  document.documentElement.dataset.theme=v==='auto'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):v;
+}
+document.querySelectorAll('[data-settheme]').forEach(b=>b.addEventListener('click',()=>{
+  applyThemePref(b.dataset.settheme);
+  document.querySelectorAll('[data-settheme]').forEach(x=>x.style.borderColor=x===b?'var(--accent)':'');
+  try{const t=document.getElementById('theme');if(t)t.click()}catch{}
+  toast('主题已切换','ok');
+}));
+$('set-nick-save')&&($('set-nick-save').onclick=()=>{
+  const v=document.getElementById('set-nick').value.trim();
+  if(!v)return;
+  myNick=v.slice(0,20);localStorage.setItem('thirdc_nick',myNick);
+  broadcastState();toast('昵称已保存','ok');
+});
+$('set-backup')&&($('set-backup').onclick=()=>{const c=CMDS.find(c=>c[1]==='bk');c&&c[2]()});
+$('set-webdav')&&($('set-webdav').onclick=()=>{const c=CMDS.find(c=>c[1]==='wd');c&&c[2]()});
+$('set-open-ws')&&($('set-open-ws').onclick=()=>{
+  document.getElementById('settings-ov').style.display='none';
+  $('ws-panel').classList.toggle('open');renderWorkspaces();
+});
+async function fillVaultInfo(){
+  const el=document.getElementById('set-vault-info');if(!el)return;
+  if(window.__TAURI_INTERNALS__){
+    try{
+      const r=await window.__TAURI_INTERNALS__.invoke('desktop_vaults');
+      el.innerHTML=r.current
+        ?`<b style="color:var(--fg)">${r.current.name}</b><br><span style="font-family:var(--font-mono);font-size:10.5px">${r.current.path}</span>`
+        :'当前库信息不可用';
+    }catch(e){el.textContent='桌面接口不可用：'+e.message}
+  }else{
+    el.innerHTML=`当前浏览器连接的库：<b style="color:var(--fg)">${vaultName||'未知'}</b><br><span style="font-family:var(--font-mono);font-size:10.5px">${location.origin}</span><br>多库管理与本地新建库请使用桌面客户端。`;
+  }
+}
+const _openSettings=openSettings;
+openSettings=async function(){
+  await _openSettings();
+  try{
+    document.querySelectorAll('[data-settheme]').forEach(x=>{x.style.borderColor=x.dataset.settheme===(localStorage.getItem('thirdc_theme')||'auto')?'var(--accent)':''});
+    document.getElementById('set-nick').value=myNick||'';
+    document.getElementById('set-version').textContent='v0.1.9';
+    fillVaultInfo();
+  }catch{}
+};
 async function openSettings(){
   overlayPrevFocus=document.activeElement;
   const ov=document.getElementById('settings-ov');
@@ -6375,9 +7001,14 @@ $('set-term').addEventListener('click',()=>{
   ov.style.display='grid';
   setTimeout(()=>{const i=document.getElementById('term-in');i&&i.focus();},30);
 });
+let termHist=JSON.parse(localStorage.getItem('thirdc_termhist')||'[]'),termHi=-1;
 $('term-in').addEventListener('keydown',async e=>{
+  if(e.key==='ArrowUp'){if(termHist.length){termHi=Math.max(0,termHi<0?termHist.length-1:termHi-1);e.target.value=termHist[termHi]||''}return}
+  if(e.key==='ArrowDown'){if(termHist.length){termHi=Math.min(termHist.length,termHi+1);e.target.value=termHist[termHi]||''}return}
   if(e.key!=='Enter')return;
   const cmd=e.target.value.trim();if(!cmd)return;
+  termHist.push(cmd);termHist=termHist.slice(-50);termHi=-1;
+  try{localStorage.setItem('thirdc_termhist',JSON.stringify(termHist))}catch{}
   const out=document.getElementById('term-out');
   out.textContent+=(out.textContent?'\n':'')+'$ '+cmd+'\n…';
   try{
@@ -6536,7 +7167,6 @@ function bootDone(){
   if(!localStorage.getItem('thirdc_last_ws'))localStorage.setItem('thirdc_last_ws',location.origin);
   renderRailVaults();
   renderDocTabs();
-  maybeSwitchToLastWs();
   const cs=cacheGet('status'); if(cs)applyStatus(cs);
   const raw=cacheGet('browse');
   const cachedBrowse=(raw&&raw.data)?((!raw.path||raw.path==='Notes')?raw.data:null):(raw&&raw.folders?raw:null);
