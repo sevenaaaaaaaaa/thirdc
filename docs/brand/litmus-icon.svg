@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- 鹿蕊 Litmus · 主图标 · 林下出品 -->
+  <!-- 墨底 -->
+  <rect width="1024" height="1024" rx="240" fill="#22252d"/>
+  <rect x="16" y="16" width="992" height="992" rx="224" fill="none" stroke="#4a4f5e" stroke-width="30"/>
+  <!-- 试纸（倾斜，静止端白、变色端绿） -->
+  <g transform="rotate(-18 512 512)">
+    <rect x="212" y="424" width="308" height="176" rx="48" fill="#ebecee" opacity="0.32"/>
+    <rect x="528" y="424" width="284" height="176" rx="48" fill="#4bd18d"/>
+    <!-- 角枝：刻在绿端里的驯鹿角，鹿蕊之名 -->
+    <g stroke="#22252d" stroke-width="30" stroke-linecap="round" fill="none">
+      <path d="M660 556v-86"/>
+      <path d="M660 500c0-26-17-38-40-44"/>
+      <path d="M660 486c0-24 16-36 38-42"/>
+      <path d="M660 452v-52"/>
+    </g>
+  </g>
+</svg>

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ThirdC Studio",
+  "productName": "Litmus",
   "version": "0.1.10",
   "identifier": "com.nownexts.thirdc",
   "build": {
@@ -27,8 +27,8 @@
       "minimumSystemVersion": "12.0"
     },
     "category": "Productivity",
-    "shortDescription": "AI Native 知识工作台",
-    "longDescription": "ThirdC Studio：你的知识库是文件，也是画布，也是 agent 的工具。本地优先、开源、无锁定。",
+    "shortDescription": "林下出品 · AI 时代知识 OS",
+    "longDescription": "鹿蕊 Litmus —— 林下 Understory 出品的知识 OS。本地优先，文件真相，人与 agent 共用同一份真相。",
     "copyright": "AGPL-3.0-or-later"
   }
 }

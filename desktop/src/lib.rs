@@ -78,7 +78,7 @@ fn save_registry(app: &AppHandle, reg: &VaultRegistry) -> Result<(), String> {
 fn vault_name_for(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "ThirdC".into())
+        .unwrap_or_else(|| "Litmus".into())
 }
 
 fn sanitize_vault_name(name: &str) -> Result<String, String> {
@@ -216,13 +216,13 @@ fn desktop_switch_vault(app: AppHandle, path: String) -> Result<String, String> 
     switch_and_navigate(&app, p, name)
 }
 
-/// 默认库位置：~/Documents/ThirdC，可用 THIRDC_VAULT 覆盖。
+/// 默认库位置：~/Documents/Litmus（旧安装沿用已注册的库，不受影响），THIRDC_VAULT 可覆盖。
 fn default_vault() -> PathBuf {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    home.join("Documents").join("ThirdC")
+    home.join("Documents").join("Litmus")
 }
 
 fn open_or_init(path: &Path) -> anyhow::Result<kernel_core::Vault> {
@@ -230,7 +230,7 @@ fn open_or_init(path: &Path) -> anyhow::Result<kernel_core::Vault> {
         return Ok(kernel_core::Vault::open(path)?);
     }
     std::fs::create_dir_all(path)?;
-    match kernel_core::Vault::init(path, "ThirdC") {
+    match kernel_core::Vault::init(path, "Litmus") {
         Ok(v) => Ok(v),
         // 目录已被别的实例初始化过（竞态）：回退到 open。
         Err(_) => Ok(kernel_core::Vault::open(path)?),
@@ -307,7 +307,7 @@ fn error_page(vault: &Path, reason: &str) -> Option<String> {
             .replace('>', "&gt;")
     };
     let html = format!(
-        r#"<!doctype html><meta charset="utf-8"><title>ThirdC Studio</title>
+        r#"<!doctype html><meta charset="utf-8"><title>鹿蕊 Litmus</title>
 <style>
 :root{{color-scheme:light dark;--bg:oklch(97.4% .012 85);--fg:oklch(24% .022 70);--muted:oklch(47% .018 72);
   --card:oklch(100% 0 0/.8);--border:oklch(88% .012 82);--danger:oklch(55% .2 25)}}

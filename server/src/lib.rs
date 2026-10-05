@@ -165,7 +165,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/", get(app))
         .route("/assets/tokens.css", get(tokens_css))
         .route("/icon48.png", get(|| async { ([("content-type","image/png"),("cache-control","public, max-age=86400")], include_bytes!("../web/icon48.png").as_slice()) }))
-        .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"ThirdC Studio","short_name":"ThirdC","start_url":"/","display":"standalone","background_color":"#0e1116","theme_color":"#4a6cf7"})) }))
+        .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"鹿蕊 Litmus","short_name":"鹿蕊","start_url":"/","display":"standalone","background_color":"#22252d","theme_color":"#22252d"})) }))
         .route("/sw.js", get(|| async {
     // 壳版本 = index.html 内容哈希（构建期自动）：改前端必出新缓存键，忘 bump 也不再吃旧壳。
     let body = SW_SRC.replace("__SHELL_VERSION__", shell_version());
@@ -3661,7 +3661,7 @@ transform:scale(min(calc(100vw/1320),calc(100vh/880)));transform-origin:center}}
 .hint{{position:fixed;left:18px;bottom:14px;font-size:12px;color:oklch(60% .01 80)}}
 </style></head><body>
 <div class="stage">
-  <section class="slide on cover"><div><div class="mark">3C</div><h1>{vault_name}</h1><div class="sub">{count} 篇知识 · {today} · ThirdC Studio</div></div></section>
+  <section class="slide on cover"><div><div class="mark">3C</div><h1>{vault_name}</h1><div class="sub">{count} 篇知识 · {today} · 鹿蕊 Litmus</div></div></section>
   <section class="slide"><div class="toc"><h2 style="margin:0 0 18px">目录</h2><ul style="padding:0;margin:0">{toc_items}</ul></div></section>
   {slides}
 </div>
