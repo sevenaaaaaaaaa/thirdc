@@ -6619,7 +6619,211 @@ function openCtx(x,y,items){
 function closeCtx(){ctxEl.style.display='none';}
 document.addEventListener('pointerdown',e=>{if(!ctxEl.contains(e.target))closeCtx();},true);
 window.addEventListener('blur',closeCtx);
-// Esc 关右键菜单已并入 closeTopFloat（z 序最高中的一层）
+
+/* ───────── 文件操作右键菜单（文件真相的壳形态：对文件的平凡操作一样不少）───────── */
+let fileClip=''; // 进程内文件剪贴板（复制文档路径，粘贴=重复到目标目录）
+
+function docCtxItems(path){
+  const isCsv=/\.csv$/i.test(path);
+  return [
+    {label:'📝 打开',fn:()=>openDoc(path)},
+    {label:'✏️ 重命名…',fn:()=>renameDoc(path)},
+    {label:'📂 移动到…',fn:()=>moveDocTo(path)},
+    {label:'📑 复制一份',fn:()=>duplicateDoc(path)},
+    'sep',
+    {label:'📄 复制相对路径',fn:()=>{navigator.clipboard.writeText(path);toast('已复制 '+path,'ok');}},
+    {label:'🗂 复制绝对路径',fn:async()=>{const r=await api('/status');navigator.clipboard.writeText(r.root+'/'+path);toast('已复制绝对路径','ok');}},
+    {label:'🔗 获取链接',fn:()=>{const u=location.origin+BASE+'?doc='+encodeURIComponent(path);navigator.clipboard.writeText(u);toast('已复制可打开的链接','ok');}},
+    'sep',
+    {label:'📤 发送到…',fn:()=>sendDocTo(path)},
+    {label:'📌 添加到常用（菜单栏）',fn:()=>pinDocCommon(path)},
+    {label:'🗒 添加到便利贴',fn:()=>stickyRef(path)},
+    isCsv?{label:'📊 转为 Markdown 表格',fn:()=>csvToTableDoc(path)}:null,
+    'sep',
+    {label:'ℹ️ 属性',fn:()=>showDocProps(path)},
+    {label:'⬇️ 下载原文件',fn:()=>{location.href=BASE+'/doc/raw?token='+encodeURIComponent(token)+'&path='+encodeURIComponent(path);}},
+    'sep',
+    {label:'🗑 移入回收站',danger:true,fn:async()=>{
+      if(!(await uiConfirm('移入回收站？'+path+'\n（可在 ⌘K「回收站」恢复）',{ok:'移入回收站'})))return;
+      try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});dropDocLocal(path);toast('已移入回收站：'+path,'ok');await refreshAll();}
+      catch(err){toast('删除失败：'+err.message,'err');}
+    }},
+  ].filter(Boolean);
+}
+function folderCtxItems(name){
+  const dir=(browsePath&&browsePath!=='Notes')?browsePath:(name&&name!=='Notes'?('Notes/'+name):'Notes');
+  return [
+    {label:'📋 复制文件夹路径',fn:()=>{navigator.clipboard.writeText(dir);toast('已复制 '+dir,'ok');}},
+    {label:'📂 在画布中打开',fn:()=>{browsePath=dir;loadGraph();}},
+    'sep',
+    {label:'📋 粘贴文档到此处',fn:()=>pasteDocInto(dir)},
+    {label:'📥 导入并转码…',fn:()=>filePickerTranscode(dir)},
+    'sep',
+    {label:'ℹ️ 文件夹属性',fn:()=>showDirProps(dir)},
+  ];
+}
+async function renameDoc(path){
+  const name=path.split('/').pop();
+  const dir=path.split('/').slice(0,-1).join('/');
+  const newName=await uiPrompt('新文件名（含扩展名）',name);
+  if(!newName||newName===name)return;
+  const to=dir+'/'+newName.trim();
+  try{
+    await api('/doc/move',{method:'POST',json:{from:path,to}});
+    toast(`已重命名 → ${newName}`,'ok');await refreshAll();
+    if(current===path)openDoc(to);
+  }catch(e){toast('重命名失败：'+e.message,'err')}
+}
+async function moveDocTo(path){
+  const name=path.split('/').pop();
+  const dir=await uiPrompt('目标目录（Notes/ 下，如 Sources/upload）',path.split('/').slice(0,-1).join('/').replace(/^Notes\/?/,''));
+  if(dir===null)return;
+  const to='Notes/'+dir.split('/').map(s=>s.trim()).filter(Boolean).join('/')+'/'+name;
+  if(to===path){toast('位置未变','ok');return}
+  try{
+    await api('/doc/move',{method:'POST',json:{from:path,to}});
+    toast(`已移动 → ${to}`,'ok');await refreshAll();
+    if(current===path)openDoc(to);
+  }catch(e){toast('移动失败：'+e.message,'err')}
+}
+async function duplicateDoc(path){
+  const m=path.match(/^(.*\/)([^/]+?)(\.[^/]*)?$/);
+  const to=(m?m[1]:'')+((m?m[2]:path)+'-副本')+(m&&m[3]?m[3]:'');
+  try{
+    await api('/doc/copy',{method:'POST',json:{from:path,to}});
+    toast('已创建副本 '+to,'ok');await refreshAll();openDoc(to);
+  }catch(e){toast('复制失败：'+e.message,'err')}
+}
+function pasteDocInto(dir){
+  if(!fileClip){toast('文件剪贴板为空——先在文件上右键「复制一份」或复制路径','err');return}
+  const name=fileClip.split('/').pop();
+  const m=name.match(/^(.*?)(\.[^.]*)?$/);
+  const to=(dir==='Notes'?'Notes':dir)+'/'+m[1]+'-'+Date.now().toString(36).slice(-4)+(m[2]||'');
+  api('/doc/copy',{method:'POST',json:{from:fileClip,to}})
+    .then(()=>{toast('已粘贴 → '+to,'ok');fileClip='';refreshAll();})
+    .catch(e=>toast('粘贴失败：'+e.message,'err'));
+}
+function filePickerTranscode(dir){
+  const inp=document.createElement('input');inp.type='file';inp.multiple=true;
+  inp.accept='.pdf,.doc,.docx,.odt,.ods,.odp,.xlsx,.pptx,.csv,.html,.htm,.md,.txt,.json,.yaml,.yml,.toml,.xml';
+  inp.onchange=async()=>{
+    for(const f of [...inp.files]){
+      try{
+        const buf=new Uint8Array(await f.arrayBuffer());
+        const ext=f.name.split('.').pop().toLowerCase();
+        if(ext==='csv'){
+          const text=new TextDecoder().decode(buf);
+          const md=csvToMarkdownTable(text);
+          const base=dir==='Notes'?'Notes':dir;
+          await api('/doc?path='+encodeURIComponent(base+'/'+f.name.replace(/\.csv$/i,'')+'.md'),{method:'PUT',body:md,headers:{'content-type':'text/markdown'}});
+          toast('CSV 已转 Markdown 表格入库','ok');
+        }else if(['pdf','doc','docx','odt','ods','odp','xlsx','pptx'].includes(ext)){
+          let b64='';const chunk=0x8000;for(let i=0;i<buf.length;i+=chunk)b64+=String.fromCharCode(...buf.subarray(i,i+chunk));
+          const r=await api('/ingest/file',{method:'POST',json:{name:f.name,content_base64:btoa(b64)}});
+          toast(`${f.name} 已转码入库 → ${r.rel}`,'ok');
+        }else{
+          const text=new TextDecoder().decode(buf);
+          const base=dir==='Notes'?'Notes':dir;
+          await api('/doc?path='+encodeURIComponent(base+'/'+f.name),{method:'PUT',body:text,headers:{'content-type':'text/plain'}});
+          toast(`已导入 ${f.name}（原样保留）`,'ok');
+        }
+      }catch(e){toast(`${f.name} 失败：`+e.message,'err')}
+    }
+    await refreshAll();
+  };
+  inp.click();
+}
+function csvToMarkdownTable(text){
+  const rows=[];let row=[],cell='',q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++} else q=false } else cell+=c }
+    else if(c==='"')q=true;
+    else if(c===','){row.push(cell);cell=''}
+    else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n')i++; row.push(cell);cell=''; if(row.some(x=>x!==''))rows.push(row); row=[] }
+    else cell+=c;
+  }
+  if(cell!==''||row.length){row.push(cell);rows.push(row)}
+  const clean=rows.filter(r=>r.some(c=>c.trim()!==''));
+  if(!clean.length)return'> （空 CSV）\n';
+  const w=clean[0].length;
+  const esc=c=>c.replace(/\|/g,'\\|').replace(/\n/g,' ').trim();
+  const out=[ '| '+clean[0].map(esc).join(' | ')+' |', '|'+'---|'.repeat(w) ];
+  clean.slice(1).forEach(r=>out.push('| '+Array.from({length:w},(_,i)=>esc(r[i]??'')).join(' | ')+' |'));
+  return out.join('\n')+'\n';
+}
+async function csvToTableDoc(path){
+  try{
+    const d=await api('/doc?path='+encodeURIComponent(path));
+    const md='# '+path.split('/').pop().replace(/\.csv$/i,'')+'\n\n'+csvToMarkdownTable(d.source);
+    const to=path.replace(/\.csv$/i,'')+'.md';
+    await api('/doc?path='+encodeURIComponent(to),{method:'PUT',body:md,headers:{'content-type':'text/markdown'}});
+    toast('已生成 '+to.split('/').pop(),'ok');await refreshAll();openDoc(to);
+  }catch(e){toast('转换失败：'+e.message,'err')}
+}
+async function sendDocTo(path){
+  openDoc(path).then(()=>$('d-export').click());
+}
+async function pinDocCommon(path){
+  saveTreeUI({ recentDocs: [path, ...(treeUI.recentDocs||[]).filter(x=>x!==path)].slice(0,12) });
+  toast('已加入菜单栏「常用·最近文档」','ok');
+}
+async function stickyRef(path){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  const ts=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const to=`Notes/便利贴/引用-${ts}.md`;
+  try{
+    const doc=(window.__fullDocs||[]).find(x=>x.path===path);
+    await api('/doc?path='+encodeURIComponent(to),{method:'PUT',
+      body:`- ${(doc&&doc.title)||path.split('/').pop()}\n  - 相对路径：${path}\n`,
+      headers:{'content-type':'text/markdown'}});
+    toast('已生成引用便签 '+to.split('/').pop(),'ok');await refreshAll();
+  }catch(e){toast('失败：'+e.message,'err')}
+}
+async function showDocProps(path){
+  try{
+    const d=await api('/doc?path='+encodeURIComponent(path));
+    const r=await api('/status');
+    const kb=d.size>=1024?(d.size/1024).toFixed(1)+' KB':d.size+' B';
+    const when=d.mtime?new Date(d.mtime*1000).toLocaleString():'—';
+    const words=(d.source||'').length;
+    showPropsPanel([
+      ['文件名',path.split('/').pop()],
+      ['相对路径',path],
+      ['绝对路径',r.root+'/'+path],
+      ['格式',d.format],
+      ['大小',kb],
+      ['修改时间',when],
+      ['字符数',words],
+      ['标签',(d.tags||[]).join('、')||'—'],
+      ['可打开的链接',location.origin+BASE+'?doc='+encodeURIComponent(path)],
+    ]);
+  }catch(e){toast('读取属性失败：'+e.message,'err')}
+}
+async function showDirProps(dir){
+  try{
+    const r=await api('/browse?path='+encodeURIComponent(dir));
+    const list=r.items||r.entries||[];
+    showPropsPanel([['目录',dir],['条目数',list.length],['绝对路径',(await api('/status')).root+'/'+dir]]);
+  }catch(e){toast('读取失败：'+e.message,'err')}
+}
+function showPropsPanel(rows){
+  let ov=$('props-ov');
+  if(!ov){
+    ov=document.createElement('div');ov.className='overlay';ov.id='props-ov';
+    ov.innerHTML='<div class="panel"><div class="panel-head"><h3>属性</h3><button class="icon-btn" data-close="props-ov" title="关闭">✕</button></div><div class="panel-body" id="props-body"></div></div>';
+    document.body.appendChild(ov);
+  }
+  const box=ov.querySelector('#props-body');box.innerHTML='';
+  rows.forEach(([k,v])=>{
+    const row=document.createElement('div');row.style.cssText='display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;align-items:baseline';
+    const kEl=document.createElement('b');kEl.textContent=k;kEl.style.cssText='flex:none;width:88px;color:var(--muted);font-weight:600';
+    const vEl=document.createElement('span');vEl.textContent=v;vEl.style.cssText='word-break:break-all;font-family:var(--font-mono)';
+    vEl.ondblclick=()=>{navigator.clipboard.writeText(v);toast('已复制','ok')};
+    row.append(kEl,vEl);box.appendChild(row);
+  });
+  openOverlay('props-ov');
+}
 // 画布：节点右键 → 检查器同款动作；空白右键 → 画布级动作
 document.getElementById('canvas').addEventListener('contextmenu',e=>{
   e.preventDefault();
@@ -6630,16 +6834,20 @@ document.getElementById('canvas').addEventListener('contextmenu',e=>{
     selected=id;selectNode(id);
     openCtx(e.clientX,e.clientY,[
       {label:'📝 打开编辑',fn:()=>openDoc(n.path)},
+      ...docCtxItems(n.path).filter(it=>it!=='sep'&&it.label&&it.label.includes('回收站')===false),
+      'sep',
       {label:'✨ 动作',fn:()=>{selected=id;selectNode(id);abLastPointer={x:e.clientX,y:e.clientY};abShow();}},
       {label:'🎯 聚焦此节点',fn:()=>$b('ins-focus').click()},
       {label:'🚀 发布为 AI-HTML',fn:()=>$b('ins-pub').click()},
-      {label:'📋 复制路径',fn:()=>{navigator.clipboard.writeText(n.path);toast('已复制 '+n.path,'ok');}},
       'sep',
       {label:'🗑 移入回收站',danger:true,fn:()=>$b('ins-del').click()},
     ]);
   }else{
     openCtx(e.clientX,e.clientY,[
       {label:'＋ 新建文档',fn:newDoc},
+      {label:'📥 导入并转码…',fn:()=>filePickerTranscode()},
+      {label:'📋 粘贴文档',fn:()=>pasteDocInto(browsePath==='Notes'?'Notes':browsePath)},
+      'sep',
       {label:'⚡ 采集主题',fn:()=>openPalette()},
       'sep',
       {label:'✨ 整理布局',fn:tidy},
@@ -6658,23 +6866,11 @@ document.getElementById('rail-list').addEventListener('contextmenu',e=>{
   e.preventDefault();
   if(leaf){
     const path=leaf.title||'';
-    openCtx(e.clientX,e.clientY,[
-      {label:'📝 打开',fn:()=>openDoc(path)},
-      {label:'📋 复制路径',fn:()=>{navigator.clipboard.writeText(path);toast('已复制','ok');}},
-      'sep',
-      {label:'🗑 移入回收站',danger:true,fn:async()=>{
-        if(!(await uiConfirm('移入回收站？'+path+'\n（可在 ⌘K「回收站」恢复）',{ok:'移入回收站'})))return;
-        try{await api('/doc?path='+encodeURIComponent(path),{method:'DELETE'});dropDocLocal(path);toast('已移入回收站：'+path,'ok');await refreshAll();}
-        catch(err){toast('删除失败：'+err.message,'err');}
-      }},
-    ]);
+    openCtx(e.clientX,e.clientY,docCtxItems(path));
   }else if(row){
     const nm=row.querySelector('.nm');
     const folder=(window.__browseCache&&browsePath)||'Notes';
-    openCtx(e.clientX,e.clientY,[
-      {label:'📋 复制文件夹名',fn:()=>{navigator.clipboard.writeText(nm?nm.textContent:'');toast('已复制','ok');}},
-      {label:'📂 在画布中打开',fn:()=>{loadGraph();}},
-    ]);
+    openCtx(e.clientX,e.clientY,folderCtxItems(nm?nm.textContent:''));
   }
 });
 
@@ -7651,6 +7847,20 @@ function bootDone(){
   /* 恢复上次位置（本地即时）+ 拉取跨设备 UI 状态（新者胜）：树展开 / 最近文档 / 浏览位置 */
   setTimeout(async()=>{
     try{
+      /* 深链优先（?doc= 或 #doc=——「获取链接」复制的 URL）：__fullDocs 懒加载，轮询等就位（≤10s）后打开 */
+      const d=params.get('doc')||(location.hash.match(/^#doc=(.+)/)||[])[1];
+      if(d){
+        params.delete('doc');
+        history.replaceState(null,'',location.pathname+(params.toString()?'?'+params:''));
+        const target=decodeURIComponent(d);
+        let n=0;
+        const t=setInterval(()=>{
+          const hit=window.__fullDocs&&window.__fullDocs.some(x=>x.path===target);
+          if(hit){clearInterval(t);openDoc(target);}
+          else if(++n>40){clearInterval(t);}
+        },250);
+        return;
+      }
       if(treeUI.browsePath&&treeUI.browsePath!==browsePath){browsePath=treeUI.browsePath;await loadGraph();}
       if(treeUI.lastDoc&&mode!=='learn'&&mode!=='present')locateInTree(treeUI.lastDoc);
     }catch{}

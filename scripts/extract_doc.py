@@ -61,35 +61,76 @@ def extract_xlsx(path):
 
 MAX_SLIDES = 300
 
-def extract_pptx(path):
-    from pptx import Presentation
-    prs = Presentation(path)
+def _odf_paras(root, tags):
+    """按文档序抽 ODF 段落文本（namespace 通配，text:p / text:h / 呈现层 span 已含在 itertext）。"""
+    out = []
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1]
+        if tag in tags:
+            t = " ".join("".join(el.itertext()).split())
+            if t:
+                out.append((tag, t))
+    return out
+
+def extract_odt(path):
+    import zipfile, xml.etree.ElementTree as ET
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("content.xml"))
     parts = []
-    slides = list(prs.slides)[:MAX_SLIDES]
-    for i, slide in enumerate(slides, 1):
-        title = ""
-        try:
-            if slide.shapes.title is not None:
-                title = slide.shapes.title.text.strip()
-        except Exception:
-            title = ""
-        parts.append(f"## Slide {i}" + (f"：{title}" if title else ""))
-        for shape in slide.shapes:
-            if getattr(shape, "has_text_frame", False):
-                for para in shape.text_frame.paragraphs:
-                    t = "".join(run.text for run in para.runs).strip()
-                    if t and t != title:
-                        parts.append(("- " if (para.level or 0) == 0 else "  - ") + t)
-        try:
-            if slide.has_notes_slide:
-                notes = slide.notes_slide.notes_text_frame.text.strip()
-                if notes:
-                    parts.append("")
-                    parts.append(f"> 备注：{notes}")
-        except Exception:
-            pass
-        parts.append("")
-    return "\n".join(parts)
+    for tag, t in _odf_paras(root, {"h", "p"}):
+        parts.append(f"## {t}" if tag == "h" else t)
+    return "\n\n".join(parts)
+
+def extract_ods(path):
+    import zipfile, xml.etree.ElementTree as ET
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("content.xml"))
+    parts, cur_table = [], None
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1]
+        if tag == "table":
+            name = ""
+            for k, v in el.attrib.items():
+                if k.rsplit("}", 1)[-1] == "name":
+                    name = v
+            cur_table = name or "表"
+            parts.append(f"## {cur_table}")
+        elif tag == "table-row" and cur_table is not None:
+            cells = []
+            for c in el:
+                if c.tag.rsplit("}", 1)[-1] != "table-cell":
+                    continue
+                cells.append(" ".join("".join(c.itertext()).split()).replace("|", "\\|"))
+            if any(cells):
+                parts.append("| " + " | ".join(cells) + " |")
+    # 每表首行后补表头分隔线（简单启发：表名行后第一数据行）
+    out, header_done = [], False
+    for line in parts:
+        out.append(line)
+        if line.startswith("| ") and not header_done:
+            cols = line.count("|") - 1
+            out.append("|" + "---|" * cols)
+            header_done = True
+        if line.startswith("## "):
+            header_done = False
+    return "\n".join(out)
+
+def extract_odp(path):
+    import zipfile, xml.etree.ElementTree as ET
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("content.xml"))
+    parts, page = 0, 0
+    lines = []
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1]
+        if tag == "page":
+            page += 1
+            lines.append(f"## Slide {page}")
+        elif tag == "p":
+            t = " ".join("".join(el.itertext()).split())
+            if t:
+                lines.append("- " + t)
+    return "\n".join(lines)
 
 if __name__ == "__main__":
     path = sys.argv[1]
@@ -99,6 +140,9 @@ if __name__ == "__main__":
         elif ext == "docx": text = extract_docx(path)
         elif ext == "xlsx": text = extract_xlsx(path)
         elif ext == "pptx": text = extract_pptx(path)
+        elif ext == "odt": text = extract_odt(path)
+        elif ext == "ods": text = extract_ods(path)
+        elif ext == "odp": text = extract_odp(path)
         else: text = open(path, encoding="utf-8", errors="replace").read()
         print(json.dumps({"ok": True, "text": text}))
     except Exception as e:

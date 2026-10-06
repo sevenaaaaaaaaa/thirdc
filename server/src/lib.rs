@@ -197,6 +197,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/boards", get(boards_list).post(boards_create))
         .route("/boards/{name}", axum::routing::delete(boards_delete))
         .route("/doc/move", post(move_doc))
+        .route("/doc/copy", post(copy_doc))
+        .route("/doc/raw", get(raw_doc))
         .route("/asset-file", get(asset_file))
         .route("/connections", get(connections))
         .route("/conn/probe", post(conn_probe))
@@ -1484,6 +1486,7 @@ async fn get_doc(
     }
     let html = k.render_doc_html_with_views(&path).ok();
     let source = std::fs::read_to_string(k.vault.root.join(&path)).unwrap_or_default();
+    let meta = std::fs::metadata(k.vault.root.join(&path)).ok();
     let format = if kernel_core::is_html_rel(&path) {
         "html"
     } else if kernel_core::is_verbatim_rel(&path) {
@@ -1503,11 +1506,97 @@ async fn get_doc(
             "blocks": model.blocks,
             "markdown": kernel_core::to_markdown(&model),
             "html": html,
+            "size": meta.as_ref().map(|m| m.len()).unwrap_or(0),
+            "mtime": meta.as_ref().and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64).unwrap_or(0),
         }))
         .into_response()
         }
         Err(e) => err(StatusCode::NOT_FOUND, e).into_response(),
     }
+}
+
+/// 复制文档（文件真相的平凡操作：读源文件字节 → put_doc 到新路径）。
+async fn copy_doc(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let from = req.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let to = req.get("to").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if !kernel_core::is_safe_doc_path(&from) || !kernel_core::is_safe_doc_path(&to) {
+        return err(StatusCode::BAD_REQUEST, "paths must be under Notes/").into_response();
+    }
+    if from == to {
+        return err(StatusCode::BAD_REQUEST, "源与目标相同").into_response();
+    }
+    let mut k = st.kernel.lock().unwrap();
+    if let Err(e) = k.sync_throttled() {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let text = match std::fs::read_to_string(k.vault.root.join(&from)) {
+        Ok(s) => s,
+        Err(e) => return err(StatusCode::NOT_FOUND, format!("源不可读：{e}")).into_response(),
+    };
+    match k.put_doc(&to, &text) {
+        Ok(()) => Json(json!({ "written": to })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// 原文件下载（Notes/ 下任意文档字节级原样，Content-Disposition 附件）。
+async fn raw_doc(
+    State(st): State<Arc<AppState>>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let path = q.get("path").cloned().unwrap_or_default();
+    if !kernel_core::is_safe_doc_path(&path) {
+        return err(StatusCode::BAD_REQUEST, "path must be under Notes/").into_response();
+    }
+    let k = st.kernel.lock().unwrap();
+    let abs = k.vault.root.join(&path);
+    match std::fs::read(&abs) {
+        Ok(bytes) => {
+            let name = path.rsplit('/').next().unwrap_or("file");
+            (
+                [
+                    (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename*=UTF-8''{}", urlencoding_encode(name)),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(_) => err(StatusCode::NOT_FOUND, "file not found").into_response(),
+    }
+}
+
+/// RFC 5987 filename* 的最小百分号编码。
+fn urlencoding_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 async fn put_doc(
@@ -4156,8 +4245,8 @@ async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
         Err(e) => return err(StatusCode::BAD_REQUEST, format!("base64: {e}")).into_response(),
     };
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-    if !["pdf", "docx", "doc", "xlsx", "pptx"].contains(&ext.as_str()) {
-        return err(StatusCode::BAD_REQUEST, "仅支持 pdf/docx/xlsx/pptx").into_response();
+    if !["pdf", "docx", "doc", "xlsx", "pptx", "odt", "ods", "odp"].contains(&ext.as_str()) {
+        return err(StatusCode::BAD_REQUEST, "仅支持 pdf/docx/doc/xlsx/pptx/odt/ods/odp").into_response();
     }
 
     // 写临时文件 → python3 提取
