@@ -342,6 +342,193 @@ ol{{margin:0;padding-left:20px;color:var(--muted)}} li{{margin:6px 0}}
     tauri::Url::from_file_path(&path).ok().map(|u| u.to_string())
 }
 
+// ── 菜单栏图标（tray）：呼出列表 / 新建 / 常用（最近文档）/ 便利贴 / 凭证库 ──
+
+/// tray 与便利贴窗口需要的内核上下文。
+#[cfg(desktop)]
+struct TrayCtx {
+    origin: String,
+    token: String,
+    vault: PathBuf,
+    /// 菜单「最近文档」idx → 路径（菜单事件里反查）。
+    recents: StdMutex<Vec<String>>,
+}
+
+#[cfg(desktop)]
+fn ui_state_recents(vault: &Path) -> Vec<String> {
+    std::fs::read_to_string(vault.join(".thirdc").join("ui-state.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("recentDocs")
+                .and_then(|r| r.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(desktop)]
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// 向主窗口页面派发事件（shell 监听 CustomEvent 完成动作）。
+#[cfg(desktop)]
+fn dispatch_main(app: &AppHandle, name: &str, detail: &str) {
+    if let Some(w) = app.get_webview_window("main") {
+        let js = format!(
+            "window.dispatchEvent(new CustomEvent('{name}',{detail}))"
+        );
+        let _ = w.eval(&js);
+    }
+}
+
+#[cfg(desktop)]
+fn open_sticky(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("sticky") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let ctx = app.state::<TrayCtx>();
+    let url = format!("{}/sticky.html?token={}", ctx.origin, ctx.token);
+    let parsed: tauri::Url = match url.parse() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[tray] 便利贴地址解析失败：{e}");
+            return;
+        }
+    };
+    if let Err(e) = WebviewWindowBuilder::new(app, "sticky", WebviewUrl::External(parsed))
+        .title("便利贴 · 鹿蕊 Litmus")
+        .inner_size(300.0, 380.0)
+        .min_inner_size(220.0, 240.0)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .build()
+    {
+        eprintln!("[tray] 便利贴窗口创建失败：{e}");
+    }
+}
+
+/// 重建 tray 菜单（最近文档随 ui-state.json 实时变化，点击图标时刷新一次）。
+#[cfg(desktop)]
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
+    let recents = {
+        let ctx = app.state::<TrayCtx>();
+        let mut r = ctx
+            .recents
+            .lock()
+            .map_err(|_| tauri::Error::WindowNotFound)?;
+        let fresh = ui_state_recents(&ctx.vault);
+        *r = fresh.clone();
+        fresh
+    };
+    let show = MenuItem::with_id(app, "t-show", "显示主窗口", true, None::<&str>)?;
+    let new_doc = MenuItem::with_id(app, "t-new", "新建文档", true, None::<&str>)?;
+    let sticky = MenuItem::with_id(app, "t-sticky", "新建便利贴", true, None::<&str>)?;
+    let secrets = MenuItem::with_id(app, "t-secrets", "凭证库", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "t-quit", "退出 Litmus", true, None::<&str>)?;
+    let mut sub = SubmenuBuilder::new(app, "常用 · 最近文档");
+    if recents.is_empty() {
+        sub = sub.item(&MenuItem::with_id(
+            app,
+            "t-none",
+            "暂无最近文档",
+            false,
+            None::<&str>,
+        )?);
+    } else {
+        for (i, p) in recents.iter().take(8).enumerate() {
+            let label = p.rsplit('/').next().unwrap_or(p).to_string();
+            sub = sub.item(&MenuItem::with_id(
+                app,
+                &format!("t-doc:{i}"),
+                &label,
+                true,
+                Some(p.as_str()),
+            )?);
+        }
+    }
+    let recent_sub = sub.build()?;
+    MenuBuilder::new(app)
+        .item(&show)
+        .separator()
+        .item(&new_doc)
+        .item(&sticky)
+        .item(&recent_sub)
+        .item(&secrets)
+        .separator()
+        .item(&quit)
+        .build()
+}
+
+/// 建菜单栏图标（仅桌面）。菜单事件全在这里分发。
+#[cfg(desktop)]
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+    let menu = build_tray_menu(app.handle())?;
+    let mut tray = TrayIconBuilder::with_id("litmus-tray")
+        .menu(&menu)
+        .menu_on_left_click(true)
+        .tooltip("鹿蕊 Litmus")
+        .on_menu_event(|app, event| {
+            let id = event.id().0.clone();
+            match id.as_str() {
+                "t-show" => show_main(app),
+                "t-new" => {
+                    show_main(app);
+                    dispatch_main(app, "tray-new-doc", "{}");
+                }
+                "t-sticky" => open_sticky(app),
+                "t-secrets" => {
+                    show_main(app);
+                    dispatch_main(app, "tray-secrets", "{}");
+                }
+                "t-quit" => app.exit(0),
+                other => {
+                    if let Some(idx) = other.strip_prefix("t-doc:") {
+                        let path = {
+                            let ctx = app.state::<TrayCtx>();
+                            ctx.recents
+                                .lock()
+                                .ok()
+                                .and_then(|r| r.get(idx.parse::<usize>().unwrap_or(99)).cloned())
+                        };
+                        if let Some(p) = path {
+                            let detail = serde_json::to_string(&serde_json::json!({ "path": p }))
+                                .unwrap_or_else(|_| "{}".into());
+                            show_main(app);
+                            dispatch_main(app, "tray-open-doc", &detail);
+                        }
+                    }
+                }
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            // 左键抬起时按 ui-state 现值重建菜单（macOS 点开即所见；其余平台同样受益）
+            if let TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, .. } = event {
+                if let Ok(m) = build_tray_menu(tray.app_handle()) {
+                    let _ = tray.set_menu(Some(m));
+                }
+            }
+        })
+        .icon(app.default_window_icon().expect("bundle icon").clone())
+        .build(app)?;
+    let _ = &mut tray; // 句柄由 app 托管
+    Ok(())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn desktop_focus_main(app: AppHandle) {
+    show_main(&app);
+}
+
 /// 应用入口：桌面由 src/main.rs 调用；移动端由 tauri mobile_entry_point 调用。
 /// 内核启动搬进 setup：移动端默认库要等 app 数据目录就绪后再解析。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -358,7 +545,8 @@ pub fn run() {
             desktop_switch_vault,
             desktop_render_page,
             ego_render_result,
-            desktop_prefs_save
+            desktop_prefs_save,
+            desktop_focus_main
         ])
         .setup(move |app| {
             let vault_path = vault_override.unwrap_or_else(|| {
@@ -437,16 +625,47 @@ pub fn run() {
             }
 
             builder.build()?;
+
+            /* 菜单栏图标：内核起成功才有 origin/token——兜底错误页时不建 tray。 */
+            #[cfg(desktop)]
+            if url.starts_with("http") {
+                let origin = url.split("/?").next().unwrap_or("").to_string();
+                let token = url.split("token=").nth(1).unwrap_or("").to_string();
+                app.manage(TrayCtx {
+                    origin,
+                    token,
+                    vault: vault_path.clone(),
+                    recents: StdMutex::new(ui_state_recents(&vault_path)),
+                });
+                if let Err(e) = setup_tray(app) {
+                    eprintln!("[tray] 菜单栏图标初始化失败：{e}");
+                }
+            }
             Ok(())
         })
-        // 单窗口应用：主窗口关掉就退出（macOS 默认会留着无窗口的进程）。
+        // 菜单栏应用语义：主窗口点关闭 → 隐藏到菜单栏（tray「退出」才真正退出）；
+        // 主窗口被真正销毁时退出进程。macOS Dock 点击（Reopen）恢复主窗口。
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
-                window.app_handle().exit(0);
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                tauri::WindowEvent::Destroyed if window.label() == "main" => {
+                    window.app_handle().exit(0);
+                }
+                _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("ThirdC Desktop 启动失败");
+        .build(tauri::generate_context!())
+        .expect("ThirdC Desktop 启动失败")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_main(app);
+            }
+            let _ = (app, &event);
+        });
 }
 
 #[cfg(test)]

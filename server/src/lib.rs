@@ -174,6 +174,9 @@ fn shell_version() -> &'static String {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(app))
+        .route("/sticky.html", get(|| async {
+            ([("content-type","text/html; charset=utf-8"),("cache-control","no-cache")], include_str!("../web/sticky.html"))
+        }))
         .route("/assets/tokens.css", get(tokens_css))
         .route("/icon48.png", get(|| async { ([("content-type","image/png"),("cache-control","public, max-age=86400")], include_bytes!("../web/icon48.png").as_slice()) }))
         .route("/manifest-pwa.json", get(|| async { axum::response::Json(serde_json::json!({"name":"鹿蕊 Litmus","short_name":"鹿蕊","start_url":"/","display":"standalone","background_color":"#22252d","theme_color":"#22252d"})) }))
@@ -241,6 +244,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/search/hybrid", get(search_hybrid))
         .route("/rag/reindex", post(rag_reindex))
         .route("/rag/status", get(rag_status))
+        .route("/secrets", get(secrets_list).post(secrets_put).delete(secrets_delete))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
         .route("/sync", post(sync))
@@ -1338,6 +1342,103 @@ async fn rag_status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoR
         "total": st.rag.total.load(Ordering::SeqCst),
         "last_error": st.rag.last_error.lock().unwrap().clone(),
     })).into_response()
+}
+
+// ── 凭证库：本地登录凭证/密码的简单保管入口 ─────────────────────────────
+// 文件真相：.thirdc/secrets.json（unix 0600，.thirdc 天然不入 git）。
+// 与 machine.toml 的 token 同一威胁模型——拿到磁盘/TOKEN 的人本就能读到一切。
+
+fn secrets_path(vault_root: &std::path::Path) -> std::path::PathBuf {
+    vault_root.join(".thirdc").join("secrets.json")
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn secrets_load(vault_root: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(secrets_path(vault_root))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("secrets").and_then(|s| s.as_array()).cloned())
+        .unwrap_or_default()
+}
+
+fn secrets_save(vault_root: &std::path::Path, rows: &[Value]) -> Result<(), String> {
+    let p = secrets_path(vault_root);
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let body = json!({ "secrets": rows, "updatedAt": now_ms() });
+    std::fs::write(&p, serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+async fn secrets_list(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let rows = { let k = st.kernel.lock().unwrap(); secrets_load(&k.vault.root) };
+    Json(json!({ "secrets": rows })).into_response()
+}
+
+async fn secrets_put(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let name = req.get("name").and_then(|n| n.as_str()).unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "需要 name").into_response();
+    }
+    let entry = json!({
+        "name": name,
+        "value": req.get("value").and_then(|v| v.as_str()).unwrap_or(""),
+        "note": req.get("note").and_then(|n| n.as_str()).unwrap_or(""),
+        "updated": now_ms(),
+    });
+    let out = {
+        let k = st.kernel.lock().unwrap();
+        let mut rows: Vec<Value> = secrets_load(&k.vault.root)
+            .into_iter().filter(|r| r.get("name").and_then(|n| n.as_str()) != Some(&name)).collect();
+        rows.insert(0, entry);
+        match secrets_save(&k.vault.root, &rows) {
+            Ok(()) => rows.len(),
+            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        }
+    };
+    Json(json!({ "ok": true, "count": out })).into_response()
+}
+
+async fn secrets_delete(State(st): State<Arc<AppState>>, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let name = q.get("name").cloned().unwrap_or_default();
+    let removed = {
+        let k = st.kernel.lock().unwrap();
+        let before = secrets_load(&k.vault.root);
+        let after: Vec<Value> = before
+            .iter().filter(|r| r.get("name").and_then(|n| n.as_str()) != Some(name.as_str())).cloned().collect();
+        let removed = before.len() - after.len();
+        match secrets_save(&k.vault.root, &after) {
+            Ok(()) => removed,
+            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        }
+    };
+    Json(json!({ "ok": true, "removed": removed })).into_response()
 }
 
 async fn search(

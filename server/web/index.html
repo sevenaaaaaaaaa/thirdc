@@ -359,6 +359,9 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:11px;font-weight:600;font-family:var(--font-mono)}
 .badge.ok{background:var(--ok-soft);color:var(--ok)}
 .badge.warn{background:var(--warn-soft);color:var(--warn)}
+/* 文件真相徽记：图标化（原文字徽章在侧栏窄模式下挤压穿模），悬停出完整释义 */
+.truth-ic{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:var(--r-pill);background:var(--ok-soft);color:var(--ok);flex:none}
+.truth-ic svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .badge.plan{background:var(--hover);color:var(--muted)}
 .road{display:flex;flex-direction:column;gap:10px}
 .road-row{display:flex;gap:10px;align-items:flex-start}
@@ -1111,7 +1114,7 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 
 <aside id="drawer">
   <div class="drawer-head">
-    <span class="badge ok">文件真相</span>
+    <span class="truth-ic" id="d-truth" title="文件真相：你编辑的就是磁盘上的普通文件"><svg viewBox="0 0 24 24" aria-label="文件真相"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="m9 14 2 2 4-4"/></svg></span>
     <span class="path" id="d-path"></span>
     <select class="style-sel" id="d-style" title="阅读设计风格（62 款 · 按场景）"><option value="">风格：默认</option></select>
     <button class="icon-btn" id="d-graph" title="一键生成知识图谱（画布）">🕸</button>
@@ -1245,6 +1248,20 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
 <div class="overlay" id="road-ov"><div class="panel">
   <div class="panel-head"><h3>路线图</h3><span class="badge warn">功能可见性契约</span><button class="icon-btn" data-close="road-ov" title="关闭" aria-label="关闭路线图">✕</button></div>
   <div class="panel-body road" id="road-list"></div>
+</div></div>
+
+<div class="overlay" id="secrets-ov"><div class="panel">
+  <div class="panel-head"><h3>凭证库</h3><span class="badge ok">.thirdc/secrets.json · 0600 · 不入 git</span><button class="icon-btn" data-close="secrets-ov" title="关闭" aria-label="关闭凭证库">✕</button></div>
+  <div class="panel-body">
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <input class="inp" id="secret-name" placeholder="名称（如：GitHub · 服务器 SSH）" style="margin:0;width:38%">
+      <input class="inp" id="secret-value" placeholder="密码 / token / 凭证" type="password" style="margin:0;flex:1">
+      <input class="inp" id="secret-note" placeholder="备注（可选）" style="margin:0;width:24%">
+      <button class="act" id="secret-add" style="height:38px;background:var(--accent);color:var(--on-accent);border-color:var(--accent)">保存</button>
+    </div>
+    <div id="secret-list"></div>
+    <p style="font-size:11.5px;color:var(--faint);margin:10px 0 0">明文存于本库 <code>.thirdc/secrets.json</code>（unix 0600，随库不走 git）。与登录 token 同一威胁模型：磁盘安全 = 凭证安全。菜单栏图标 → 凭证库可随时呼出。</p>
+  </div>
 </div></div>
 
 <div class="overlay" id="plugins-ov"><div class="panel">  <div class="panel-head"><h3>插件</h3><span class="badge plan">GitHub 导入 · 声明式命令</span><button class="icon-btn" data-close="plugins-ov" title="关闭" aria-label="关闭插件面板">✕</button></div>
@@ -2496,7 +2513,7 @@ async function openDoc(path){
     applyLearnStyle();
     dr.classList.add('open');selectNode('doc:'+path);
     buildToc(d.markdown);
-    if(currentFormat==='text'){const body=$('d-body');body.classList.remove('view');body.classList.add('edit');}
+    if(currentFormat==='text'&&!isJsonPath(path)){const body=$('d-body');body.classList.remove('view');body.classList.add('edit');}
     else if(!dr.classList.contains('wide')){const body=$('d-body');body.classList.remove('edit');body.classList.add('view');}
     addDocTab(path);syncEditorToolbar();
     /* 侧栏树定位到当前文档并记住（随库同步到其他设备） */
@@ -3447,6 +3464,7 @@ const CMDS=[
     $('thread').appendChild(el);$('thread').scrollTop=1e9;
     renderA2ui(el,A2UI_DEMO,'A2UI 示例');
   }],
+  ['凭证库','sec',()=>{closeAll();openSecrets();}],
   ['连接器管理','c',async()=>{closeAll();await openConnPanel();}],
   ['退出登录','out',()=>{
     localStorage.removeItem('thirdc_token');localStorage.removeItem('thirdc_user');
@@ -3523,6 +3541,46 @@ const CMDS=[
     }catch(e){toast('采集失败：'+e.message,'err')}
   }],
 ];
+
+/* ───────── 凭证库（.thirdc/secrets.json · 0600）───────── */
+async function openSecrets(){
+  openOverlay('secrets-ov');
+  await renderSecrets();
+}
+async function renderSecrets(){
+  const box=$('secret-list');
+  try{
+    const r=await api('/secrets');
+    box.innerHTML='';
+    if(!(r.secrets||[]).length){box.innerHTML='<div class="dv-meta">还没有保存的凭证。上方填名称与凭证值即可入库。</div>';return}
+    r.secrets.forEach(s=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:10px;margin-bottom:6px';
+      const nm=document.createElement('b');nm.textContent=s.name;nm.style.fontSize='13px';
+      const nt=document.createElement('span');nt.textContent=s.note||'';nt.style.cssText='flex:1;font-size:12px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      const copy=document.createElement('button');copy.className='act';copy.textContent='复制';copy.style.height='30px';
+      copy.onclick=async()=>{try{await navigator.clipboard.writeText(s.value||'');toast('已复制「'+s.name+'」','ok')}catch(e){toast('复制失败：'+e.message,'err')}};
+      const del=document.createElement('button');del.className='act';del.textContent='删除';del.style.height='30px';
+      del.onclick=async()=>{if(!confirm('删除凭证「'+s.name+'」？'))return;try{await api('/secrets?name='+encodeURIComponent(s.name),{method:'DELETE'});toast('已删除','ok');renderSecrets()}catch(e){toast('删除失败：'+e.message,'err')}};
+      row.append(nm,nt,copy,del);
+      box.appendChild(row);
+    });
+  }catch(e){box.innerHTML='<div class="dv-meta">读取失败：'+e.message+'</div>'}
+}
+$('secret-add')&&($('secret-add').onclick=async()=>{
+  const name=$('secret-name').value.trim(),value=$('secret-value').value,note=$('secret-note').value.trim();
+  if(!name||!value){toast('名称与凭证值必填','err');return}
+  try{
+    await api('/secrets',{method:'POST',json:{name,value,note}});
+    $('secret-name').value='';$('secret-value').value='';$('secret-note').value='';
+    toast('凭证已入库（'+name+'）','ok');renderSecrets();
+  }catch(e){toast('保存失败：'+e.message,'err')}
+});
+
+/* ───────── 桌面菜单栏图标事件（Rust 侧 eval 派发 CustomEvent）───────── */
+addEventListener('tray-open-doc',e=>{const p=e.detail&&e.detail.path;if(p)openDoc(p)});
+addEventListener('tray-new-doc',()=>newDoc());
+addEventListener('tray-secrets',()=>openSecrets());
 function renderPalette(q){
   const box=$('palette-list');box.innerHTML='';
   const ql=q.trim().toLowerCase();
@@ -6477,9 +6535,49 @@ html,body{margin:0;background:${bg};color:${fg}}
 pre{margin:0;padding:18px 20px;font:12.5px/1.75 ui-monospace,'SF Mono',Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;tab-size:4}
 .kw{color:${kw};font-weight:600}.str{color:${str}}.com{color:${com};font-style:italic}.num{color:${num}}</style></head><body><pre><code>${hlCode(src,ext)}</code></pre></body></html>`;
 }
+/* JSON 一等视图：校验 → 美化 → 专属高亮 → 状态条（有效/错误行号） */
+function isJsonPath(p){return /\.(json|jsonc)$/i.test(p||'')}
+function jsonHighlight(src){
+  const dark=document.documentElement.dataset.theme!=='light';
+  const c={key:dark?'oklch(80% .11 258)':'oklch(50% .16 258)',str:dark?'oklch(80% .12 145)':'oklch(42% .12 145)',num:dark?'oklch(80% .11 70)':'oklch(48% .13 55)',bool:dark?'oklch(76% .13 300)':'oklch(52% .19 300)',pun:dark?'oklch(60% .015 260)':'oklch(55% .015 260)'};
+  const e=escHtml(src);
+  return e
+    .replace(/&quot;(?:[^&]|&(?!quot;))*&quot;(?=\s*:)/g,m=>`<span style="color:${c.key}">${m}</span>`)
+    .replace(/&quot;(?:[^&]|&(?!quot;))*&quot;/g,m=>`<span style="color:${c.str}">${m}</span>`)
+    .replace(/\b(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/g,'<span style="color:'+c.num+'">$1</span>')
+    .replace(/\b(true|false|null)\b/g,'<span style="color:'+c.bool+'">$1</span>')
+    .replace(/([{}\[\],:])/g,'<span style="color:'+c.pun+'">$1</span>');
+}
+function jsonViewHtml(src){
+  const dark=document.documentElement.dataset.theme!=='light';
+  const bg=dark?'oklch(19% .012 260)':'oklch(97% .004 260)',fg=dark?'oklch(88% .01 260)':'oklch(24% .012 260)';
+  const line=dark?'oklch(26% .015 260)':'oklch(90% .006 260)',faint=dark?'oklch(62% .015 260)':'oklch(50% .02 260)';
+  let body='',ok=null;
+  try{
+    const parsed=JSON.parse(src);
+    const pretty=JSON.stringify(parsed,null,2);
+    const keys=Array.isArray(parsed)?parsed.length+' 项':Object.keys(parsed||{}).length+' 个键';
+    ok={ok:true,keys,bytes:new Blob([src]).size};
+    body='<pre><code>'+jsonHighlight(pretty)+'</code></pre>';
+  }catch(err){
+    const msg=String(err&&err.message||err).slice(0,160);
+    // V8 系报错带 "at position N"：换算行号；拿不到就不显示
+    let ln=0;
+    const pm=/: position (\d+)/.exec(msg)||/position (\d+)/.exec(msg);
+    if(pm){ln=src.slice(0,+pm[1]).split('\n').length;}
+    ok={ok:false,msg,line:ln};
+    body='<pre><code>'+escHtml(src)+'</code></pre>';
+  }
+  const banner=ok.ok
+    ?`<div style="padding:9px 20px;background:${line};color:${faint};font:12px var(--font-mono,ui-monospace,monospace)">✓ 有效 JSON · ${ok.keys} · ${ok.bytes} B</div>`
+    :`<div style="padding:9px 20px;background:${line};color:${dark?'oklch(75% .15 25)':'oklch(45% .18 25)'};font:12px var(--font-mono,ui-monospace,monospace)">✗ 无效 JSON${ok.line?'（约第 '+ok.line+' 行）':''} · ${ok.msg} —— 切到编辑修改，预览实时刷新</div>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;background:${bg};color:${fg}}
+pre{margin:0;padding:18px 20px;font:12.5px/1.75 ui-monospace,'SF Mono',Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;tab-size:2}</style></head><body>${banner}${body}</body></html>`;
+}
 function paintCodePreview(){
   const ext=(current&&current.includes('.'))?current.split('.').pop().toLowerCase():'txt';
-  $('preview').srcdoc=codeViewHtml($('editor').value,ext);
+  $('preview').srcdoc=isJsonPath(current)?jsonViewHtml($('editor').value):codeViewHtml($('editor').value,ext);
 }
 function applyLearnStyle(){
   if(currentFormat==='text'){paintCodePreview();return;}

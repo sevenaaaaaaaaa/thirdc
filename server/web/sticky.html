@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>便利贴 · 鹿蕊 Litmus</title>
+<style>
+:root{color-scheme:dark light}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:oklch(19% .012 260);color:oklch(88% .01 260);
+  font:13px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+@media (prefers-color-scheme: light){body{background:oklch(97% .004 260);color:oklch(24% .012 260)}}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid oklch(30% .015 260)}
+@media (prefers-color-scheme: light){header{border-color:oklch(88% .012 82)}}
+header .dot{width:8px;height:8px;border-radius:99px;background:oklch(72% .14 130);flex:none}
+header b{font-size:12px;font-weight:600;flex:1}
+header button{border:none;cursor:pointer;font:600 12px/1 system-ui;padding:7px 12px;border-radius:9px;
+  background:oklch(54% .17 258);color:#fff}
+header button:disabled{opacity:.45;cursor:default}
+textarea{flex:1;resize:none;border:none;outline:none;background:transparent;color:inherit;
+  padding:12px 14px;font:13px/1.7 inherit}
+footer{padding:6px 12px 10px;font-size:11px;color:oklch(62% .015 260);display:flex;justify-content:space-between;gap:8px}
+footer a{color:inherit}
+</style>
+</head>
+<body>
+<header><span class="dot"></span><b>便利贴 — 落库即真相</b><button id="save">存入库 ⌘↩</button></header>
+<textarea id="pad" placeholder="随手记。⌘/Ctrl+Enter 存入 Notes/便利贴/，之后在库里可检索、可协作、可发布。"></textarea>
+<footer><span id="hint"></span><a href="#" id="open-app">打开主窗口</a></footer>
+<script>
+const q=new URLSearchParams(location.search);
+const TOKEN=q.get('token')||localStorage.getItem('thirdc_token')||'';
+const BASE=location.origin;
+async function api(path,opts={}){
+  const headers=Object.assign({},opts.headers||{});
+  if(TOKEN)headers['authorization']='Bearer '+TOKEN;
+  if(opts.json!==undefined){headers['content-type']='application/json';opts.body=JSON.stringify(opts.json);}
+  const res=await fetch(BASE+path,Object.assign({},opts,{headers,cache:'no-store'}));
+  const text=await res.text();let data;try{data=text?JSON.parse(text):{}}catch{data={raw:text}}
+  if(!res.ok)throw new Error(data.error||res.status);
+  return data;
+}
+const pad=document.getElementById('pad'),btn=document.getElementById('save'),hint=document.getElementById('hint');
+function ts(){const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`}
+async function save(){
+  const body=pad.value.trim();
+  if(!body){hint.textContent='空笔记不入库';return}
+  btn.disabled=true;hint.textContent='存入中…';
+  try{
+    const path=`Notes/便利贴/${ts()}.md`;
+    await api('/doc?path='+encodeURIComponent(path),{method:'PUT',body:body+'\n',headers:{'content-type':'text/markdown'}});
+    pad.value='';hint.textContent='已入库 '+path.split('/').pop();
+  }catch(e){hint.textContent='失败：'+e.message}
+  btn.disabled=false;pad.focus();
+}
+btn.onclick=save;
+pad.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();save()}});
+document.getElementById('open-app').onclick=e=>{e.preventDefault();try{window.__TAURI_INTERNALS__.invoke('desktop_focus_main')}catch(_){}};
+pad.focus();
+</script>
+</body>
+</html>
