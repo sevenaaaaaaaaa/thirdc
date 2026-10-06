@@ -4970,14 +4970,16 @@ let mfOpen=false;
 function mfLayout(){
   const a=$('dock-magic');if(!a)return;
   const r=a.getBoundingClientRect();
-  const cy=r.top+r.height/2;
-  const R=Math.min(128,Math.max(104,innerWidth*0.1));
-  /* 最右锚点：虚拟枢轴贴右缘，扇出严格限制在 90°（正左 → 正上），不越过屏幕右缘 */
-  const vx=Math.min(r.left+r.width/2,innerWidth-R-72);
+  /* 几何约束：56px 圆钮不互叠（相邻弦长 ≥62px）且整体不压底栏。
+     枢轴抬到按钮上方 122px，弧从左下 208° 扫到正上 90°（118° 跨度），
+     R=152 → 弦长 152×23.6°rad≈62.6px。 */
+  const R=152;
+  const cy=r.top-122;
+  const vx=Math.min(r.left+r.width/2,innerWidth-40);
   MF_ITEMS.forEach((el,i)=>{
-    const ang=(180-90*(i/(MF_ITEMS.length-1)))*Math.PI/180;
+    const ang=(208-118*(i/(MF_ITEMS.length-1)))*Math.PI/180;
     const x=Math.min(innerWidth-64,Math.max(8,vx+R*Math.cos(ang)-28));
-    const y=Math.max(8,cy-R*Math.sin(ang)-34);
+    const y=Math.max(8,cy-R*Math.sin(ang)-28);
     el.style.setProperty('--mx',Math.round(x)+'px');
     el.style.setProperty('--my',Math.round(y)+'px');
     el.style.setProperty('--d',(i*36)+'ms');
