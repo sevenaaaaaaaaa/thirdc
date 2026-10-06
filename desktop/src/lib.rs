@@ -131,7 +131,6 @@ async fn desktop_render_page(
     state: tauri::State<'_, RenderSlot>,
     url: String,
 ) -> Result<String, String> {
-    use tauri::webview::PageLoadEvent;
     {
         let mut slot = state.0.lock().map_err(|_| "渲染槽锁异常".to_string())?;
         *slot = None;
@@ -474,7 +473,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = build_tray_menu(app.handle())?;
     let mut tray = TrayIconBuilder::with_id("litmus-tray")
         .menu(&menu)
-        .menu_on_left_click(true)
+        .show_menu_on_left_click(true)
         .tooltip("鹿蕊 Litmus")
         .on_menu_event(|app, event| {
             let id = event.id().0.clone();
