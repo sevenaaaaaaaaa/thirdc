@@ -180,6 +180,10 @@ pub struct AiConfig {
     #[serde(default)]
     pub api_key: String,
     pub model: String,
+    /// Embeddings 模型（密向量召回，走 {base_url}/embeddings）。留空 = 不启用，检索退回 TF-IDF。
+    /// 向量只进 index.db 旁路表 doc_vectors，可随时删除重建（文件真相纪律 §1）。
+    #[serde(default)]
+    pub embedding_model: String,
     /// 单轮对话最大工具步数
     #[serde(default = "default_max_steps")]
     pub max_steps: usize,

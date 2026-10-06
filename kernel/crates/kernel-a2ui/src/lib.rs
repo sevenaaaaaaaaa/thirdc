@@ -268,6 +268,16 @@ pub fn render_jsonl(jsonl: &str, title: &str) -> Result<String, A2uiError> {
     s.render_document(title)
 }
 
+/// A2UI 消息流 → HTML 片段（无外壳，供宿主页面 Shadow DOM 原生承载——A2UI-3 去 iframe）。
+/// 样式由调用方随片段一并注入（`A2UI_CSS`）。
+pub fn render_jsonl_fragment(jsonl: &str) -> Result<String, A2uiError> {
+    let mut s = A2uiStream::new();
+    for line in jsonl.lines() {
+        s.push_line(line)?;
+    }
+    s.render()
+}
+
 /// contents 是邻接表：[{key, valueString|valueNumber|valueBoolean|valueMap}]。
 /// 键全为连续数字时归一成数组——A2UI 用数字键表达列表，template.dataBinding 需要数组。
 fn contents_to_json(contents: &Value) -> Value {
@@ -440,6 +450,15 @@ mod tests {
         assert!(doc.contains("data-catalog=\"https://a2ui.org/specification/v0_8/"));
         assert!(doc.contains(".a2ui-card"));
         assert!(doc.contains("<title>个人卡片</title>"));
+    }
+
+    #[test]
+    fn fragment_has_no_document_shell() {
+        let frag = render_jsonl_fragment(PROFILE_JSONL).unwrap();
+        assert!(!frag.contains("<!doctype"), "片段不能带文档外壳");
+        assert!(!frag.contains("<style>"), "样式由宿主注入，不在片段里");
+        assert!(frag.contains("a2ui-surface"));
+        assert!(frag.contains("Building beautiful apps."));
     }
 
     #[test]

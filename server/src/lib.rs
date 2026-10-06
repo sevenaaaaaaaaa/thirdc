@@ -39,6 +39,17 @@ pub struct AppState {
     pub desktop: bool,
     /// 远端拉取的后台任务状态：结构秒回，正文流式拉取，前端轮询进度。
     pub pull: Arc<Mutex<PullJob>>,
+    /// 密向量重建任务状态（/rag/status 秒回，进度可轮询）。
+    pub rag: Arc<RagJob>,
+}
+
+/// RAG 建向量后台任务的可观察状态。
+#[derive(Default)]
+pub struct RagJob {
+    pub running: std::sync::atomic::AtomicBool,
+    pub done: std::sync::atomic::AtomicUsize,
+    pub total: std::sync::atomic::AtomicUsize,
+    pub last_error: std::sync::Mutex<String>,
 }
 
 /// 后台拉取任务的可观察状态。登录/建目录是同步阶段（快），正文在后台流式写入。
@@ -228,6 +239,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/publish/{name}", get(publish_file))
         .route("/search", get(search))
         .route("/search/hybrid", get(search_hybrid))
+        .route("/rag/reindex", post(rag_reindex))
+        .route("/rag/status", get(rag_status))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
         .route("/sync", post(sync))
@@ -481,9 +494,22 @@ async fn a2ui_render(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
     } else {
         return err(StatusCode::BAD_REQUEST, "需要 jsonl / messages / 单条消息").into_response();
     };
-    match kernel_a2ui::render_jsonl(&jsonl, title) {
-        Ok(html) => Json(json!({ "html": html, "bytes": html.len() })).into_response(),
-        Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+    match req.get("fragment").and_then(|v| v.as_bool()).unwrap_or(false) {
+        // 片段模式：无文档外壳，宿主页面 Shadow DOM 原生承载（A2UI-3 去 iframe）
+        true => match kernel_a2ui::render_jsonl_fragment(&jsonl) {
+            Ok(html) => Json(json!({
+                "html": html,
+                "css": kernel_a2ui::A2UI_CSS,
+                "fragment": true,
+                "bytes": html.len()
+            }))
+            .into_response(),
+            Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+        },
+        false => match kernel_a2ui::render_jsonl(&jsonl, title) {
+            Ok(html) => Json(json!({ "html": html, "bytes": html.len() })).into_response(),
+            Err(e) => err(StatusCode::BAD_REQUEST, e).into_response(),
+        },
     }
 }
 
@@ -1149,20 +1175,169 @@ async fn search_hybrid(
         return e.into_response();
     }
     let query = q.get("q").cloned().unwrap_or_default();
-    let mut k = st.kernel.lock().unwrap();
-    if let Err(e) = k.sync_throttled() {
-        return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
-    }
-    let fts = k.search(&query).unwrap_or_default();
-    // 混合检索走内核（语料按 epoch 缓存，库没变不重建）
-    let merged = match k.search_hybrid(&query, 20) {
-        Ok(m) => m,
-        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    // 第一程（锁内）：FTS + TF-IDF + 取 embeddings 配置
+    let (fts_len, hybrid, embed_cfg) = {
+        let mut k = st.kernel.lock().unwrap();
+        if let Err(e) = k.sync_throttled() {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+        }
+        let fts = k.search(&query).unwrap_or_default();
+        let hybrid = match k.search_hybrid(&query, 20) {
+            Ok(m) => m,
+            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        };
+        let model = k.embedding_model();
+        let endpoint = (!model.is_empty()).then(|| k.embedding_endpoint()).flatten();
+        (fts.len(), hybrid, endpoint.map(|(b, key)| (b, key, model)))
     };
+    // 第二程（锁外网络）：查询向量。失败静默降级为两路结果。
+    let mut dense_count = 0usize;
+    let mut dense_model = String::new();
+    if let Some((base_url, api_key, model)) = embed_cfg {
+        dense_model = model.clone();
+        let input = kernel_core::rag::embed_text(&query);
+        let embedded = tokio::task::spawn_blocking(move || {
+            kernel_core::rag::embed_batch(&base_url, &api_key, &model, &[input])
+        }).await.ok().and_then(|r| r.ok()).and_then(|mut v| if v.len() == 1 { Some(v.remove(0)) } else { None });
+        if let Some(qv) = embedded {
+            let mut k = st.kernel.lock().unwrap();
+            if let Ok(dense) = k.search_dense(&qv, 20) {
+                dense_count = dense.len();
+                let merged = kernel_core::rag::rrf_merge_n(&[&hybrid, &dense], 20);
+                return hybrid_response(query, fts_len, merged, dense_count, dense_model);
+            }
+        } else {
+            eprintln!("search/hybrid: 查询向量失败，降级为 FTS+TF-IDF");
+        }
+    }
+    hybrid_response(query, fts_len, hybrid, dense_count, dense_model)
+}
+
+fn hybrid_response(
+    query: String,
+    fts_len: usize,
+    merged: Vec<(String, f64)>,
+    dense_count: usize,
+    dense_model: String,
+) -> axum::response::Response {
     let hits: Vec<Value> = merged.iter()
         .map(|(path, score)| json!({ "path": path, "score": score, "source": "rrf" }))
         .collect();
-    Json(json!({ "query": query, "hits": hits, "fts_count": fts.len(), "vec_count": merged.len() })).into_response()
+    Json(json!({
+        "query": query,
+        "hits": hits,
+        "fts_count": fts_len,
+        "vec_count": merged.len(),
+        "dense_count": dense_count,
+        "dense_model": dense_model,
+    })).into_response()
+}
+
+// ── RAG 密向量重建（AI embeddings 旁路索引；向量只进 doc_vectors，可整表重建）──────
+
+/// 建向量同步任务：跑在 spawn_blocking 或 preheat 线程上。
+/// 增量：vector_stale 只补缺失/过期项；文本取自索引语料（与检索同 scope：Notes/ md/html）。
+pub fn rag_job_blocking(state: Arc<AppState>) {
+    use std::sync::atomic::Ordering;
+    if state.rag.running.swap(true, Ordering::SeqCst) {
+        return; // 已有一轮在跑
+    }
+    *state.rag.last_error.lock().unwrap() = String::new();
+    let t0 = std::time::Instant::now();
+    (|| {
+        let (model, endpoint, stale, corpus) = {
+            let mut k = state.kernel.lock().unwrap();
+            let model = k.embedding_model();
+            if model.is_empty() { return; } // 未配置：静默跳过
+            let endpoint = match k.embedding_endpoint() {
+                Some(v) => v,
+                None => { *state.rag.last_error.lock().unwrap() = "[ai].base_url 未配置".into(); return; }
+            };
+            let stale = k.vector_stale().unwrap_or_default();
+            let corpus: std::collections::HashMap<String, String> = k.hybrid_snapshot()
+                .map(|(_, c)| c.into_iter().collect())
+                .unwrap_or_default();
+            (model, endpoint, stale, corpus)
+        };
+        let todo: Vec<(String, i64)> = stale.into_iter().filter(|(p, _)| corpus.contains_key(p)).collect();
+        state.rag.total.store(todo.len(), Ordering::SeqCst);
+        state.rag.done.store(0, Ordering::SeqCst);
+        if todo.is_empty() { return; }
+        for batch in todo.chunks(16) {
+            let inputs: Vec<String> = batch.iter()
+                .map(|(p, _)| kernel_core::rag::embed_text(corpus.get(p).map(String::as_str).unwrap_or("")))
+                .collect();
+            let (base_url, api_key) = endpoint.clone();
+            let out = kernel_core::rag::embed_batch(&base_url, &api_key, &model, &inputs);
+            match out {
+                Ok(vecs) => {
+                    let rows: Vec<(String, i64, Vec<f32>)> = batch.iter().cloned()
+                        .zip(vecs).map(|((p, m), v)| (p, m, v)).collect();
+                    if let Err(e) = state.kernel.lock().unwrap().vectors_store(&model, &rows) {
+                        *state.rag.last_error.lock().unwrap() = e.to_string();
+                        return;
+                    }
+                    state.rag.done.fetch_add(batch.len(), Ordering::SeqCst);
+                }
+                Err(e) => {
+                    *state.rag.last_error.lock().unwrap() = e;
+                    return;
+                }
+            }
+        }
+    })();
+    state.rag.running.store(false, Ordering::SeqCst);
+    eprintln!(
+        "rag: 密向量就绪 {}/{}（+{}ms，模型 {}）",
+        state.rag.done.load(Ordering::SeqCst),
+        state.rag.total.load(Ordering::SeqCst),
+        t0.elapsed().as_millis(),
+        { state.kernel.lock().unwrap().embedding_model() }
+    );
+}
+
+/// 触发密向量重建（后台跑，进度看 /rag/status）。
+async fn rag_reindex(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let model = { st.kernel.lock().unwrap().embedding_model() };
+    if model.is_empty() {
+        return Json(json!({ "ok": false, "note": "未配置 [ai].embedding_model，密向量未启用" })).into_response();
+    }
+    let already = st.rag.running.load(std::sync::atomic::Ordering::SeqCst);
+    if !already {
+        let st2 = st.clone();
+        tokio::task::spawn_blocking(move || rag_job_blocking(st2));
+    }
+    Json(json!({
+        "ok": true,
+        "queued": !already,
+        "note": if already { "已有重建任务在跑，进度看 /rag/status" } else { "密向量重建已在后台开始" },
+    })).into_response()
+}
+
+/// 密向量状态：模型、覆盖率、任务进度。
+async fn rag_status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    use std::sync::atomic::Ordering;
+    let (model, covered, docs) = {
+        let k = st.kernel.lock().unwrap();
+        let m = k.embedding_model();
+        let (c, d) = k.vector_stats().unwrap_or((0, 0));
+        (m, c, d)
+    };
+    Json(json!({
+        "model": model,
+        "covered": covered,
+        "docs": docs,
+        "running": st.rag.running.load(Ordering::SeqCst),
+        "done": st.rag.done.load(Ordering::SeqCst),
+        "total": st.rag.total.load(Ordering::SeqCst),
+        "last_error": st.rag.last_error.lock().unwrap().clone(),
+    })).into_response()
 }
 
 async fn search(
@@ -1580,6 +1755,7 @@ pub fn build_state(vault: Vault) -> anyhow::Result<Arc<AppState>> {
         memo_cache: Arc::new(Mutex::new(None)),
         desktop: std::env::var("THIRDC_DESKTOP").map(|v| v == "1").unwrap_or(false),
         pull: Arc::new(Mutex::new(PullJob::default())),
+        rag: Arc::new(RagJob::default()),
     }))
 }
 
@@ -1627,6 +1803,9 @@ pub async fn serve_listener(
                 let built = axum::body::Bytes::from(serde_json::to_vec(&payload).unwrap_or_default());
                 *preheat_state.memo_cache.lock().unwrap() = Some((snap.0.0 as u64, built));
                 eprintln!("preheat: memo 索引就绪（+{}ms）", (t0.elapsed() - hm).as_millis());
+                // 密向量增量补齐：未配置 [ai].embedding_model 时任务内部直接返回
+                let rag_state = preheat_state.clone();
+                std::thread::spawn(move || rag_job_blocking(rag_state));
                 return;
             }
             drop(k); // 批间放锁，UI 请求可插入
@@ -3890,7 +4069,9 @@ async fn ingest_file(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes)
         .or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("../src/scripts/extract_doc.py"))))
         .filter(|p| p.is_file())
         .unwrap_or_else(|| std::path::PathBuf::from("scripts/extract_doc.py"));
-    let out = tokio::process::Command::new("python3")
+    // 解释器定位：THIRDC_PYTHON > python3（服务器侧装新版 Python 时经 systemd 注入，绕开系统 py3.6）
+    let python = std::env::var("THIRDC_PYTHON").ok().filter(|p| !p.is_empty()).unwrap_or_else(|| "python3".to_string());
+    let out = tokio::process::Command::new(python)
         .arg(&script).arg(&tmp)
         .output().await;
     let _ = std::fs::remove_file(&tmp);

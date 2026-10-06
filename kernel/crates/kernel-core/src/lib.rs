@@ -47,6 +47,8 @@ pub struct Kernel {
     epoch: u64,
     /// 混合检索的 TF-IDF 语料缓存，键为 (文档数, 最大 mtime)。
     hybrid_cache: Option<((usize, i64), rag::TfidfIndex)>,
+    /// 密向量缓存，键为 (文档数, 最大 mtime, 模型)。
+    dense_cache: Option<((usize, i64), rag::DenseIndex)>,
 }
 
 impl Kernel {
@@ -66,6 +68,7 @@ impl Kernel {
             _watcher,
             epoch: 0,
             hybrid_cache: None,
+            dense_cache: None,
         })
     }
 
@@ -795,6 +798,60 @@ impl Kernel {
     /// 安装锁外构建好的 TF-IDF 语料缓存。
     pub fn hybrid_install(&mut self, epoch: (usize, i64), idx: rag::TfidfIndex) {
         self.hybrid_cache = Some((epoch, idx));
+    }
+
+    // ── 密向量召回（AI embeddings 旁路索引；未配置 embedding_model 时全部退回 TF-IDF）──
+
+    /// [ai] 配置的 embeddings 模型（空 = 未启用）。
+    pub fn embedding_model(&self) -> String {
+        self.vault.config.ai.as_ref()
+            .map(|c| c.embedding_model.clone())
+            .unwrap_or_default()
+    }
+
+    /// embeddings 端点与密钥（配置优先，密钥兜底环境变量）。
+    pub fn embedding_endpoint(&self) -> Option<(String, String)> {
+        let ai = self.vault.config.ai.as_ref()?;
+        if ai.base_url.is_empty() { return None; }
+        Some((ai.base_url.clone(), ai.resolved_key()))
+    }
+
+    /// 密向量覆盖：(已建向量数, 文档总数)。
+    pub fn vector_stats(&self) -> Result<(usize, usize), StoreError> {
+        let model = self.embedding_model();
+        let covered = if model.is_empty() { 0 } else { self.index.vector_count(&model)? };
+        Ok((covered, self.index.doc_count()?))
+    }
+
+    /// 待建/待更新清单：(path, mtime)，mtime 新的在前。
+    pub fn vector_stale(&self) -> Result<Vec<(String, i64)>, SyncError> {
+        let model = self.embedding_model();
+        if model.is_empty() { return Ok(Vec::new()); }
+        let _ = self.index.vectors_prune().map_err(SyncError::Store)?;
+        self.index.vector_stale(&model).map_err(SyncError::Store)
+    }
+
+    /// 落一批向量（旁路表 upsert）。
+    pub fn vectors_store(&self, model: &str, rows: &[(String, i64, Vec<f32>)]) -> Result<(), SyncError> {
+        self.index.vectors_upsert(model, rows).map_err(SyncError::Store)
+    }
+
+    /// 密向量检索：查询向量已由调用方在锁外取好（embedding 是网络调用，不进内核锁）。
+    pub fn search_dense(&mut self, q: &[f32], limit: usize) -> Result<Vec<(String, f64)>, SyncError> {
+        let model = self.embedding_model();
+        if model.is_empty() { return Ok(Vec::new()); }
+        let stats = self.index.stat_map().map_err(SyncError::Store)?;
+        let epoch = (stats.len(), stats.values().map(|(m, _)| *m).max().unwrap_or(0));
+        let stale = match &self.dense_cache {
+            Some((e, idx)) => *e != epoch || idx.model != model,
+            None => true,
+        };
+        if stale {
+            let vectors = self.index.vectors_all(&model).map_err(SyncError::Store)?;
+            self.dense_cache = Some((epoch, rag::DenseIndex::build(&model, vectors)));
+        }
+        let idx = &self.dense_cache.as_ref().expect("dense cache just set").1;
+        Ok(idx.search(q, limit))
     }
 
     /// 已索引文档数。
@@ -1656,16 +1713,114 @@ pub mod rag {
 
     /// RRF（Reciprocal Rank Fusion）：把 FTS5 和向量检索的结果合并。
     pub fn rrf_merge(fts_hits: &[(String, f64)], vec_hits: &[(String, f64)], k: usize) -> Vec<(String, f64)> {
+        rrf_merge_n(&[fts_hits, vec_hits], k)
+    }
+
+    /// RRF 多路合并：FTS5 / TF-IDF / 密向量各贡献一路排名。
+    pub fn rrf_merge_n(lists: &[&[(String, f64)]], k: usize) -> Vec<(String, f64)> {
         let mut scores: HashMap<String, f64> = HashMap::new();
-        for (rank, (path, _)) in fts_hits.iter().enumerate() {
-            *scores.entry(path.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
-        }
-        for (rank, (path, _)) in vec_hits.iter().enumerate() {
-            *scores.entry(path.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
+        for hits in lists {
+            for (rank, (path, _)) in hits.iter().enumerate() {
+                *scores.entry(path.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
+            }
         }
         let mut out: Vec<(String, f64)> = scores.into_iter().collect();
         out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         out.into_iter().take(k).collect()
+    }
+
+    /// f32 余弦相似度（维度不齐按 0 处理——不同代模型混排时防 panic）。
+    pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+        let n = a.len().min(b.len());
+        let (mut dot, mut na, mut nb) = (0.0f32, 0.0f32, 0.0f32);
+        for i in 0..n {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+        if na < 1e-9 || nb < 1e-9 { 0.0 } else { dot / (na.sqrt() * nb.sqrt()) }
+    }
+
+    /// 内存密向量索引（向量来自 doc_vectors 旁路表，可整表重建）。
+    pub struct DenseIndex {
+        pub model: String,
+        /// (path, 向量)。1 万篇 × 1k 维 f32 ≈ 40MB，可承受；更高规模再换 HNSW。
+        pub vectors: Vec<(String, Vec<f32>)>,
+    }
+
+    impl DenseIndex {
+        pub fn build(model: &str, vectors: Vec<(String, Vec<f32>)>) -> Self {
+            DenseIndex { model: model.to_string(), vectors }
+        }
+
+        /// 余弦 top-k。0.25 以下视为不相关（不同供应商的绝对分值不可比，取保守下限）。
+        pub fn search(&self, q: &[f32], k: usize) -> Vec<(String, f64)> {
+            let mut scores: Vec<(String, f64)> = self.vectors.iter()
+                .map(|(path, v)| (path.clone(), cosine(q, v) as f64))
+                .filter(|(_, s)| *s > 0.25)
+                .collect();
+            scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            scores.into_iter().take(k).collect()
+        }
+    }
+
+    /// embedding 输入预算：标题行在前 + 正文截断到 4000 字符（各家 8k token 上限内）。
+    pub fn embed_text(text: &str) -> String {
+        let mut out = String::new();
+        for line in text.lines() {
+            if line.trim_start().starts_with('#') {
+                out.push_str(line.trim());
+                out.push('\n');
+            }
+            if out.len() > 500 { break; }
+        }
+        let body: String = text.lines()
+            .filter(|l| !l.trim_start().starts_with("---") && !l.trim_start().starts_with('#'))
+            .collect::<Vec<_>>().join("\n");
+        out.push_str(&body);
+        out.chars().take(4000).collect()
+    }
+
+    /// OpenAI 兼容 /embeddings 调用（blocking——调用方放后台线程或 spawn_blocking）。
+    pub fn embed_batch(
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        inputs: &[String],
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let url = format!("{}/embeddings", base_url.trim_end_matches('/'));
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build().map_err(|e| e.to_string())?;
+        let mut req = client.post(&url).json(&serde_json::json!({
+            "model": model,
+            "input": inputs,
+        }));
+        if !api_key.is_empty() {
+            req = req.bearer_auth(api_key);
+        }
+        let resp = req.send().map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("embeddings HTTP {status}: {}", resp.text().unwrap_or_default().chars().take(200).collect::<String>()));
+        }
+        let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        let mut rows: Vec<(usize, Vec<f32>)> = body.get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| "embeddings 响应缺 data 数组".to_string())?
+            .iter()
+            .filter_map(|item| {
+                let i = item.get("index")?.as_u64()? as usize;
+                let v: Vec<f32> = item.get("embedding")?.as_array()?
+                    .iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+                Some((i, v))
+            })
+            .collect();
+        rows.sort_by_key(|(i, _)| *i);
+        if rows.len() != inputs.len() {
+            return Err(format!("embeddings 返回 {} 条，期望 {} 条", rows.len(), inputs.len()));
+        }
+        Ok(rows.into_iter().map(|(_, v)| v).collect())
     }
 }
 
@@ -1701,6 +1856,40 @@ mod rag_tests {
         let merged = rrf_merge(&fts, &vec, 3);
         assert_eq!(merged[0].0, "b.md", "两路都命中的排最前");
         assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn cosine_and_dense_search() {
+        let a = vec![1.0f32, 0.0, 0.0];
+        let b = vec![0.9f32, 0.1, 0.0];
+        let c = vec![0.0f32, 1.0, 0.0];
+        assert!(cosine(&a, &b) > 0.99);
+        assert!(cosine(&a, &c).abs() < 1e-6);
+        let idx = DenseIndex::build("test", vec![
+            ("near.md".into(), b), ("far.md".into(), c),
+        ]);
+        let hits = idx.search(&a, 2);
+        assert_eq!(hits[0].0, "near.md");
+        assert!(!hits.iter().any(|(p, _)| p == "far.md"), "零相关要被阈值滤掉");
+    }
+
+    #[test]
+    fn rrf_n_merges_three_legs() {
+        let fts = vec![("a.md".into(), 1.0)];
+        let tfidf = vec![("b.md".into(), 1.0)];
+        let dense = vec![("a.md".into(), 1.0), ("b.md".into(), 0.9)];
+        let merged = rrf_merge_n(&[&fts, &tfidf, &dense], 5);
+        // a 两路命中（fts+dense），b 两路命中（tfidf+dense），并列时秩和定序
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|(p, _)| p == "a.md") && merged.iter().any(|(p, _)| p == "b.md"));
+    }
+
+    #[test]
+    fn embed_text_keeps_headings_and_truncates() {
+        let long = "# 标题\n\n".to_string() + &"正文内容。".repeat(2000);
+        let out = embed_text(&long);
+        assert!(out.starts_with("# 标题"));
+        assert!(out.chars().count() <= 4000, "要截到预算内");
     }
 }
 

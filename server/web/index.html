@@ -406,7 +406,7 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .node.compact{width:260px}
 .node.drop{box-shadow:0 0 0 3px var(--accent),var(--node-shadow)}
 .a2ui-host{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--bg-soft)}
-.a2ui-frame{width:100%;height:260px;border:none;display:block;background:var(--bg)}
+.a2ui-host.a2ui-native{padding:6px 16px}
 .a2ui-loading{padding:14px;color:var(--faint);font-size:12.5px;font-family:var(--font-mono)}
 .peer{position:absolute;pointer-events:none;transition:left .12s linear,top .12s linear}
 .peer .arrow{width:0;height:0;border:7px solid transparent;border-bottom-color:var(--accent);border-left-color:var(--accent)}
@@ -2966,32 +2966,47 @@ $('say').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preve
 
 
 /* ───────── A2UI（Agent-to-User Interface）原生渲染 ───────── */
+/* A2UI-3：不再走沙箱 iframe + postMessage 桥——服务端出 HTML 片段，
+   客户端 Shadow DOM 承载（样式隔离、不执行任意脚本），交互直接调 openDoc//a2ui/action。 */
 function extractA2ui(text){
   const m=/```a2ui\s*([\s\S]*?)```/.exec(text||'');
   return m?m[1].trim():null;
 }
-const A2UI_BRIDGE=`<script>document.addEventListener('click',function(e){var v=e.target.closest('[data-doc]');if(v){e.preventDefault();parent.postMessage({type:'open-doc',path:v.dataset.doc},'*');return}var b=e.target.closest('[data-action]');if(!b)return;parent.postMessage({type:'a2ui-action',name:b.dataset.action,sourceComponentId:b.dataset.component,context:{}},'*');});<\/script>`;
+/* 服务端渲染只转义文本；此处再把危险节点/属性剥掉，等效原 sandbox 语义 */
+function sanitizeA2ui(html){
+  const doc=new DOMParser().parseFromString('<div id="__a2ui_root">'+html+'</div>','text/html');
+  const root=doc.getElementById('__a2ui_root');
+  root.querySelectorAll('script,iframe,object,embed,link,meta,form').forEach(n=>n.remove());
+  root.querySelectorAll('*').forEach(n=>{
+    for(const a of [...n.attributes]){
+      if(/^on/i.test(a.name))n.removeAttribute(a.name);
+      else if((a.name==='href'||a.name==='src')&&/^\s*javascript:/i.test(a.value))n.removeAttribute(a.name);
+    }
+  });
+  return root.innerHTML;
+}
+function handleA2uiActivate(e){
+  const v=e.target.closest('[data-doc]');
+  if(v){e.preventDefault();openDoc(v.dataset.doc);return}
+  const b=e.target.closest('[data-action]');
+  if(!b)return;
+  api('/a2ui/action',{method:'POST',json:{type:'a2ui-action',name:b.dataset.action,sourceComponentId:b.dataset.component,context:{}}})
+    .then(r=>toast(`A2UI 动作「${b.dataset.action||'?'}」已回传（${r.note?'已记录':'ok'}）`,'ok'))
+    .catch(err=>toast('A2UI 动作回传失败：'+err.message,'err'));
+}
 async function renderA2ui(msgEl,jsonl,title){
   const host=document.createElement('div');host.className='a2ui-host';
   host.innerHTML='<div class="a2ui-loading">正在渲染 A2UI surface…</div>';
   msgEl.appendChild(host);
   try{
-    const r=await api('/a2ui/render',{method:'POST',json:{jsonl,title:title||'A2UI'}});
-    const frame=document.createElement('iframe');
-    frame.className='a2ui-frame';frame.setAttribute('sandbox','allow-scripts');
-    frame.srcdoc=r.html.replace('</body>',A2UI_BRIDGE+'</body>');
-    host.innerHTML='';host.appendChild(frame);
+    const r=await api('/a2ui/render',{method:'POST',json:{jsonl,title:title||'A2UI',fragment:true}});
+    host.innerHTML='';
+    const shadow=host.attachShadow({mode:'open'});
+    shadow.innerHTML='<style>'+r.css+'</style>'+sanitizeA2ui(r.html);
+    shadow.addEventListener('click',handleA2uiActivate);
+    host.classList.add('a2ui-native');
   }catch(e){host.innerHTML='<div class="a2ui-loading">A2UI 渲染失败：'+e.message+'</div>';}
 }
-window.addEventListener('message',async e=>{
-  const d=e.data||{};
-  if(d.type==='open-doc'){openDoc(d.path);return}
-  if(d.type!=='a2ui-action')return;
-  try{
-    const r=await api('/a2ui/action',{method:'POST',json:d});
-    toast(`A2UI 动作「${d.name||'?'}」已回传（${r.note?'已记录':'ok'}）`,'ok');
-  }catch(err){toast('A2UI 动作回传失败：'+err.message,'err');}
-});
 const A2UI_DEMO=[
  {"surfaceUpdate":{"components":[{"id":"root","component":{"Column":{"children":{"explicitList":["card"]}}}}]}},
  {"surfaceUpdate":{"components":[{"id":"card","component":{"Card":{"child":"col"}}}]}},

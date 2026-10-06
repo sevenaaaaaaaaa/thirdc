@@ -1,0 +1,30 @@
+# ThirdC 内核门禁：kernel 全家测试 + 纯逻辑 crate 的 wasm32 可移植性检查。
+# wasm32 是通往原生/微内核的路由（宪法 §2：crate 边界 = 未来进程边界）：
+# kernel-md / kernel-a2ui 零 IO 依赖必须保持可移植，新增依赖别把它们锁死在桌面平台。
+name: kernel
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths: ["kernel/**", ".github/workflows/kernel.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 内核测试
+        run: cargo test -p kernel-core -p kernel-store -p kernel-md -p kernel-a2ui -p kernel-sync -p kernel-design -p kernel-deploy -p kernel-browser
+
+      - name: wasm32 可移植性（kernel-md / kernel-a2ui）
+        run: cargo check -p kernel-md -p kernel-a2ui --target wasm32-unknown-unknown

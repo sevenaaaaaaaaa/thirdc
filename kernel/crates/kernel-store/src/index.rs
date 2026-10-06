@@ -38,6 +38,13 @@ CREATE TABLE IF NOT EXISTS items(
     fetched_at INTEGER NOT NULL,
     PRIMARY KEY(connection, uri)
 );
+CREATE TABLE IF NOT EXISTS doc_vectors(
+    path TEXT PRIMARY KEY,
+    mtime INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    vec BLOB NOT NULL
+);
 "#;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -328,6 +335,89 @@ impl Index {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    // ── doc_vectors：密向量旁路表（文件真相纪律：可随时清表重建，内容永只在这里作索引）──
+
+    /// f32 → 小端字节。
+    fn vec_blob(v: &[f32]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(v.len() * 4);
+        for x in v {
+            out.extend_from_slice(&x.to_le_bytes());
+        }
+        out
+    }
+
+    fn blob_vec(blob: Vec<u8>) -> Vec<f32> {
+        blob.chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect()
+    }
+
+    /// 某模型已建向量数。
+    pub fn vector_count(&self, model: &str) -> Result<usize, StoreError> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM doc_vectors WHERE model = ?1", [model], |r| r.get::<_, i64>(0))
+            .map(|n| n as usize)
+            .map_err(StoreError::from)
+    }
+
+    /// 全量取回某模型的向量（内存索引重建用；1 万篇 × 1k 维 f32 ≈ 40MB，可承受）。
+    pub fn vectors_all(&self, model: &str) -> Result<Vec<(String, Vec<f32>)>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, vec FROM doc_vectors WHERE model = ?1")?;
+        let rows = stmt.query_map([model], |r| {
+            Ok((r.get::<_, String>(0)?, Self::blob_vec(r.get::<_, Vec<u8>>(1)?)))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// 待建/待更新清单：docs 表有而 doc_vectors 缺失或 mtime 更旧的 (path, mtime)。
+    pub fn vector_stale(&self, model: &str) -> Result<Vec<(String, i64)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT d.path, d.mtime FROM docs d \
+             LEFT JOIN doc_vectors v ON v.path = d.path AND v.model = ?1 \
+             WHERE v.path IS NULL OR v.mtime < d.mtime \
+             ORDER BY d.mtime DESC",
+        )?;
+        let rows = stmt.query_map([model], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// 批量 upsert 向量（单事务）。
+    pub fn vectors_upsert(
+        &self,
+        model: &str,
+        rows: &[(String, i64, Vec<f32>)],
+    ) -> Result<(), StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO doc_vectors(path, mtime, model, dim, vec) VALUES (?1, ?2, ?3, ?4, ?5) \
+                      ON CONFLICT(path) DO UPDATE SET mtime=?2, model=?3, dim=?4, vec=?5")?;
+        let tx = self.conn.unchecked_transaction()?;
+        for (path, mtime, vec) in rows {
+            stmt.execute(rusqlite::params![path, mtime, model, vec.len() as i64, Self::vec_blob(vec)])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// 清掉 docs 表已不存在的文档向量，返回清除数。
+    pub fn vectors_prune(&self) -> Result<usize, StoreError> {
+        self.conn
+            .execute("DELETE FROM doc_vectors WHERE path NOT IN (SELECT path FROM docs)", [])
+            .map_err(StoreError::from)
     }
 
     /// 全文检索，按相关度（bm25）排序。返回 (相对路径, 相关度)。

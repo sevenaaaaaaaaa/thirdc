@@ -56,6 +56,8 @@ enum Cmd {
         #[arg(long, default_value = "127.0.0.1:7700")]
         addr: String,
     },
+    /// 密向量重建：[ai].embedding_model 配置后，把全库增量嵌入 index.db 旁路表
+    Reindex { path: PathBuf },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
     /// 从 Obsidian 库导入（保留目录结构，附件内容寻址）
@@ -239,6 +241,25 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async move { thirdc_server::serve(&addr, state).await })
                 .context("serve")?;
+        }
+        Cmd::Reindex { path } => {
+            let vault = Vault::open(&path)?;
+            let state = thirdc_server::build_state(vault).context("build state")?;
+            let model = state.kernel.lock().unwrap().embedding_model();
+            if model.is_empty() {
+                println!("未配置 [ai].embedding_model（thirdc.toml），密向量未启用");
+                return Ok(());
+            }
+            println!("密向量重建：模型 {model}，后台批量嵌入中…");
+            thirdc_server::rag_job_blocking(state.clone());
+            let k = state.kernel.lock().unwrap();
+            let (covered, docs) = k.vector_stats().unwrap_or((0, 0));
+            let err = state.rag.last_error.lock().unwrap().clone();
+            println!("完成：{covered}/{docs} 篇已建向量");
+            if !err.is_empty() {
+                println!("最后错误：{err}");
+                std::process::exit(1);
+            }
         }
         Cmd::Mcp { path } => {
             use std::io::{BufRead, Write};
