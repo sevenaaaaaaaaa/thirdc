@@ -41,6 +41,8 @@ pub struct AppState {
     pub pull: Arc<Mutex<PullJob>>,
     /// 密向量重建任务状态（/rag/status 秒回，进度可轮询）。
     pub rag: Arc<RagJob>,
+    /// 备份任务状态（/backup/status）。
+    pub backup: Arc<BackupJob>,
 }
 
 /// RAG 建向量后台任务的可观察状态。
@@ -49,6 +51,13 @@ pub struct RagJob {
     pub running: std::sync::atomic::AtomicBool,
     pub done: std::sync::atomic::AtomicUsize,
     pub total: std::sync::atomic::AtomicUsize,
+    pub last_error: std::sync::Mutex<String>,
+}
+
+/// 备份后台任务状态（/backup/status 秒回）。
+#[derive(Default)]
+pub struct BackupJob {
+    pub running: std::sync::atomic::AtomicBool,
     pub last_error: std::sync::Mutex<String>,
 }
 
@@ -246,6 +255,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/search/hybrid", get(search_hybrid))
         .route("/rag/reindex", post(rag_reindex))
         .route("/rag/status", get(rag_status))
+        .route("/backup/run", post(backup_run))
+        .route("/backup/status", get(backup_status))
         .route("/secrets", get(secrets_list).post(secrets_put).delete(secrets_delete))
         .route("/doc", get(get_doc).put(put_doc).delete(delete_doc))
         .route("/asset", post(post_asset))
@@ -1323,6 +1334,88 @@ async fn rag_reindex(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl Into
     })).into_response()
 }
 
+// ── E2EE 备份（kernel-backup：age 快照 → webdav/local/rclone；3-2-1 合规）──────
+
+/// 备份执行体（spawn_blocking / 调度线程调用）。
+pub fn backup_job_blocking(state: Arc<AppState>, filter: Option<String>) {
+    use std::sync::atomic::Ordering;
+    if state.backup.running.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let outcome = (|| -> Result<(), String> {
+        let (cfg, root) = {
+            let k = state.kernel.lock().unwrap();
+            let cfg = k.vault.config.backup.clone().ok_or("未配置 [backup]")?;
+            (cfg, k.vault.root.clone())
+        };
+        let (reports, st) = kernel_backup::run_backup(&root, &cfg, filter.as_deref())
+            .map_err(|e| e.to_string())?;
+        for r in &reports {
+            if !r.ok {
+                return Err(format!("{}：{}", r.target, r.error));
+            }
+        }
+        kernel_backup::save_state(&root, &st);
+        let (ok, msg) = kernel_backup::compliance(&st);
+        eprintln!("backup: {}（{}）", msg, if ok { "合规" } else { "待补目标" });
+        Ok(())
+    })();
+    match outcome {
+        Ok(()) => *state.backup.last_error.lock().unwrap() = String::new(),
+        Err(e) => *state.backup.last_error.lock().unwrap() = e,
+    }
+    state.backup.running.store(false, Ordering::SeqCst);
+}
+
+/// 触发备份（后台跑）。可选 { "target": "名字" } 只跑一个目标。
+async fn backup_run(State(st): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let filter: Option<String> = if body.is_empty() {
+        None
+    } else {
+        match serde_json::from_slice::<Value>(&body) {
+            Ok(v) => v.get("target").and_then(|t| t.as_str()).map(String::from),
+            Err(_) => None,
+        }
+    };
+    let cfg_ready = { let k = st.kernel.lock().unwrap(); k.vault.config.backup.is_some() };
+    if !cfg_ready {
+        return Json(json!({ "ok": false, "note": "未配置 [backup]（thirdc.toml）" })).into_response();
+    }
+    let already = st.backup.running.load(std::sync::atomic::Ordering::SeqCst);
+    if !already {
+        let st2 = st.clone();
+        tokio::task::spawn_blocking(move || backup_job_blocking(st2, filter));
+    }
+    Json(json!({
+        "ok": true,
+        "queued": !already,
+        "note": if already { "已有备份在跑，看 /backup/status" } else { "备份已在后台开始" },
+    })).into_response()
+}
+
+/// 备份状态：任务 + 各目标上次结果 + 3-2-1 合规。
+async fn backup_status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = check_token(&st, &h) {
+        return e.into_response();
+    }
+    let (root, configured) = {
+        let k = st.kernel.lock().unwrap();
+        (k.vault.root.clone(), k.vault.config.backup.is_some())
+    };
+    let state = kernel_backup::load_state(&root);
+    let (ok, msg) = kernel_backup::compliance(&state);
+    Json(json!({
+        "configured": configured,
+        "running": st.backup.running.load(std::sync::atomic::Ordering::SeqCst),
+        "last_error": st.backup.last_error.lock().unwrap().clone(),
+        "compliance": { "ok": ok, "message": msg },
+        "targets": state.targets,
+    })).into_response()
+}
+
 /// 密向量状态：模型、覆盖率、任务进度。
 async fn rag_status(State(st): State<Arc<AppState>>, h: HeaderMap) -> impl IntoResponse {
     if let Err(e) = check_token(&st, &h) {
@@ -1946,6 +2039,7 @@ pub fn build_state(vault: Vault) -> anyhow::Result<Arc<AppState>> {
         desktop: std::env::var("THIRDC_DESKTOP").map(|v| v == "1").unwrap_or(false),
         pull: Arc::new(Mutex::new(PullJob::default())),
         rag: Arc::new(RagJob::default()),
+        backup: Arc::new(BackupJob::default()),
     }))
 }
 
@@ -1996,6 +2090,28 @@ pub async fn serve_listener(
                 // 密向量增量补齐：未配置 [ai].embedding_model 时任务内部直接返回
                 let rag_state = preheat_state.clone();
                 std::thread::spawn(move || rag_job_blocking(rag_state));
+                // E2EE 备份自动调度：auto_hours>0 且距上次成功到期则自跑（每 30 分钟巡检一次）
+                {
+                    let bs = preheat_state.clone();
+                    std::thread::spawn(move || loop {
+                        std::thread::sleep(std::time::Duration::from_secs(1800));
+                        let Ok(k) = bs.kernel.lock() else { continue };
+                        let Some(cfg) = k.vault.config.backup.clone() else { continue };
+                        let root = k.vault.root.clone();
+                        drop(k);
+                        if cfg.auto_hours == 0 || cfg.passphrase.is_empty() { continue; }
+                        let st = kernel_backup::load_state(&root);
+                        if bs.backup.running.load(std::sync::atomic::Ordering::SeqCst) { continue; }
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                        let due = st.targets.values().all(|t| t.last_ok == 0)
+                            || st.targets.values().filter(|t| t.last_ok > 0).count() == 0
+                            || st.targets.values().all(|t| now.saturating_sub(t.last_ok) > cfg.auto_hours as u64 * 3600);
+                        if due {
+                            let st2 = bs.clone();
+                            std::thread::spawn(move || backup_job_blocking(st2, None));
+                        }
+                    });
+                }
                 return;
             }
             drop(k); // 批间放锁，UI 请求可插入

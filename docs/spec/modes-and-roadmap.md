@@ -32,6 +32,7 @@
 | WEB-1 | Web WASM 内核 + OPFS 真文件库（PWA） | 2 周 | **评估后暂缓（10-06）**：OPFS 文件外部工具不可直读，与宪法 §1 文件真相冲突；兼容性已由 web+daemon（任意浏览器）与桌面/移动原生壳覆盖。通往原生的可移植性投资改走：CI 增加 kernel 纯逻辑 crate（kernel-md / kernel-a2ui，零 IO 依赖）的 wasm32 检查编译 |
 | UX-6 | 协作光标 v2（选区/文档内光标 + 评论） | 2 周 | **11-07** |
 | AGENT-1 | Agent 记忆（对话历史入库、可检索） | 并行 | 10 月 |
+| BACKUP-1 | E2EE 备份（age 快照 → WebDAV/local/rclone；3-2-1 合规检查） | 2 天 | ✅ 10-07（kernel-backup + CLI + /backup/*；Proton/Dropbox 经 rclone 桥，NAS 走 WebDAV，iCloud 走 local 目标；spec：backup.md） |
 
 ## 四、Open Knowledge Format（OKF）· 开放知识格式规范 ✅
 

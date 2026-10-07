@@ -56,6 +56,58 @@ pub struct VaultConfig {
     /// 缺省 30；`0` = 永久保留（不自动清除）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trash_days: Option<u32>,
+    /// 备份：age 口令加密快照 → 多目标（WebDAV / 本地文件夹 / rclone 桥）。
+    /// 3-2-1：本地库 1 份 + cloud ≥1 + nas/offsite ≥1。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<BackupConfig>,
+}
+
+/// E2EE 备份配置。口令不设或留空则读环境变量 THIRDC_BACKUP_PASSPHRASE；
+/// **口令即恢复的唯一凭证**——丢了 = 快照成废纸（age scrypt，无后门）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BackupConfig {
+    #[serde(default)]
+    pub passphrase: String,
+    /// 每目标保留快照数（超出删最旧），缺省 10。
+    #[serde(default = "default_backup_keep")]
+    pub keep: u32,
+    /// 自动备份间隔（小时）；0 = 仅手动。
+    #[serde(default)]
+    pub auto_hours: u32,
+    /// 把 .thirdc/ops/（CRDT 增量日志）也打进快照。缺省 false——文件真相已含全部内容，
+    /// ops 只是协作历史；打开后单快照显著变大。
+    #[serde(default)]
+    pub include_ops: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<BackupTarget>,
+}
+
+/// 备份目标。kind：webdav（飞牛/群晖/坚果云/Nextcloud）| local（文件夹/iCloud Drive）| rclone（Proton Drive/Dropbox/任意）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BackupTarget {
+    pub name: String,
+    pub kind: String,
+    /// 层级：cloud | nas | offsite。缺省按 kind 推断（rclone→cloud，webdav→nas，local→cloud）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tier: String,
+    /// webdav：集合 URL，如 https://nas.local:5006/home/Litmus/
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// webdav 凭据（也可经 THIRDC_WEBDAV_USER/PASS 环境变量）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// local：目标目录（iCloud Drive 例：~/Library/Mobile Documents/com~apple~CloudDocs/Litmus-Backup）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// rclone：远端与路径，如 proton:Litmus-Backup（需 rclone 配置同名 remote）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+}
+
+fn default_backup_keep() -> u32 {
+    10
 }
 
 /// 登录凭据覆盖（thirdc.toml [auth]）。API token 鉴权不受影响，这里只管 Web 登录表单。

@@ -58,6 +58,22 @@ enum Cmd {
     },
     /// 密向量重建：[ai].embedding_model 配置后，把全库增量嵌入 index.db 旁路表
     Reindex { path: PathBuf },
+    /// E2EE 备份：运行备份（默认推全部目标）；--list 列举快照；--restore --into 恢复
+    Backup {
+        path: PathBuf,
+        /// 只跑指定目标（按 name）
+        #[arg(long)]
+        target: Option<String>,
+        /// 列举各目标快照
+        #[arg(long)]
+        list: bool,
+        /// 恢复指定快照 id；不带值 = 恢复最新
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        restore: Option<String>,
+        /// 恢复到该目录（必须为空或不存在）
+        #[arg(long)]
+        into: Option<String>,
+    },
     /// 以 MCP server 运行（stdio），供 Claude/Cursor 等 agent 使用
     Mcp { path: PathBuf },
     /// 从 Obsidian 库导入（保留目录结构，附件内容寻址）
@@ -258,6 +274,74 @@ fn main() -> Result<()> {
             println!("完成：{covered}/{docs} 篇已建向量");
             if !err.is_empty() {
                 println!("最后错误：{err}");
+                std::process::exit(1);
+            }
+        }
+        Cmd::Backup {
+            path,
+            target,
+            list,
+            restore,
+            into,
+        } => {
+            let vault = Vault::open(&path)?;
+            let cfg = vault
+                .config
+                .backup
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("未配置备份：thirdc.toml 加 [backup] 与 [[backup.targets]]"))?;
+            let into: Option<String> = into;
+            if let Some(ref dir) = into {
+                // 恢复模式
+                let t = match target.as_ref() {
+                    Some(name) => cfg.targets.iter().find(|t| &t.name == name)
+                        .ok_or_else(|| anyhow::anyhow!("目标不存在：{name}"))?,
+                    None => cfg.targets.first()
+                        .ok_or_else(|| anyhow::anyhow!("未配置备份目标"))?,
+                };
+                let snap = match restore.filter(|s| !s.is_empty()) {
+                    Some(id) => id,
+                    None => kernel_backup::list_snapshots(t)
+                        .ok()
+                        .and_then(|l| l.first().map(|m| m.id.clone()))
+                        .unwrap_or_default(),
+                };
+                if snap.is_empty() {
+                    anyhow::bail!("目标「{}」没有可用快照", t.name);
+                }
+                                let passphrase = if cfg.passphrase.is_empty() { std::env::var("THIRDC_BACKUP_PASSPHRASE").unwrap_or_default() } else { cfg.passphrase.clone() };
+                let (files, bytes) = kernel_backup::restore(t, &snap, std::path::Path::new(dir), &passphrase)?;
+                println!("已恢复 {snap}：{files} 个文件，{bytes} 字节 → {dir}");
+                return Ok(());
+            }
+            if list {
+                for t in cfg.targets.iter() {
+                    match kernel_backup::list_snapshots(t) {
+                        Ok(metas) => {
+                            println!("◆ {}（{}）", t.name, t.kind);
+                            for m in metas {
+                                println!("  {}  {} 个文件  {} 字节  @{}", m.id, m.files, m.bytes, m.host);
+                            }
+                        }
+                        Err(e) => println!("◆ {}（{}）：列举失败 {e}", t.name, t.kind),
+                    }
+                }
+                return Ok(());
+            }
+            let (reports, state) = kernel_backup::run_backup(&vault.root, &cfg, target.as_deref())?;
+            let mut any_fail = false;
+            for r in &reports {
+                if r.ok {
+                    println!("✓ {}（{}）→ {}  {} 字节 / {}s，修剪 {} 份",
+                        r.target, r.kind, r.snapshot, r.bytes, r.seconds, r.pruned);
+                } else {
+                    any_fail = true;
+                    println!("✗ {}（{}）：{}", r.target, r.kind, r.error);
+                }
+            }
+            let (_, msg) = kernel_backup::compliance(&state);
+            println!("{msg}");
+            if any_fail {
                 std::process::exit(1);
             }
         }

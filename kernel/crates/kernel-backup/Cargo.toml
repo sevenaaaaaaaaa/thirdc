@@ -1,0 +1,21 @@
+[package]
+name = "kernel-backup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+description = "ThirdC E2EE 备份引擎：age 口令加密快照 → WebDAV / 本地文件夹 / rclone 桥"
+
+[dependencies]
+kernel-store = { path = "../kernel-store" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+walkdir.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+tar.workspace = true
+flate2.workspace = true
+age.workspace = true
+reqwest.workspace = true

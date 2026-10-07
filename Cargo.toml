@@ -9,6 +9,7 @@ members = [
     "kernel/crates/kernel-browser",
     "kernel/crates/kernel-a2ui",
     "kernel/crates/kernel-deploy",
+    "kernel/crates/kernel-backup",
     "server",
     "mcp",
     "cli",
@@ -49,6 +50,9 @@ notify = "6"
 rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+age = "0.11"
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "process"] }
 tower = { version = "0.5", features = ["util"] }
