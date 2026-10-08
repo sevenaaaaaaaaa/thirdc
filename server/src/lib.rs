@@ -1004,6 +1004,12 @@ struct MemoDoc {
     title: String,
     tags: Vec<String>,
     mtime: i64,
+    /// 来源：memo（Notes/Memos/）| inbox（Notes/Sources/ 剪藏与转码代理）
+    #[serde(default)]
+    src: String,
+    /// 正文预览（首段截断，卡片直显）。
+    #[serde(default)]
+    excerpt: String,
 }
 
 fn memo_push_tag(out: &mut Vec<String>, t: &str) {
@@ -1077,7 +1083,13 @@ fn extract_memo_tags(head: &str) -> Vec<String> {
                     continue;
                 }
                 let rest = cs.as_str();
-                let mut rc = rest.chars();
+                // 中段标点一并截断：#工作,节奏不错 → 工作（全角/半角都算边界）
+                let core = rest
+                    .split(|c: char| ".,;!?，。；！？、:：)）」\"'".contains(c))
+                    .next()
+                    .unwrap_or(rest)
+                    .trim_end_matches(|c: char| ".,;!?，。；！？)）」\"'".contains(c));
+                let mut rc = core.chars();
                 let valid = match rc.next() {
                     Some(c) if c.is_alphanumeric() => true,
                     _ => false,
@@ -1085,7 +1097,6 @@ fn extract_memo_tags(head: &str) -> Vec<String> {
                 if !valid {
                     continue; // `#`、`##`、`#!` 之类都不是标签
                 }
-                let core = rest.trim_end_matches(|c: char| ".,;!?，。；！？)）」\"'".contains(c));
                 if !core.is_empty() {
                     memo_push_tag(&mut out, core);
                 }
@@ -1103,8 +1114,11 @@ fn extract_memo_tags(head: &str) -> Vec<String> {
 fn memo_build_sync(root: &std::path::Path, stats: &HashMap<String, (i64, i64)>) -> Vec<MemoDoc> {
     use std::io::Read;
     let mut docs: Vec<MemoDoc> = Vec::with_capacity(stats.len());
-    for (p, (mt, _sz)) in stats {
-        if !p.starts_with("Notes/Memos/") || !(p.ends_with(".md") || p.ends_with(".html")) {
+    for (p, (mt, sz)) in stats {
+        let is_memo = p.starts_with("Notes/Memos/");
+        // inbox：剪藏与转码代理（Sources/ 下任何 md/html——记录性内容，进 memo 流可预览）
+        let is_inbox = p.starts_with("Notes/Sources/");
+        if !(is_memo || is_inbox) || !(p.ends_with(".md") || p.ends_with(".html")) {
             continue;
         }
         let mut buf = [0u8; 4096];
@@ -1113,11 +1127,20 @@ fn memo_build_sync(root: &std::path::Path, stats: &HashMap<String, (i64, i64)>) 
             .unwrap_or(0);
         let head = String::from_utf8_lossy(&buf[..n]);
         let name = p.rsplit('/').next().unwrap_or(p);
+        // 预览：跳过 frontmatter 与标题行，首段截 140 字符
+        let excerpt: String = head
+            .lines()
+            .skip_while(|l| l.trim() == "---" || l.starts_with("tags:") || l.starts_with("created:") || l.trim_start_matches('-').trim().is_empty())
+            .find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#') && l.trim() != "---")
+            .map(|l| l.trim().chars().take(140).collect())
+            .unwrap_or_default();
         docs.push(MemoDoc {
             path: p.clone(),
             title: title_from_filename(name),
             tags: extract_memo_tags(&head),
             mtime: *mt,
+            src: if is_memo { "memo".into() } else { "inbox".into() },
+            excerpt: if is_memo || *sz < 200_000 { excerpt } else { String::new() },
         });
     }
     docs.sort_by(|a, b| b.mtime.cmp(&a.mtime));
