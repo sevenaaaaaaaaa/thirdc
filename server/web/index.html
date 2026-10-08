@@ -360,6 +360,10 @@ body[data-mode="present"] #rail,body[data-mode="present"] #rail-open{display:non
 .badge.ok{background:var(--ok-soft);color:var(--ok)}
 .badge.warn{background:var(--warn-soft);color:var(--warn)}
 /* 文件真相徽记：图标化（原文字徽章在侧栏窄模式下挤压穿模），悬停出完整释义 */
+.crumb{border:none;background:none;padding:0;font:inherit;color:var(--muted);cursor:pointer}
+.crumb:hover{color:var(--accent);text-decoration:underline}
+.crumb.cur{color:var(--fg);cursor:default;font-weight:600}
+.fmt-tag{margin-left:8px;padding:1px 7px;border-radius:var(--r-pill);background:var(--bg-soft);color:var(--faint);font:600 10px var(--font-mono)}
 .truth-ic{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:var(--r-pill);background:var(--ok-soft);color:var(--ok);flex:none}
 .truth-ic svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .badge.plan{background:var(--hover);color:var(--muted)}
@@ -1117,11 +1121,12 @@ button:focus-visible,[role="button"]:focus-visible,.tab-pill:focus-visible,.icon
     <span class="truth-ic" id="d-truth" title="文件真相：你编辑的就是磁盘上的普通文件"><svg viewBox="0 0 24 24" aria-label="文件真相"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="m9 14 2 2 4-4"/></svg></span>
     <span class="path" id="d-path"></span>
     <select class="style-sel" id="d-style" title="阅读设计风格（62 款 · 按场景）"><option value="">风格：默认</option></select>
+    <button class="icon-btn" id="d-sticky" title="便利贴：打开速记便签（⌘↩ 落库 Notes/便利贴/）"><svg viewBox="0 0 24 24"><path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10l6-6V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/></svg></button>
     <button class="icon-btn" id="d-graph" title="一键生成知识图谱（画布）">🕸</button>
     <button class="icon-btn" id="d-export" title="导出分享（长图 / 小红书 / 公众号 / Newsletter）"><svg viewBox="0 0 24 24"><path d="M12 3v13M6 11l6 6 6-6M4 21h16"/></svg></button>
     <button class="icon-btn" id="d-upload" title="上传附件（图片/PDF/DOCX）"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7-7 7 7"/></svg></button>
     <input type="file" id="d-file" style="display:none" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.docx,.doc,.xlsx,.pptx,.md,.txt,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.py,.js,.ts,.jsx,.tsx,.css,.scss,.sh,.rs,.go,.c,.h,.cpp,.java,.kt,.swift,.rb,.php,.sql,.log,.ini,.cfg,.conf">
-    <button class="icon-btn" id="d-pub" title="发布"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    <button class="icon-btn" id="d-pub" title="发布（站点/AI-HTML）"><svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4Z"/></svg></button>
     <button class="icon-btn" id="d-mode" title="编辑 / 预览" aria-pressed="false" aria-label="编辑或预览"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="icon-btn" id="d-toc" title="目录开关" aria-label="目录开关" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
     <button class="icon-btn" id="d-expand" title="铺开：编辑 + 实时预览" aria-pressed="false" aria-label="铺开预览"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
@@ -1805,6 +1810,19 @@ function renderGraph(){
     el.style.left=x+'px';el.style.top=y+'px';
     if(fresh)el.style.animationDelay=Math.min(i*28,360)+'ms';
     el.dataset.id=n.id;el.dataset.col=n.collection||'(根)';
+    if(view!=='canvas')el.draggable=true; // 时间线/看板：HTML5 拖拽直投侧栏文件夹或画布文件夹节点
+    if(n.kind==='folder'){
+      el.ondragover=e=>{e.preventDefault();el.classList.add('drop-hot')};
+      el.ondragleave=()=>el.classList.remove('drop-hot');
+      el.ondrop=async e=>{
+        e.preventDefault();el.classList.remove('drop-hot');e.stopPropagation();
+        const from=e.dataTransfer.getData('text/thirdc-path');
+        if(!from||from===n.path)return;
+        const to=n.path+'/'+from.split('/').pop();
+        try{await api('/doc/move',{method:'POST',json:{from,to}});toast(`${from.split('/').pop()} → ${to}`,'ok');await refreshAll();}
+        catch(err){toast('移动失败：'+err.message,'err');}
+      };
+    }
     const title=n.title||n.path.split('/').pop();
     let body='';
     if(n.kind==='asset'){body=`<div class="n-body"><img loading="lazy" src="${BASE}/asset-file?path=${encodeURIComponent(n.path)}${token?'&token='+token:''}" alt=""></div>`;}
@@ -1820,6 +1838,13 @@ function renderGraph(){
     frag.appendChild(el);
   });
   wrap.replaceChildren(frag);
+  if(view!=='canvas'){
+    wrap.querySelectorAll('.node').forEach(el=>{
+      const n=graph.nodes.find(x=>x.id===el.dataset.id);
+      if(!n||n.kind==='folder')return;
+      el.ondragstart=e=>{e.dataTransfer.setData('text/thirdc-path',n.path||'');e.dataTransfer.effectAllowed='move';};
+    });
+  }
   const meta=layoutMeta();
   $('axis').innerHTML=meta.labels.map(l=>`<div class="axis-label${l.day?' day':''}" style="left:${l.x}px;top:${l.y}px">${l.text}</div>`).join('');
   const maxY=Math.max(600,...placed.map(p=>p.y+220));
@@ -1960,7 +1985,22 @@ $('nodes').addEventListener('pointerout',ev=>{
 $('nodes').addEventListener('pointerdown',e=>{
   const el=e.target.closest('.node');if(!el)return;
   if(view==='timeline')return;
-  const id=el.dataset.id,start=board.nodes[id]||{x:0,y:0},w=s2w(e.clientX,e.clientY);
+  const id=el.dataset.id;
+  /* 批量选择：⌘/Ctrl+点击切换成员，⇧+点击连选（画布/时间线/看板同源 .node）。
+     修饰键点击不进入拖拽；拖拽仍归单击路径。 */
+  if(e.metaKey||e.ctrlKey||e.shiftKey){
+    e.preventDefault();
+    if(e.shiftKey&&selected){
+      const ids=[...document.querySelectorAll('#nodes .node')].map(n=>n.dataset.id);
+      const a=ids.indexOf(selected),b=ids.indexOf(id);
+      if(a>=0&&b>=0){ids.slice(Math.min(a,b),Math.max(a,b)+1).forEach(x=>multiSel.add(x));multiSel.add(id);}
+    }else if(multiSel.has(id))multiSel.delete(id);
+    else multiSel.add(id);
+    syncMultiSel();
+    return;
+  }
+  if(multiSel.size){multiSel.clear();syncMultiSel();}
+  const start=board.nodes[id]||{x:0,y:0},w=s2w(e.clientX,e.clientY);
   const off={x:w.x-start.x,y:w.y-start.y};
   selectNode(id);canvas.classList.add('dragging');
   el.setPointerCapture(e.pointerId);
@@ -2003,7 +2043,7 @@ $('nodes').addEventListener('pointerdown',e=>{
   el.addEventListener('pointermove',move);el.addEventListener('pointerup',up);
 });
 $('nodes').addEventListener('dblclick',e=>{
-  const hit=e.target.closest('.n-hit');if(hit){openDoc(hit.dataset.open);return;}
+  const hit=e.target.closest('.n-hit');if(hit){openDoc(hit.dataset.open);revealDoc(hit.dataset.open);return;}
   const el=e.target.closest('.node');if(!el)return;
   const n=graph.nodes.find(x=>x.id===el.dataset.id);
   if(n&&n.kind==='folder'){browsePath=n.path;loadGraph();}
@@ -2017,6 +2057,15 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){closeTopFloat();return;}
   const tag=(e.target.tagName||'').toLowerCase();
   if(tag==='input'||tag==='textarea')return;
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='a'){
+    const ids=[...document.querySelectorAll('#nodes .node')].map(n=>n.dataset.id);
+    if(!ids.length)return;
+    e.preventDefault();
+    ids.forEach(x=>multiSel.add(x));
+    syncMultiSel();
+    toast(`已全选 ${ids.length} 项——底栏批量条可移动/打标签/删除`,'ok');
+    return;
+  }
   /* 输入框内 ⌘Z/⇧⌘Z 交给浏览器原生撤销；画布等非输入上下文才走 agent 动作栈 */
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='z'){
     if(e.shiftKey){if(abRedoStack.length){e.preventDefault();abRedo();}}
@@ -2506,7 +2555,7 @@ async function openDoc(path){
     const d=await api('/doc?path='+encodeURIComponent(path));
     current=path;dirty=false;currentFormat=d.format||'markdown';
     recordRecent(path);
-    $('d-path').textContent=path+(currentFormat==='html'?'  ·  HTML':currentFormat==='text'?'  ·  '+path.split('.').pop().toUpperCase():'');
+    renderDocCrumbs(path);
     $('editor').value=currentFormat==='markdown'?d.markdown:d.source;
     setTimeout(()=>{renderRemoteCarets()},50);
     currentLearnHtml=currentFormat==='html'?d.source:d.html;
@@ -2744,6 +2793,7 @@ $('d-file').addEventListener('change',async e=>{
 });
 
 $b('d-pub').onclick=()=>current?doPublish(current):toast('先打开一篇文档','err');
+$('d-sticky')&&($('d-sticky').onclick=()=>window.open(BASE+'/sticky.html','thirdc-sticky','width=320,height=400'));
 $('editor').addEventListener('input',()=>dirty=true);
 /* 铺开时：打字即防抖写入并刷新预览（实时修改 + 预览） */
 let liveTimer=null;
@@ -3595,7 +3645,7 @@ function renderPalette(q){
   docs.forEach(d=>{seen.add(d.path);const el=document.createElement('div');el.className='prow';
     el.innerHTML=`<span class="badge ok">文档</span><span class="t"></span><span class="h">${d.path}</span>`;
     el.querySelector('.t').textContent=d.title||d.path.split('/').pop();
-    el.onclick=()=>{closeAll();openDoc(d.path);};box.appendChild(el);});
+    el.onclick=()=>{closeAll();openDoc(d.path);revealDoc(d.path);};box.appendChild(el);});
   if(ql&&ql.length>=2&&!cmds.length&&!docs.length){
     const empty=document.createElement('div');
     empty.dataset.paletteEmpty='1';
@@ -4238,7 +4288,7 @@ async function renderLocalVaults(box){
     const hint=document.createElement('div');hint.className='dv-meta';
     hint.textContent='库 = 「文稿」里的普通文件夹。切换/新建由桌面壳原地重启内核，无需重开应用。';
     box.appendChild(hint);
-  }catch(e){box.innerHTML='<span style="font-size:11px;color:var(--faint)">库列表加载失败：'+e.message+'</span>'}
+  }catch(e){const m=(e&&e.message)||String(e||'未知错误');box.innerHTML='<span style="font-size:11px;color:var(--faint)">库列表加载失败：'+m+'</span>'}
 }
 async function renderWorkspaces(){
   const box=$('ws-list');box.innerHTML='';
@@ -6947,7 +6997,7 @@ $('p-thumbs-toggle')&&($('p-thumbs-toggle').onclick=()=>{
 /* ───────── 圈选（整理模式） ───────── */
 let lasso=null;
 canvas.addEventListener('pointerdown',e=>{
-  if(mode!=='organize'||e.target.closest('.node'))return;
+  if((mode!=='organize'&&mode!=='studio')||e.target.closest('.node'))return;
   lasso={sx:e.clientX,sy:e.clientY};
   const el=$('lasso');el.style.display='block';
   el.style.left=e.clientX+'px';el.style.top=e.clientY+'px';el.style.width='0px';el.style.height='0px';
@@ -6974,6 +7024,50 @@ canvas.addEventListener('pointerup',e=>{
   $('batch-n').textContent=multiSel.size;
   $('batchbar').classList.toggle('show',multiSel.size>0);
 });
+/* 抽屉顶路径 → 面包屑：点任意一级文件夹 = 画布浏览定位到该级；末段（文件名）纯文本 */
+function renderDocCrumbs(path){
+  const box=$('d-path');if(!box)return;box.innerHTML='';box.title=path;
+  const parts=path.split('/');
+  parts.forEach((seg,i)=>{
+    if(i)box.appendChild(document.createTextNode(' / '));
+    const isFile=i===parts.length-1;
+    if(isFile){
+      const t=document.createElement('span');t.className='crumb cur';t.textContent=seg;box.appendChild(t);
+      if(currentFormat==='html'){const f=document.createElement('span');f.className='fmt-tag';f.textContent='HTML';box.appendChild(f);}
+      else if(currentFormat==='text'){const f=document.createElement('span');f.className='fmt-tag';f.textContent=(path.split('.').pop()||'').toUpperCase();box.appendChild(f);}
+      return;
+    }
+    const b=document.createElement('button');
+    b.className='crumb';b.textContent=seg;
+    b.title='画布定位到 '+parts.slice(0,i+1).join('/');
+    b.onclick=()=>{
+      const dir=parts.slice(0,i+1).join('/');
+      closeAll();
+      browsePath=dir;loadGraph();
+      toast('画布已定位 '+dir,'ok');
+    };
+    box.appendChild(b);
+  });
+}
+/* 查找/深链打开后：侧栏树定位 + 画布选中居中（双聚焦）。节点不在当前画布时先刷图。 */
+async function revealDoc(path){
+  try{locateInTree(path);}catch{}
+  try{
+    // 目标目录不在当前画布范围时先切过去（画布只渲染 browsePath 子树）
+    const dir=path.split('/').slice(0,-1).join('/')||'Notes';
+    if(browsePath!==dir){browsePath=dir;await loadGraph();}
+    let n=graph.nodes.find(x=>x.path===path&&x.kind!=='folder');
+    if(!n){await loadGraph();n=graph.nodes.find(x=>x.path===path&&x.kind!=='folder');}
+    if(!n)return;
+    selected=n.id;selectNode(n.id);
+    focusNodes(new Set([n.id]));
+  }catch{}
+}
+function syncMultiSel(){
+  document.querySelectorAll('#nodes .node').forEach(el=>el.classList.toggle('multi',multiSel.has(el.dataset.id)));
+  $('batch-n').textContent=multiSel.size;
+  $('batchbar').classList.toggle('show',multiSel.size>0);
+}
 function clearSel(){multiSel.clear();document.querySelectorAll('#nodes .node').forEach(el=>el.classList.remove('multi'));$('batchbar').classList.remove('show')}
 $b('b-clear').onclick=clearSel;
 $b('b-del').onclick=async()=>{
